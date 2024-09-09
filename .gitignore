@@ -1,6 +1,8 @@
 # Ignore the data folder
 data/
 
+notebooks/trained_models/*/
+notebooks/trained_models/**/*
 
 scr/trained_models/*/
 scr/trained_models/**/*

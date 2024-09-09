@@ -19,8 +19,18 @@ class PCGraphConv(torch.nn.Module):
                  log_tensorboard=True, wandb_logger=None, device="cpu"):
         super(PCGraphConv, self).__init__()  # 'add' aggregation
         self.num_vertices = num_vertices
-        self.sensory_indices = sensory_indices
-        self.internal_indices = internal_indices
+        
+        
+        # these are fixed and inmutable, such that we can copy 
+        self.sensory_indices_single_graph = sensory_indices
+        self.internal_indices_single_graph = internal_indices
+        self.supervised_labels_single_graph = supervised_learning 
+        
+
+        # init, but these are going to updated depending on batchsize
+        self.sensory_indices = self.sensory_indices_single_graph
+        self.internal_indices = self.internal_indices_single_graph
+        self.supervised_labels = self.supervised_labels_single_graph 
         
         self.lr_values , self.lr_weights = learning_rate  
 
@@ -30,7 +40,6 @@ class PCGraphConv(torch.nn.Module):
         self.edge_index_single_graph = graph_structure  # a geometric graph structure
         self.mode = ""
 
-        self.supervised_labels = supervised_learning 
         self.task = None
         self.device = device
         self.weight_init = weight_init
@@ -120,7 +129,7 @@ class PCGraphConv(torch.nn.Module):
             weight_decay = self.use_optimzers[0]
 
             print("------------Using optimizers for values/weights updating ------------")
-            self.optimizer_weights = torch.optim.Adam([self.weights], lr=self.lr_weights, weight_decay=weight_decay) #weight_decay=1e-2)        
+            # self.optimizer_weights = torch.optim.Adam([self.weights], lr=self.lr_weights, weight_decay=weight_decay) #weight_decay=1e-2)        
             self.optimizer_weights = torch.optim.SGD([self.weights], lr=self.lr_weights)
 
             # self.optimizer_weights = torch.optim.SGD([self.weights], lr=self.gamma) #weight_decay=1e-2)
@@ -524,9 +533,9 @@ class PCGraphConv(torch.nn.Module):
         assert self.mode in ['training', 'testing', 'classification'], "Mode not set, (training or testing / classification )"
 
         # Base indices (for a single graph instance)
-        base_sensory_indices = list(self.sensory_indices)
-        base_internal_indices = list(self.internal_indices)
-        base_supervised_labels = list(self.supervised_labels) if self.supervised_labels else []
+        base_sensory_indices = list(self.sensory_indices_single_graph)
+        base_internal_indices = list(self.internal_indices_single_graph)
+        base_supervised_labels = list(self.supervised_labels_single_graph) if self.supervised_labels else []
 
         # Extended indices to account for the batch size
         self.sensory_indices_batch = []
@@ -538,6 +547,15 @@ class PCGraphConv(torch.nn.Module):
             self.internal_indices_batch.extend([index + i * self.num_vertices for index in base_internal_indices])
             if base_supervised_labels:
                 self.supervised_labels_batch.extend([index + i * self.num_vertices for index in base_supervised_labels])
+
+        print("vertix", self.num_vertices)
+        print("before after", len(base_sensory_indices), len(self.sensory_indices_batch))
+        print("before after", len(base_internal_indices), len(self.internal_indices_batch))
+        print("before after", len(base_supervised_labels), len(self.supervised_labels_batch))
+
+        self.sensory_indices   = self.sensory_indices_batch
+        self.internal_indices  = self.internal_indices_batch
+        self.supervised_labels = self.supervised_labels_batch
 
         if self.mode == "training":
             # Update only the internal nodes during training
@@ -671,7 +689,7 @@ class PCGraphConv(torch.nn.Module):
             print(self.lr_weights, delta_w.shape)
             print(self.weights.data.shape)
 
-            self.weights.data += self.lr_weights * delta_w
+            self.weights.data += (self.lr_weights * delta_w)
             # self.weights.data += self.lr_weights * self.delta_w
         
             # self.weights.data = (1 - self.damping_factor) * self.w_t_min_1 + self.damping_factor * (self.weights.data)

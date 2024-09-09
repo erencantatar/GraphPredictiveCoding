@@ -103,7 +103,7 @@ def plot_connection_strength_dist(W):
 
 
 
-def plot_energy_during_training(internal_energy, sensory_energy, history, model_dir, epoch):
+def plot_energy_during_training(internal_energy, sensory_energy, history, model_dir=None, epoch="end"):
 
 
 
@@ -146,9 +146,12 @@ def plot_energy_during_training(internal_energy, sensory_energy, history, model_
 
     # Display the plots
     plt.tight_layout()
-    # plt.show()
 
-    fig.savefig(f'{model_dir}/energy/energy_{epoch}.png')
+    if model_dir:
+        fig.savefig(f'{model_dir}/energy/energy_{epoch}.png')
+    else:
+        plt.show()
+    
     plt.close(fig)
 
 
