@@ -1,0 +1,20 @@
+
+
+
+Denoise:
+New/scr/trained_models/test/fully_connected/num_internal_nodes_1500_T_25_lr_weights_0.0001_lr_values_0.01_batch_size_4_2024-09-06_17_01_13
+With value of internal nodes init as random during trainnig 
+
+Occul.
+
+
+
+Generation.
+New/scr/trained_models/test/fully_connected/num_internal_nodes_1500_T_65_lr_weights_1e-05_lr_values_0.1_batch_size_4_2024-09-06_17_23_47
+!!With value of internal nodes init as random during trainnig 
+
+
+
+Classification: 
+trained_models/test/fully_connected/num_internal_nodes_1500_T_15_lr_weights_0.0001_lr_values_0.01_batch_size_4_2024-09-05_15_53_41/
+?? Raar want trainen on N=2 with 0-7 but eval with N "all" 

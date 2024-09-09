@@ -2,7 +2,8 @@
 data/
 
 
-trained_models
+scr/trained_models/*/
+scr/trained_models/**/*
 
 # Don't ignore the specific file you want to track
 !/scr/trained_models/most_promising_model.txt
