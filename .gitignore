@@ -1,6 +1,6 @@
 # Ignore the data folder
 data/
-# Ignore everything in the PredCoding_snellius/scr/trained_models/ folder
+
 
 trained_models
 
