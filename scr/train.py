@@ -367,8 +367,8 @@ os.makedirs(os.path.join(model_dir, "eval/occlusion"), exist_ok=True)
 os.makedirs(os.path.join(model_dir, "energy"), exist_ok=True)
 
 plot_adj_matrix(single_graph, model_dir, 
-                overlay=(sensory_indices, internal_indices, supervision_indices))
-plot_adj_matrix(full_batch, model_dir, overlay=None)
+                node_types=(sensory_indices, internal_indices, supervision_indices))
+plot_adj_matrix(full_batch, model_dir, node_types=None)
 
 
 

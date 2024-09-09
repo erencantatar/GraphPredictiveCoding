@@ -2,56 +2,77 @@ import matplotlib.pyplot as plt
 import numpy as np
 from torch_geometric.utils import to_dense_adj, dense_to_sparse
 
-def plot_adj_matrix(edge_index, model_dir, overlay=None):
+
+import matplotlib.pyplot as plt
+import numpy as np
+import torch
+from torch_geometric.utils import to_dense_adj
+
+def plot_adj_matrix(edge_index, model_dir, node_types=None):
+    """
+    Function to plot the adjacency matrix or node types (sensory, internal, supervision) as colored pixels.
+    
+    Parameters:
+    edge_index (PyG edge_index): Edge index of the graph.
+    model_dir (str): Directory to save the plot.
+    node_types (tuple): Tuple containing sensory, internal, and supervision indices for node types. 
+                        If None, just plots the adjacency matrix.
+    """
     # Convert edge_index to adjacency matrix
     adj_matrix_pyg = to_dense_adj(edge_index)[0].numpy()
+    adj_matrix_size = adj_matrix_pyg.shape[0]
 
-    # Create figure and axis
-    fig, ax = plt.subplots(figsize=(30, 18))
+    if node_types:
+        # Create a white empty grid for node types
+        fig, ax = plt.subplots(figsize=(12, 12))  # Adjust size as needed
+        grid = np.ones((adj_matrix_size, adj_matrix_size))  # White background
+        ax.imshow(grid, cmap='gray', vmin=0, vmax=1)  # Display empty white grid
 
-    # Plot the adjacency matrix
-    cax = ax.imshow(adj_matrix_pyg, cmap='viridis')
-    ax.set_title("Adjacency Matrix with Sensory, Internal, and Supervision Blocks")
-    fig.colorbar(cax, ax=ax)
+        # Extract sensory, internal, and supervision indices from node_types tuple
+        sensory_indices, internal_indices, supervision_indices = node_types
 
-    if overlay:
-        sensory_indices, internal_indices, supervision_indices = overlay
-        # Overlay blocks for sensory, internal, and supervision nodes
-        def overlay_block(indices, color, label):
-            for idx in indices:
+        # Plot each node type as a single point/pixel
+        if sensory_indices is not None:
+            sensory_indices = np.array(sensory_indices)
+            ax.scatter(sensory_indices, sensory_indices, color='red', label='Sensory Nodes', s=10)
 
-                # print("idxx overlay", idx)
-                if isinstance(idx, (torch.Tensor, np.ndarray)):  # Convert if it's a tensor or array
-                    idx = idx.item()  # Extract the integer value
-                elif isinstance(idx, tuple):  # Handle if idx is a tuple
-                    idx = idx[0]  # Choose the first element, or modify based on your data structure
-                ax.add_patch(plt.Rectangle((idx, idx), 1, 1, fill=False, edgecolor=color, lw=2))
-            # Adding legend entries for each block
-            ax.plot([], [], color=color, label=label)
+        if internal_indices is not None:
+            internal_indices = np.array(internal_indices)
+            ax.scatter(internal_indices, internal_indices, color='blue', label='Internal Nodes', s=10)
 
-        # Overlay sensory block
-        overlay_block(sensory_indices, 'red', 'Sensory Nodes')
+        if supervision_indices is not None:
+            supervision_indices = np.array(supervision_indices)
+            ax.scatter(supervision_indices, supervision_indices, color='green', label='Supervision Nodes', s=10)
 
-        # Overlay internal block
-        overlay_block(internal_indices, 'blue', 'Internal Nodes')
-
-        # Overlay supervision block
-        overlay_block(supervision_indices, 'green', 'Supervision Nodes')
-
-        # Add legend on top
+        # Set title and legend
+        ax.set_title("Node Types: Sensory, Internal, and Supervision")
         ax.legend(loc='upper right')
 
+        # Ensure the axis limits match the adjacency matrix size
+        ax.set_xlim(0, adj_matrix_size - 1)
+        ax.set_ylim(0, adj_matrix_size - 1)
 
-    # Save the figure to model_dir
-    plt.tight_layout()
-    
-    if overlay:
-        fig.savefig(f'{model_dir}/adj_matrix_overlay.png')
+        # Save the figure with node types
+        plt.tight_layout()
+        fig.savefig(f'{model_dir}/node_types_grid.png')
+
+        # Close the figure after saving
+        plt.close(fig)
     else:
-        fig.savefig(f'{model_dir}/adj_matrix_.png')
+        # Create figure and axis for the adjacency matrix
+        fig, ax = plt.subplots(figsize=(30, 18))
 
-    plt.close(fig)
+        # Plot the adjacency matrix
+        cax = ax.imshow(adj_matrix_pyg, cmap='viridis')
+        ax.set_title("Adjacency Matrix")
+        fig.colorbar(cax, ax=ax)
 
+        # Save the figure for the adjacency matrix
+        plt.tight_layout()
+        fig.savefig(f'{model_dir}/adj_matrix.png')
+
+        # Close the figure after saving
+        plt.close(fig)
 
 
 def plot_connection_strength_dist(W):
