@@ -1,0 +1,44 @@
+#!/bin/bash
+
+#SBATCH --partition=gpu
+#SBATCH --gpus=1
+#SBATCH --job-name=ICP
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=18
+#SBATCH --time=01:00:00
+#SBATCH --output=outputs/IPC/fully_connected_w_self/slurm_output_%A_simple.out
+
+module purge
+module load 2022
+module load Anaconda3/2022.05
+
+cd /home/etatar/New/scr/
+
+# Activate your environment
+
+source activate PredCod
+
+# experiment 1: own params 
+echo "Running simple training"
+# srun python -u train_simple.py --epochs 10 ... 
+
+# srun python -u train_simple.py --epochs 10 --num_internal_nodes 2000 --seed 42 --T 50 --batch_size 1 --lr_alpha 1 --lr_gamma 0.01 --dataset_transform normalize_min1_plus1 --optimizer False 
+# srun python -u train_simple.py --epochs 10 --num_internal_nodes 2000 --seed 42 --T 50 --batch_size 1 --lr_alpha 1 --lr_gamma 0.001 --dataset_transform normalize_min1_plus1 --optimizer False 
+# srun python -u train_simple.py --epochs 10 --num_internal_nodes 2000 --seed 42 --T 50 --batch_size 1 --lr_alpha 1 --lr_gamma 0.0001 --dataset_transform normalize_min1_plus1 --optimizer False 
+
+# srun python -u train_simple.py --epochs 10 --num_internal_nodes 2000 --seed 42 --T 50 --batch_size 1 --lr_alpha 0.001 --lr_gamma 0.1 --dataset_transform normalize_min1_plus1 --optimizer False 
+# srun python -u train_simple.py --epochs 5 --num_internal_nodes 2000 --seed 42 --T 50 --batch_size 1 --lr_alpha 0.001 --lr_gamma 0.01 --dataset_transform normalize_min1_plus1 --optimizer False 
+
+# srun python -u train_simple.py --use_wandb online --epochs 30 --num_internal_nodes 2000 --seed 42 --T 40 --batch_size 1 --lr_alpha 0.01 --lr_gamma 0.001 --optimizer False 
+
+# --use_wandb disabled 
+
+
+# srun python -u train.py --dataset_transform normalize_mnist_mean_std --num_internal_nodes 1500 --graph_type fully_connected_w_self --weight_init 0.001 --T 40 --lr_alpha 0.001 --lr_gamma 0.0001 --activation_func swish --epochs 5 --batch_size 1 --seed 42 --optimizer False 
+# srun python -u train.py --model_type ipc --dataset_transform none --num_internal_nodes 1500 --graph_type fully_connected_w_self --weight_init 0.001 --T 40 --lr_alpha 0.001 --lr_gamma 0.0001 --activation_func swish --epochs 5 --batch_size 1 --seed 42 --optimizer False 
+
+srun python -u train.py  --model_type IPC --dataset_transform none --numbers_list 0,1,3,4,5,6,7 --N 20 --supervision_label_val 10 --num_internal_nodes 1500 --graph_type fully_connected_w_self --model_type IPC --weight_init 0.001 --T 5 --lr_values 0.01 --lr_weights 0.00001 --activation_func swish --epochs 10 --batch_size 4 --seed 42 --optimizer False
+
+srun python -u train.py  --model_type PC --dataset_transform none --numbers_list 0,1,3,4,5,6,7 --N 20 --supervision_label_val 10 --num_internal_nodes 1500 --graph_type fully_connected_w_self --model_type IPC --weight_init 0.001 --T 5 --lr_values 0.001 --lr_weights 0.00001 --activation_func swish --epochs 10 --batch_size 4 --seed 42 --optimizer 0.1
+
+# srun python -u train.py --epochs 5 --graph_type fully_connected_w_self --num_internal_nodes 1500 --seed 42 --T 20 --batch_size 4 --lr_alpha 0.1 --lr_gamma 0.0001 --optimizer False --dataset_transform normalize_mnist_mean_std

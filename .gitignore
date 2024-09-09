@@ -1,0 +1,11 @@
+# Ignore the data folder
+data/
+
+# Ignore the trained_models folder
+trained_models/
+
+# Ignore the cache folder
+cache/
+
+# Ignore Python cache files
+__pycache__/
