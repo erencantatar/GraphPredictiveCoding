@@ -469,7 +469,7 @@ def classification(test_loader, model,
                    test_params, num_samples=5):
         
     model.pc_conv1.set_mode("testing", task="classification")
-
+    
 
     # model.pc_conv1.nodes_2_update += list(model.pc_conv1.sensory_indices) 
 
@@ -502,6 +502,9 @@ def classification(test_loader, model,
 
     y_true, y_pred = [], []
 
+    print("CHECK 1 ",  model.pc_conv1.values.data[model.pc_conv1.supervised_labels] )
+
+
     print("No vmin vmax")
     for idx, (noisy_batch, clean_image) in enumerate(test_loader):
 
@@ -526,6 +529,8 @@ def classification(test_loader, model,
 
         noisy_batch.x[:, 0][model.pc_conv1.internal_indices] = torch.rand(noisy_batch.x[:, 0][model.pc_conv1.internal_indices].shape).to(model.pc_conv1.device)
 
+        print("CHECK 2 ",  model.pc_conv1.values.data[model.pc_conv1.supervised_labels] )
+
         #### SURVERVISED ##########
         if test_params["supervised_learning"]:
             # if during training the label for the supervised node was 60, also here
@@ -534,12 +539,16 @@ def classification(test_loader, model,
         else:
             noisy_batch.x[:, 0][model.pc_conv1.supervised_labels] = 0
         
-        
+        print("CHECK 3 ",  model.pc_conv1.values.data[model.pc_conv1.supervised_labels] )
+
         print("labels model", noisy_batch.x[:, 0][model.pc_conv1.supervised_labels] )
 
         # model.inference()
         
         noisy_batch.x[:, 0][-10:] = 0 
+        
+        print("CHECK 4 ",  model.pc_conv1.values.data[model.pc_conv1.supervised_labels] )
+
         print("CHECK",  model.pc_conv1.values.data[model.pc_conv1.supervised_labels] )
         # Extract the denoised output from the sensory nodes
         noisy_image = noisy_batch.x[:, 0][0:784].view(28,28).cpu().detach().numpy()

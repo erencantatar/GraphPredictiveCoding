@@ -56,6 +56,13 @@ class PCGraphConv(torch.nn.Module):
             "supervised_energy_testing": []
         }
 
+        self.gradients_minus_1 = 1 # or -1 
+        self.gradients_minus_1 = -1 # or -1 
+
+        print("------------------------------------")
+        print(f"gradients_minus_1: x and w.grad += {self.gradients_minus_1} * grad")
+        print("------------------------------------")
+
         self.values_at_t = []
         
         self.TODO = """ 
@@ -123,6 +130,9 @@ class PCGraphConv(torch.nn.Module):
 
 
         self.values_dummy = torch.nn.Parameter(torch.zeros(self.batchsize * self.num_vertices, device=self.device), requires_grad=True) # requires_grad=False)                
+        self.values = None
+        self.errors = None
+        self.predictions = None  
 
 
         if self.use_optimzers:
@@ -301,7 +311,6 @@ class PCGraphConv(torch.nn.Module):
         # print(self.data.x[self.nodes_2_update, 0].shape)
 
         # self.data.x[self.nodes_2_update, 0] = self.values_dummy.data[:, self.nodes_2_update].detach()  # Detach to avoid retaining the computation graph
-
         ## GOOD ONE #### 
         if self.use_optimzers:
             self.optimizer_values.zero_grad()
@@ -311,7 +320,7 @@ class PCGraphConv(torch.nn.Module):
                 self.values_dummy.grad.zero_()  # Reset the gradients to zero
             
             # print("ai ai ")
-            self.values_dummy.grad[self.nodes_2_update] = delta_x[self.nodes_2_update]
+            self.values_dummy.grad[self.nodes_2_update] = self.gradients_minus_1 * delta_x[self.nodes_2_update]
             self.optimizer_values.step()
 
             # print(self.data.x[self.nodes_2_update, 0].shape)
@@ -321,7 +330,7 @@ class PCGraphConv(torch.nn.Module):
     
         else:
             # self.values_dummy.data[self.nodes_2_update] += self.gamma * delta_x[self.nodes_2_update].detach() 
-            self.data.x[self.nodes_2_update, 0] += self.lr_values * delta_x[self.nodes_2_update].unsqueeze(-1).detach()  # Detach to avoid retaining the computation graph
+            self.data.x[self.nodes_2_update, 0] += self.gradients_minus_1 * self.lr_values * delta_x[self.nodes_2_update].unsqueeze(-1).detach()  # Detach to avoid retaining the computation graph
         
         
 
@@ -467,10 +476,21 @@ class PCGraphConv(torch.nn.Module):
 
     def restart_activity(self):
 
-        self.set_phase("Restarting activity (weights/pred/errors/values)")
+        self.set_phase("Restarting activity (pred/errors/values)")
 
-        pass         
+        # Initialize tensors to zeros without creating new variables where not needed
+        with torch.no_grad():
+            self.values = torch.zeros(self.data.size(0), device=self.device) if self.values is None else self.values.zero_()
+            self.errors = torch.zeros(self.data.size(0), device=self.device) if self.errors is None else self.errors.zero_()
+            self.predictions = torch.zeros(self.data.size(0), device=self.device) if self.predictions is None else self.predictions.zero_()
 
+            # Use in-place operation for values_dummy to reduce memory overhead
+            self.values_dummy.data.zero_()  # Zero out values_dummy without creating a new tensor
+
+        # Reset optimizer gradients if needed
+        if self.use_optimzers:
+            self.optimizer_values.zero_grad()
+            self.optimizer_weights.zero_grad()
 
     def inference(self, data, restart_activity=True):
 
@@ -518,6 +538,9 @@ class PCGraphConv(torch.nn.Module):
             energy = self.energy(self.data)
             t_bar.set_description(f"Total energy at time {t+1} / {self.T} {energy},")
             
+        if self.mode == "train":
+            self.restart_activity()
+
         return True
 
     def set_mode(self, mode, task=None):
@@ -673,7 +696,7 @@ class PCGraphConv(torch.nn.Module):
             # self.optimizer_weights.zero_grad()             self.optimizer_values.grad = torch.zeros_like(self.values.grad)  # .zero_grad()
             # self.weights.grad = torch.zeros_like(self.weights.grad)  # .zero_grad()
             self.optimizer_weights.zero_grad()
-            self.weights.grad = delta_w
+            self.weights.grad = self.gradients_minus_1 * delta_w
             self.optimizer_weights.step()
 
 
@@ -689,7 +712,7 @@ class PCGraphConv(torch.nn.Module):
             print(self.lr_weights, delta_w.shape)
             print(self.weights.data.shape)
 
-            self.weights.data += (self.lr_weights * delta_w)
+            self.weights.data += self.gradients_minus_1 * (self.lr_weights * delta_w)
             # self.weights.data += self.lr_weights * self.delta_w
         
             # self.weights.data = (1 - self.damping_factor) * self.w_t_min_1 + self.damping_factor * (self.weights.data)
@@ -838,6 +861,7 @@ class PCGNN(torch.nn.Module):
     def query(self, method, data=None):
         
         print("Random init values of all internal nodes")
+
         data.x[:, 0][self.pc_conv1.internal_indices] = torch.rand(data.x[:, 0][self.pc_conv1.internal_indices].shape).to(self.pc_conv1.device)
 
 
