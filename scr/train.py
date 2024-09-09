@@ -54,7 +54,6 @@ parser.add_argument('--N', type=valid_int_or_all, default=20, help="Number of di
 parser.add_argument('--supervision_label_val', default=10, type=int, required=True, help='An integer value.')
 
 
-
 # -----graph----- 
 from graphbuilder import graph_type_options
 parser.add_argument('--num_internal_nodes', type=int, default=1500, help='Number of internal nodes.')
@@ -679,7 +678,7 @@ test_params = {
 # model.pc_conv1.lr_values = 0.1
 # model.pc_conv1.lr_values = model_params["lr_params"][0]
 
-accuracy_mean = classification(test_loader, model, test_params)
+y_true, y_pred, accuracy_mean = classification(test_loader, model, test_params)
 ######################################################################################################### 
 
 test_params = {
@@ -743,6 +742,9 @@ with open(model_dir + "eval/eval_scores.txt", 'w') as file:
     file.write(", ".join(map(str, MSE_values_occ)) + "\n\n")
 
     file.write("accuracy_mean:\n")
+    file.write("y_true: " + ", ".join(map(str, y_true)) + "\n")
+    file.write("y_pred: " + ", ".join(map(str, y_pred)) + "\n")
+    
     file.write(str(accuracy_mean) + "\n\n")
 
 

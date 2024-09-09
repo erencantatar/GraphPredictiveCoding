@@ -8,6 +8,11 @@ import numpy as np
 import torch
 from torch_geometric.utils import to_dense_adj
 
+import matplotlib.pyplot as plt
+import numpy as np
+import torch
+from torch_geometric.utils import to_dense_adj
+
 def plot_adj_matrix(edge_index, model_dir, node_types=None):
     """
     Function to plot the adjacency matrix or node types (sensory, internal, supervision) as colored pixels.
@@ -15,7 +20,7 @@ def plot_adj_matrix(edge_index, model_dir, node_types=None):
     Parameters:
     edge_index (PyG edge_index): Edge index of the graph.
     model_dir (str): Directory to save the plot.
-    node_types (tuple): Tuple containing sensory, internal, and supervision indices for node types. 
+    node_types (tuple): Tuple containing sensory, internal, and supervision indices for overlay. 
                         If None, just plots the adjacency matrix.
     """
     # Convert edge_index to adjacency matrix
@@ -26,7 +31,7 @@ def plot_adj_matrix(edge_index, model_dir, node_types=None):
         # Create a white empty grid for node types
         fig, ax = plt.subplots(figsize=(12, 12))  # Adjust size as needed
         grid = np.ones((adj_matrix_size, adj_matrix_size))  # White background
-        ax.imshow(grid, cmap='gray', vmin=0, vmax=1)  # Display empty white grid
+        ax.imshow(grid, cmap='gray', vmin=0, vmax=1, origin='upper')  # Display empty white grid with top-left origin
 
         # Extract sensory, internal, and supervision indices from node_types tuple
         sensory_indices, internal_indices, supervision_indices = node_types
@@ -50,7 +55,7 @@ def plot_adj_matrix(edge_index, model_dir, node_types=None):
 
         # Ensure the axis limits match the adjacency matrix size
         ax.set_xlim(0, adj_matrix_size - 1)
-        ax.set_ylim(0, adj_matrix_size - 1)
+        ax.set_ylim(adj_matrix_size - 1, 0)  # Reverse the y-axis to match top-left origin
 
         # Save the figure with node types
         plt.tight_layout()
@@ -62,10 +67,14 @@ def plot_adj_matrix(edge_index, model_dir, node_types=None):
         # Create figure and axis for the adjacency matrix
         fig, ax = plt.subplots(figsize=(30, 18))
 
-        # Plot the adjacency matrix
-        cax = ax.imshow(adj_matrix_pyg, cmap='viridis')
+        # Plot the adjacency matrix with top-left origin
+        cax = ax.imshow(adj_matrix_pyg, cmap='viridis', origin='upper')
         ax.set_title("Adjacency Matrix")
         fig.colorbar(cax, ax=ax)
+
+        # Ensure the axis limits match the adjacency matrix size
+        ax.set_xlim(0, adj_matrix_size - 1)
+        ax.set_ylim(adj_matrix_size - 1, 0)  # Reverse the y-axis to match top-left origin
 
         # Save the figure for the adjacency matrix
         plt.tight_layout()
@@ -73,6 +82,7 @@ def plot_adj_matrix(edge_index, model_dir, node_types=None):
 
         # Close the figure after saving
         plt.close(fig)
+
 
 
 def plot_connection_strength_dist(W):

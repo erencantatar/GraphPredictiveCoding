@@ -721,7 +721,7 @@ def classification(test_loader, model,
     # plt.ylabel('True Labels')
     # plt.title('Confusion Matrix')
 
-    return accuracy
+    return y_true, y_pred, accuracy
     
     # plt.show()
 
