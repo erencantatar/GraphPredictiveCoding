@@ -103,7 +103,7 @@ def plot_connection_strength_dist(W):
 
 
 
-def plot_energy_during_training(internal_energy, sensory_energy, history,model_dir, epoch):
+def plot_energy_during_training(internal_energy, sensory_energy, history, model_dir, epoch):
 
 
 
@@ -131,7 +131,7 @@ def plot_energy_during_training(internal_energy, sensory_energy, history,model_d
     # Plot energy per epoch with two y-axes
     ax["B"].plot(history["internal_energy_per_epoch"], label="Internal Energy", color='blue')
     ax["B"].set_xlabel("Epochs")
-    ax["B"].set_ylabel("Internal Energy", color='blue')
+    ax["B"].set_ylabel("Mean Internal Energy", color='blue')
     ax["B"].tick_params(axis='y', labelcolor='blue')
     ax["B"].set_title("Energy per Epoch")
 
