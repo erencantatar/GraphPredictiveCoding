@@ -56,7 +56,7 @@ class PCGraphConv(torch.nn.Module):
             "supervised_energy_testing": []
         }
 
-        self.gradients_minus_1 = 1 # or -1 
+        # self.gradients_minus_1 = 1 # or -1 
         self.gradients_minus_1 = -1 # or -1 
 
         print("------------------------------------")
@@ -312,6 +312,10 @@ class PCGraphConv(torch.nn.Module):
 
         # self.data.x[self.nodes_2_update, 0] = self.values_dummy.data[:, self.nodes_2_update].detach()  # Detach to avoid retaining the computation graph
         ## GOOD ONE #### 
+
+        # https://chatgpt.com/share/54c649d0-e7de-48be-9c00-442bef5a24b8
+        # This confirms that the optimizer internally performs the subtraction of the gradient (grad), which is why you should assign theta.grad = grad rather than theta.grad = -grad. If you set theta.grad = -grad, it would result in adding the gradient to the weights, which would maximize the loss instead of minimizing it.
+
         if self.use_optimzers:
             self.optimizer_values.zero_grad()
             if self.values_dummy.grad is None:
@@ -320,7 +324,7 @@ class PCGraphConv(torch.nn.Module):
                 self.values_dummy.grad.zero_()  # Reset the gradients to zero
             
             # print("ai ai ")
-            self.values_dummy.grad[self.nodes_2_update] = self.gradients_minus_1 * delta_x[self.nodes_2_update]
+            self.values_dummy.grad[self.nodes_2_update] = delta_x[self.nodes_2_update]
             self.optimizer_values.step()
 
             # print(self.data.x[self.nodes_2_update, 0].shape)
@@ -696,7 +700,7 @@ class PCGraphConv(torch.nn.Module):
             # self.optimizer_weights.zero_grad()             self.optimizer_values.grad = torch.zeros_like(self.values.grad)  # .zero_grad()
             # self.weights.grad = torch.zeros_like(self.weights.grad)  # .zero_grad()
             self.optimizer_weights.zero_grad()
-            self.weights.grad = self.gradients_minus_1 * delta_w
+            self.weights.grad = delta_w
             self.optimizer_weights.step()
 
 
