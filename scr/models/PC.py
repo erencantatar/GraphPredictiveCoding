@@ -47,6 +47,12 @@ class PCGraphConv(torch.nn.Module):
         self.clamping = clamping
         self.wandb_logger = wandb_logger
 
+        self.trace_activity_values, self.trace_activity_errors = False, False  
+        self.trace = {
+            "values": [], 
+            "errors": [],
+         }
+
         self.energy_vals = {
             "internal_energy": [],
             "sensory_energy": [],
@@ -312,6 +318,9 @@ class PCGraphConv(torch.nn.Module):
 
         # self.data.x[self.nodes_2_update, 0] = self.values_dummy.data[:, self.nodes_2_update].detach()  # Detach to avoid retaining the computation graph
         ## GOOD ONE #### 
+        
+        if self.trace_activity_values:
+            self.trace["values"].append(self.data.x[:,0].cpu().detach())
 
         # https://chatgpt.com/share/54c649d0-e7de-48be-9c00-442bef5a24b8
         # This confirms that the optimizer internally performs the subtraction of the gradient (grad), which is why you should assign theta.grad = grad rather than theta.grad = -grad. If you set theta.grad = -grad, it would result in adding the gradient to the weights, which would maximize the loss instead of minimizing it.
@@ -335,7 +344,6 @@ class PCGraphConv(torch.nn.Module):
         else:
             # self.values_dummy.data[self.nodes_2_update] += self.gamma * delta_x[self.nodes_2_update].detach() 
             self.data.x[self.nodes_2_update, 0] += self.gradients_minus_1 * self.lr_values * delta_x[self.nodes_2_update].unsqueeze(-1).detach()  # Detach to avoid retaining the computation graph
-        
         
 
 
@@ -775,6 +783,19 @@ class PCGNN(torch.nn.Module):
         
         return history
     
+    def trace(self, values=False, errors=False):
+        
+        self.pc_conv1.trace = {
+            "values": [], 
+            "errors": [],
+         }
+    
+        if values:
+            self.pc_conv1.trace_activity_values = True 
+            
+        if errors:
+            self.pc_conv1.trace_activity_errors = True  
+
 
     def Disable_connection(self, from_indices, to_indices):
         """
@@ -788,13 +809,16 @@ class PCGNN(torch.nn.Module):
             # Make a copy of the original weights the first time a connection is disabled
             self.original_weights = self.pc_conv1.weights.clone()
 
+        masks = []
         for from_idx in from_indices:
             for to_idx in to_indices:
                 # Find the corresponding edge in the graph
                 edge_mask = (self.pc_conv1.edge_index_single_graph[0] == from_idx) & \
                             (self.pc_conv1.edge_index_single_graph[1] == to_idx)
                 # Temporarily set the weights of these edges to zero
+                masks.append(edge_mask)
                 self.pc_conv1.weights.data[edge_mask] = 0
+        return masks
 
     def enable_all_connections(self):
         """
