@@ -63,7 +63,7 @@ class PCGraphConv(torch.nn.Module):
         }
 
         self.gradients_minus_1 = 1 # or -1 
-        # self.gradients_minus_1 = -1 # or -1 
+        # self.gradients_minus_1 = -1 # or -1 #NEVER 
 
         print("------------------------------------")
         print(f"gradients_minus_1: x and w.grad += {self.gradients_minus_1} * grad")
@@ -338,7 +338,7 @@ class PCGraphConv(torch.nn.Module):
 
             # print(self.data.x[self.nodes_2_update, 0].shape)
             # print(self.values_dummy.data[self.nodes_2_update].shape)
-            self.data.x[self.nodes_2_update, 0] = self.values_dummy.data[self.nodes_2_update].unsqueeze(-1)  # Detach to avoid retaining the computation graph
+            self.data.x[self.nodes_2_update, 0] = self.values_dummy.data[self.nodes_2_update].unsqueeze(-1).detach()  # Detach to avoid retaining the computation graph
             # self.values[self.nodes_2_update] = self.values_dummy.data
     
         else:
