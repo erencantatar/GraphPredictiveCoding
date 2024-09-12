@@ -244,9 +244,11 @@ def plot_model_weights(model, model_dir):
 
     # Adjust layout and save the figure
     plt.tight_layout(rect=[0, 0, 1, 0.97])  # Adjust layout to fit the title
-    save_path = model_dir
 
-    plt.savefig(save_path)
-    plt.close(fig)
+    if model_dir:
+        plt.savefig(model_dir)
+        plt.close(fig)
 
-    print(f'Figure saved to {save_path}')
+        print(f'Figure saved to {model_dir}')
+    else:
+        plt.show()

@@ -56,8 +56,8 @@ class PCGraphConv(torch.nn.Module):
             "supervised_energy_testing": []
         }
 
-        # self.gradients_minus_1 = 1 # or -1 
-        self.gradients_minus_1 = -1 # or -1 
+        self.gradients_minus_1 = 1 # or -1 
+        # self.gradients_minus_1 = -1 # or -1 
 
         print("------------------------------------")
         print(f"gradients_minus_1: x and w.grad += {self.gradients_minus_1} * grad")
@@ -794,7 +794,7 @@ class PCGNN(torch.nn.Module):
                 edge_mask = (self.pc_conv1.edge_index_single_graph[0] == from_idx) & \
                             (self.pc_conv1.edge_index_single_graph[1] == to_idx)
                 # Temporarily set the weights of these edges to zero
-                self.pc_conv1.weights[edge_mask] = 0
+                self.pc_conv1.weights.data[edge_mask] = 0
 
     def enable_all_connections(self):
         """
