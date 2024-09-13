@@ -4,6 +4,12 @@ data/
 notebooks/trained_models/*/
 notebooks/trained_models/**/*
 
+!/jobs/create_jobs/cmds_2_run.txt
+!/jobs/create_jobs/create_jobs.py
+
+jobs/create_jobs/*/
+jobs/create_jobs/**/*
+
 scr/trained_models/*/
 scr/trained_models/**/*
 

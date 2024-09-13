@@ -341,8 +341,8 @@ GRAPH_TYPE = graph_params["graph_type"]["name"]    #"fully_connected"
 
 date_hour = datetime.now().strftime("%Y-%m-%d_%H_%M_%S")
 
-model_dir = f"trained_models/test/{GRAPH_TYPE}/{model_params_name}_{date_hour}/"
-# model_dir = f"trained_models/{args.model_type.lower()}/{GRAPH_TYPE}/{model_params_name}_{date_hour}/"
+# model_dir = f"trained_models/test/{GRAPH_TYPE}/{model_params_name}_{date_hour}/"
+model_dir = f"trained_models/{args.model_type.lower()}/{GRAPH_TYPE}/{model_params_name}_{date_hour}/"
 
 # Define the directory path
 print("Saving model, params, graph_structure to :", model_dir)
@@ -477,7 +477,7 @@ from helper.plot import plot_model_weights
 
 save_path = os.path.join(model_dir, 'parameter_info/weight_matrix_visualization_epoch0.png')
 # plot_model_weights(model, save_path)
-plot_model_weights(model, GRAPH_TYPE, model_dir=None)
+plot_model_weights(model, GRAPH_TYPE, model_dir=save_path)
 
 
 
@@ -523,7 +523,6 @@ for epoch in range(args.epochs):
         try:
             print("Label:", batch.y, "Input Shape:", batch.x.shape)
             model.train()
-            model.pc_conv1.restart_activity()
 
             batch = batch.to(device)
             history_epoch = model.learning(batch)
@@ -531,6 +530,13 @@ for epoch in range(args.epochs):
             # Append energy values to history
             history["internal_energy_per_epoch"].append(history_epoch["internal_energy_mean"])
             history["sensory_energy_per_epoch"].append(history_epoch["sensory_energy_mean"])
+
+            # Log energy values for this batch/epoch to wandb
+            wandb.log({
+                "epoch": epoch,
+                "internal_energy_mean": history_epoch["internal_energy_mean"],
+                "sensory_energy_mean": history_epoch["sensory_energy_mean"]
+            })
 
             model.pc_conv1.restart_activity()
 
@@ -569,6 +575,14 @@ for epoch in range(args.epochs):
                                             model_dir=model_dir,
                                             epoch=epoch)
 
+                  # Plot energy per epoch with two y-axes
+
+                # for value in history["internal_energy_per_epoch"]:
+                #     wandb.log({"internal_energy_per_epoch": value})
+
+                # for value in history["sensory_energy_per_epoch"]:
+                #     wandb.log({"sensory_energy_per_epoch": value})
+
                 break 
 
 
@@ -589,7 +603,7 @@ print(f"Training completed in {end_time - start_time:.2f} seconds for {args.epoc
 
 
 save_path = os.path.join(model_dir, 'parameter_info/weight_matrix_visualization_epoch_End.png')
-plot_model_weights(model, GRAPH_TYPE, model_dir=None)
+plot_model_weights(model, GRAPH_TYPE, model_dir=save_path)
 
 
 if earlystop:
@@ -599,6 +613,9 @@ if earlystop:
         # Write each list to the file
 
         file.write("Stopped training :\n")
+
+    wandb.log({"crashed": True})
+
     exit()
 
 
@@ -717,8 +734,7 @@ test_params = {
 # model.pc_conv1.lr_values = 0.1
 # model.pc_conv1.lr_values = model_params["lr_params"][0]
 
-avg_SSIM_mean, avg_SSIM_max, avg_MSE_mean, avg_MSE_max = generation(test_loader, model, test_params, clean_images, verbose=1)
-
+avg_SSIM_mean, avg_SSIM_max, avg_MSE_mean, avg_MSE_max = generation(test_loader, model, test_params, clean_images, verbose=0)
 
 # MSE_values = denoise(test_loader, model, supervised_learning=True)
 # print("MSE_values", MSE_values)
@@ -758,11 +774,10 @@ with open(model_dir + "eval/eval_scores.txt", 'w') as file:
     ### Generation ###
     
     file.write("Generation:\n")
-    file.write("avg_SSIM_mean:", avg_SSIM_mean + "\n")
-    file.write("avg_SSIM_max:", avg_SSIM_max + "\n")
-    file.write("avg_MSE_mean:", avg_MSE_mean + "\n")
-    file.write("avg_MSE_max:", avg_MSE_max + "\n")
-
+    file.write("avg_SSIM_mean: " + str(avg_SSIM_mean) + "\n")
+    file.write("avg_SSIM_max: " + str(avg_SSIM_max) + "\n")
+    file.write("avg_MSE_mean: " + str(avg_MSE_mean) + "\n")
+    file.write("avg_MSE_max: " + str(avg_MSE_max) + "\n")
 
 from datetime import datetime
 # Get the current date and time

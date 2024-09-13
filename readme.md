@@ -5,6 +5,8 @@ Foobar is a Python library for dealing with word pluralization.
 ## Snellius cheatsheat 
 
 1. srun --partition=gpu --gpus=1 --ntasks=1 --cpus-per-task=18 --time=02:00:00 --pty bash -i
+2. accinfo
+3. myquota
 
 
 ## TODO

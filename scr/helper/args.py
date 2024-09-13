@@ -13,7 +13,7 @@ def true_with_float(value):
 
 def valid_str_or_float(value):
     # Define a list of valid strings
-    valid_strings = ['uniform', 'xavier']
+    valid_strings = ['uniform', 'xavier', "randn"]
     
     # Try to convert the value to a float
     try:
