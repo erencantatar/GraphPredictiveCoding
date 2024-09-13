@@ -275,8 +275,20 @@ def denoise(test_loader, model, test_params, sigma=0.1):
 
     return MSE_values
 
+
+from skimage.metrics import structural_similarity as ssim
     
-def generation(test_loader, model, test_params, num_samples=8):
+def mse(imageA, imageB):
+    """Calculate the Mean Squared Error (MSE) between two images."""
+    return np.mean((imageA - imageB) ** 2)
+
+def generation(test_loader, model, test_params, clean_images, num_samples=8, verbose=0):
+
+
+    """We compare the generated number with the first N=10 clean images of the same class,
+    using SSIM, and MSE metric. Better generation is higher SSIM (0-1), and lower MSE (0,+inf)
+    +- 2sec    
+    """
 
 
     model.pc_conv1.T = test_params["T"]
@@ -297,6 +309,10 @@ def generation(test_loader, model, test_params, num_samples=8):
     gc.collect()
 
     print("No vmin vmax")
+
+    avg_SSIM_mean, avg_SSIM_max = [], []    
+    avg_MSE_mean, avg_MSE_max   = [], []
+ 
     for idx, (noisy_batch, clean_image) in enumerate(test_loader, start=1):
 
         # noisy_batch, clean_image = noisy_batch[0], clean_image[0]
@@ -448,13 +464,35 @@ def generation(test_loader, model, test_params, num_samples=8):
         # print(labels)
 
         print("CHECK", noisy_batch.x[:,0][-10:])
+        
+        label = noisy_batch.y.item()
+        label_clean_images = clean_images[label]
 
+        # Initialize lists for SSIM and MSE values
+        ssim_values = []
+        mse_values = []
+
+        # Compare the denoised output with each clean image of the same class
+        for clean_image in label_clean_images:
+            # Calculate SSIM and MSE
+            ssim_index = ssim(denoised_output, clean_image, data_range=1.0)
+            mse_value = mse(denoised_output, clean_image)
+
+            ssim_values.append(ssim_index)
+            mse_values.append(mse_value)
+
+            if verbose == 1:
+                print("ssim_values", ssim_values)
+                print("mse_values", mse_values)
+
+        avg_SSIM_mean.append(np.mean(ssim_values))
+        avg_SSIM_max.append(np.max(ssim_values))
+        avg_MSE_mean.append(np.mean(ssim_values))
+        avg_MSE_max.append(np.max(ssim_values))
     
         if idx >= test_params["num_samples"]:
-            break 
-
-
-
+            
+            return np.mean(avg_SSIM_mean), np.max(avg_SSIM_max), np.mean(avg_MSE_mean), np.max(avg_MSE_max)  
 
         # model_dir=None,
 

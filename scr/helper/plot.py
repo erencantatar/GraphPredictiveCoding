@@ -195,7 +195,7 @@ import os
 import matplotlib.pyplot as plt
 import scipy.sparse as sp
 
-def plot_model_weights(model, model_dir):
+def plot_model_weights(model, GRAPH_TYPE=None, model_dir=None):
     # Ensure the output directory exists
     # os.makedirs(model_dir, exist_ok=True)
 
@@ -211,7 +211,10 @@ def plot_model_weights(model, model_dir):
 
     # Create a figure with multiple subplots
     fig, axes = plt.subplots(3, 2, figsize=(20, 30))
-    fig.suptitle('Visualization of Weight Matrix', fontsize=20)
+    if GRAPH_TYPE:
+        fig.suptitle(f'Visualization of Weight Matrix of {GRAPH_TYPE}', fontsize=20)
+    else:
+        fig.suptitle(f'Visualization of Weight Matrix', fontsize=20)
 
     # Subplot 1: Sparsity pattern
     axes[0, 0].spy(W_sparse, markersize=1)

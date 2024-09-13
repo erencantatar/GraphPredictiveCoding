@@ -476,8 +476,8 @@ from helper.plot import plot_model_weights
 
 
 save_path = os.path.join(model_dir, 'parameter_info/weight_matrix_visualization_epoch0.png')
-plot_model_weights(model, save_path)
-
+# plot_model_weights(model, save_path)
+plot_model_weights(model, GRAPH_TYPE, model_dir=None)
 
 
 
@@ -589,7 +589,8 @@ print(f"Training completed in {end_time - start_time:.2f} seconds for {args.epoc
 
 
 save_path = os.path.join(model_dir, 'parameter_info/weight_matrix_visualization_epoch_End.png')
-plot_model_weights(model, save_path)
+plot_model_weights(model, GRAPH_TYPE, model_dir=None)
+
 
 if earlystop:
     print("Stopping program-------")
@@ -641,6 +642,10 @@ custom_dataset_test = CustomGraphDataset(graph_params, **dataset_params_testing,
 # dataset_params_testing["batch_size"] = 2
 
 test_loader = DataLoader(custom_dataset_test, batch_size=1, shuffle=True, generator=generator_seed)
+
+from helper.eval import get_clean_images_by_label
+
+clean_images = get_clean_images_by_label(mnist_trainset, num_images=10)
 
 
 model.pc_conv1.batchsize = 1
@@ -712,8 +717,9 @@ test_params = {
 # model.pc_conv1.lr_values = 0.1
 # model.pc_conv1.lr_values = model_params["lr_params"][0]
 
-generation(test_loader, model, test_params)
-                            
+avg_SSIM_mean, avg_SSIM_max, avg_MSE_mean, avg_MSE_max = generation(test_loader, model, test_params, clean_images, verbose=1)
+
+
 # MSE_values = denoise(test_loader, model, supervised_learning=True)
 # print("MSE_values", MSE_values)
 
@@ -728,24 +734,34 @@ print("model_dir", model_dir)
 # Open the file in write mode
 with open(model_dir + "eval/eval_scores.txt", 'w') as file:
     # Write each list to the file
-
+    
+    ### denoise ###
     file.write("MSE_values_denoise_sup:\n")
     file.write(", ".join(map(str, MSE_values_denoise_sup)) + "\n\n")
 
     file.write("MSE_values_denoise:\n")
     file.write(", ".join(map(str, MSE_values_denoise)) + "\n\n")
     
+    ### occlude ###
     file.write("MSE_values_occ_noise:\n")
     file.write(", ".join(map(str, MSE_values_occ_noise)) + "\n\n")
     
     file.write("MSE_values_occ:\n")
     file.write(", ".join(map(str, MSE_values_occ)) + "\n\n")
 
+    ### classification
     file.write("accuracy_mean:\n")
     file.write("y_true: " + ", ".join(map(str, y_true)) + "\n")
     file.write("y_pred: " + ", ".join(map(str, y_pred)) + "\n")
-    
     file.write(str(accuracy_mean) + "\n\n")
+
+    ### Generation ###
+    
+    file.write("Generation:\n")
+    file.write("avg_SSIM_mean:", avg_SSIM_mean + "\n")
+    file.write("avg_SSIM_max:", avg_SSIM_max + "\n")
+    file.write("avg_MSE_mean:", avg_MSE_mean + "\n")
+    file.write("avg_MSE_max:", avg_MSE_max + "\n")
 
 
 from datetime import datetime
@@ -758,8 +774,6 @@ print("Current date and time:", current_datetime)
 
 wandb.log({"accuracy_mean": accuracy_mean})
 # wandb.log({"energy_sensory": energy["sensory_energy"]})
-
-
 
 
 
