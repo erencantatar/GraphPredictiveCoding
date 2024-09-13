@@ -59,6 +59,9 @@ from graphbuilder import graph_type_options
 parser.add_argument('--num_internal_nodes', type=int, default=1500, help='Number of internal nodes.')
 parser.add_argument('--graph_type', type=str, default="fully_connected", help='Type of Graph', choices=list(graph_type_options.keys()))
 
+# -MessagePassing-
+parser.add_argument('--normalize_msg', type=bool, required=True, default=False, help='normalize_msg during message passing')
+
 # -----model----- 
 parser.add_argument('--model_type', type=str, default="PC", help='Predictive Model type: [PC,IPC] ', choices=["PC", "IPC"])
 parser.add_argument('--weight_init', default=0.001, type=valid_str_or_float, help='A float (e.g 0.01) or a string from the list: uniform, xavier')
@@ -287,6 +290,8 @@ model_params = {
     'sensory_indices': (sensory_indices), 
     'internal_indices': (internal_indices), 
     "supervised_learning": (supervision_indices),
+
+    "normalize_msg": args.normalize_msg,
 
     "lr_params": (args.lr_values, args.lr_weights),
     #   (args.lr_gamma, args.lr_alpha), 

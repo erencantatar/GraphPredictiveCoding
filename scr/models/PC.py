@@ -15,7 +15,7 @@ class PCGraphConv(torch.nn.Module):
     def __init__(self, num_vertices, sensory_indices, internal_indices, 
                  learning_rate, T, graph_structure,
                  batch_size, use_learning_optimizer, weight_init, clamping,
-                 supervised_learning=False, debug=False, activation=None, 
+                 supervised_learning=False, normalize_msg=False, debug=False, activation=None, 
                  log_tensorboard=True, wandb_logger=None, device="cpu"):
         super(PCGraphConv, self).__init__()  # 'add' aggregation
         self.num_vertices = num_vertices
@@ -174,7 +174,12 @@ class PCGraphConv(torch.nn.Module):
         # using graph_structure to initialize mask Data(x=x, edge_index=edge_index, y=label)
         # self.mask = self.initialize_mask(graph_structure)
         
-
+        if normalize_msg:
+            self.norm = self.compute_normalization(self.edge_index, self.num_nodes, self.device)
+        else:
+            self.norm = torch.ones(self.edge_index.size(1), device=self.device)
+            
+        
         # Apply mask to weights
         # self.weights.data *= self.mask
 
@@ -232,6 +237,16 @@ class PCGraphConv(torch.nn.Module):
     #     mask = mask.to(self.weights.device)
     #     return mask
     
+    from torch_geometric.utils import degree
+
+    def compute_normalization(self, edge_index, num_nodes, device):
+        # Calculate degree for normalization
+        row, col = edge_index
+        deg = degree(col, num_nodes, dtype=torch.float32, device=device)
+        deg_inv_sqrt = deg.pow(-0.5)
+        deg_inv_sqrt[deg_inv_sqrt == float('inf')] = 0
+        norm = deg_inv_sqrt[row] * deg_inv_sqrt[col]
+        return norm
 
 
     def initialize_weights(self, init_method):
@@ -267,7 +282,7 @@ class PCGraphConv(torch.nn.Module):
 
         # num_nodes, (features)
         weights_batched_graph = self.weights.repeat(1, self.batchsize).to(self.device)
-        delta_x = self.values_mp(self.data.x.to(self.device), self.data.edge_index.to(self.device), weights_batched_graph).squeeze()
+        delta_x = self.values_mp(self.data.x.to(self.device), self.data.edge_index.to(self.device), weights_batched_graph, norm=self.norm).squeeze()
         # delta_x = self.values_mp(self.data.x.to(self.device), self.data.edge_index.to(self.device), self.weights)
 
         # self.values.data[self.nodes_2_update, :] += delta_x[self.nodes_2_update, :]
@@ -405,7 +420,7 @@ class PCGraphConv(torch.nn.Module):
         weights_batched_graph = self.weights.repeat(1, self.batchsize).to(self.device)
 
 
-        self.predictions = self.prediction_mp(self.data.x.to(self.device), self.data.edge_index.to(self.device), weights_batched_graph)
+        self.predictions = self.prediction_mp(self.data.x.to(self.device), self.data.edge_index.to(self.device), weights_batched_graph, norm=self.norm)
         # self.predictions = self.prediction_mp(self.data.x.to(self.device), self.data.edge_index.to(self.device), self.weights)
 
 
@@ -755,6 +770,7 @@ class PCGNN(torch.nn.Module):
                  lr_params, T, graph_structure, 
                  batch_size, 
                  use_learning_optimizer=False, weight_init="xavier", clamping=None, supervised_learning=False, 
+                 normalize_msg=False, 
                  debug=False, activation=None, log_tensorboard=True, wandb_logger=None, device='cpu'):
         super(PCGNN, self).__init__()
         
@@ -763,6 +779,7 @@ class PCGNN(torch.nn.Module):
         self.pc_conv1 = PCGraphConv(num_vertices, sensory_indices, internal_indices, 
                                     lr_params, T, graph_structure, 
                                     batch_size, use_learning_optimizer, weight_init, clamping, supervised_learning, 
+                                    normalize_msg, 
                                     debug, activation, log_tensorboard, wandb_logger, device)
 
         self.original_weights = None  # Placeholder for storing the original weights
