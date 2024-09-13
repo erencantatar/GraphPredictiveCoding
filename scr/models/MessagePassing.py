@@ -1,5 +1,6 @@
 import torch
 from torch_geometric.nn import MessagePassing
+from torch_geometric.utils import add_self_loops, degree
 
 
 """ 
@@ -21,11 +22,11 @@ from helper.activation_func import set_activation
 
 
 class PredictionMessagePassing(MessagePassing):
-    def __init__(self, aggr='add', activation=None):
+    def __init__(self, activation, normalize_msg=False, aggr='add'):
         super(PredictionMessagePassing, self).__init__(aggr=aggr,flow="source_to_target")
         # Initialize the activation function and its derivative
         self.f, self.activation_derivative = set_activation(activation)
-
+        self.normalize_msg = normalize_msg
         # GET THIS with init. the 
         # self.edge_index = edge_index
 
@@ -41,23 +42,20 @@ class PredictionMessagePassing(MessagePassing):
         if x.dim() == 3 and x.size(2) == 1:
             x = x.squeeze(2)  # Now x should have shape (num_nodes, 3)
 
-         # Step 3: Compute normalization.
-        # row, col = edge_index
-        # deg = degree(col, x.size(0), dtype=x.dtype)
-        # deg_inv_sqrt = deg.pow(-0.5)
-        # deg_inv_sqrt[deg_inv_sqrt == float('inf')] = 0
-        # norm = deg_inv_sqrt[row] * deg_inv_sqrt[col]
+        #  Step 3: Compute normalization.
+        if self.normalize_msg: 
+            row, col = edge_index
+            deg = degree(col, x.size(0), dtype=x.dtype)
+            deg_inv_sqrt = deg.pow(-0.5)
+            deg_inv_sqrt[deg_inv_sqrt == float('inf')] = 0
+            norm = deg_inv_sqrt[row] * deg_inv_sqrt[col]
+        else:
+            # make norm the identity
+            norm = torch.ones(edge_index.size(1), device=x.device)
 
-        # row, col = edge_index
-        # thetaIJ = weight_matrix[row, col]  # Use the weight from the 2D matrix
-        # thetaJI = weight_matrix[col, row]  # Use the weight from the 2D matrix
-
-        # print("theta_ji pred", thetaJI)
-
-
-        return self.propagate(edge_index, x=x, weight_matrix=weight_matrix, norm=None)
-
-        # return self.propagate(edge_index, x=x, edge_weight=edge_weight, norm=norm)
+        return self.propagate(edge_index, x=x, weight_matrix=weight_matrix, norm=norm)
+        
+            
 
     def message(self, x_j, weight_matrix, norm):
         # x_j: Node features of the neighboring nodes
@@ -69,8 +67,7 @@ class PredictionMessagePassing(MessagePassing):
         
         # return thetaJI * self.activation(x_j[:, 0]).view(-1, 1)
 
-               
-        return weight_matrix.view(-1, 1) * self.f(x_j[:, 0]).view(-1, 1)
+        return weight_matrix.view(-1, 1) * self.f(x_j[:, 0]).view(-1, 1) * norm 
         # return norm.view(-1, 1) * edge_weight.view(-1, 1) * self.activation(x_j[:, 0]).view(-1, 1)
 
     def update(self, aggr_out, x):
@@ -92,10 +89,11 @@ import torch
 from torch_geometric.nn import MessagePassing
 
 class ValueMessagePassing(MessagePassing):
-    def __init__(self, aggr='add', activation=None):
+    def __init__(self, activation, normalize_msg=False, aggr='add'):
         super(ValueMessagePassing, self).__init__(aggr=aggr, flow="source_to_target")
         # Initialize the activation function and its derivative
         self.activation, self.f_prime = set_activation(activation)
+        self.normalize_msg = normalize_msg
 
     def forward(self, x, edge_index, weight_matrix):
         # x: Node features (values, errors, predictions)
@@ -106,16 +104,21 @@ class ValueMessagePassing(MessagePassing):
         if x.dim() == 3 and x.size(2) == 1:
             x = x.squeeze(2)  # Now x should have shape (num_nodes, 3)
 
-        # Perform message passing
+        #  Step 3: Compute normalization.
+        if self.normalize_msg: 
+            row, col = edge_index
+            deg = degree(col, x.size(0), dtype=x.dtype)
+            deg_inv_sqrt = deg.pow(-0.5)
+            deg_inv_sqrt[deg_inv_sqrt == float('inf')] = 0
+            norm = deg_inv_sqrt[row] * deg_inv_sqrt[col]
+        else:
+            # make norm the identity
+            norm = torch.ones(edge_index.size(1), device=x.device)
 
-        # row, col = edge_index
-        # theta_ij = weight_matrix[row, col]      # Use the weight from the 2D matrix
-        # thetaJI = weight_matrix[col, row]       # Use the weight from the 2D matrix
+        return self.propagate(edge_index, x=x, weight_matrix=weight_matrix, norm=norm)
+        # return self.propagate(edge_index, x=x, weight_matrix=weight_matrix)
 
-        # print("theta_ji", thetaJI)
-        return self.propagate(edge_index, x=x, weight_matrix=weight_matrix)
-
-    def message(self, x_j, weight_matrix):
+    def message(self, x_j, weight_matrix, norm):
         # x_j: Node features of the neighboring nodes (source nodes in edge_index)
         # x_i: Node features of the destination nodes in edge_index
         # edge_weight: Weights of the edges
@@ -126,7 +129,7 @@ class ValueMessagePassing(MessagePassing):
         # return edge_weight.view(-1, 1) * errors_j
 
         errors_j = x_j[:, 1].view(-1, 1)
-        return weight_matrix.view(-1, 1) * errors_j
+        return weight_matrix.view(-1, 1) * errors_j * norm 
 
 
     def update(self, aggr_out, x):
