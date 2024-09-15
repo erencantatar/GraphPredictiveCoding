@@ -564,7 +564,7 @@ for epoch in range(args.epochs):
                 earlystop = True
                 break
 
-            if idx >= 5:
+            if idx >= 20:
                 print("Epoch checkpoint reached, saving model...")
 
                 # model_filename = f"model_state_dict_{epoch}.pth"
@@ -611,6 +611,8 @@ save_path = os.path.join(model_dir, 'parameter_info/weight_matrix_visualization_
 plot_model_weights(model, GRAPH_TYPE, model_dir=save_path)
 
 
+
+
 if earlystop:
     print("Stopping program-------")
     # Open the file in write mode
@@ -622,6 +624,9 @@ if earlystop:
     wandb.log({"crashed": True})
 
     exit()
+
+save_path = os.path.join(model_dir, 'parameter_info')
+model.save_weights(path=save_path)
 
 
 # Save model weights 
