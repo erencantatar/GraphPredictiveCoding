@@ -22,15 +22,14 @@ from helper.activation_func import set_activation
 
 
 class PredictionMessagePassing(MessagePassing):
-    def __init__(self, activation, normalize_msg=False, aggr='add'):
-        super(PredictionMessagePassing, self).__init__(aggr=aggr,flow="source_to_target")
+    def __init__(self, activation):
+        super(PredictionMessagePassing, self).__init__(aggr="add",flow="source_to_target")
         # Initialize the activation function and its derivative
         self.f, self.activation_derivative = set_activation(activation)
-        self.normalize_msg = normalize_msg
         # GET THIS with init. the 
         # self.edge_index = edge_index
 
-    def forward(self, x, edge_index, weight_matrix):
+    def forward(self, x, edge_index, weight_matrix, norm):
         # x: Node features (values, errors, predictions)
         # edge_index: Graph connectivity (2, num_edges)
         # edge_weight: Edge weights (num_edges,)
@@ -43,15 +42,15 @@ class PredictionMessagePassing(MessagePassing):
             x = x.squeeze(2)  # Now x should have shape (num_nodes, 3)
 
         #  Step 3: Compute normalization.
-        if self.normalize_msg: 
-            row, col = edge_index
-            deg = degree(col, x.size(0), dtype=x.dtype)
-            deg_inv_sqrt = deg.pow(-0.5)
-            deg_inv_sqrt[deg_inv_sqrt == float('inf')] = 0
-            norm = deg_inv_sqrt[row] * deg_inv_sqrt[col]
-        else:
-            # make norm the identity
-            norm = torch.ones(edge_index.size(1), device=x.device)
+        # if self.normalize_msg: 
+        #     row, col = edge_index
+        #     deg = degree(col, x.size(0), dtype=x.dtype)
+        #     deg_inv_sqrt = deg.pow(-0.5)
+        #     deg_inv_sqrt[deg_inv_sqrt == float('inf')] = 0
+        #     norm = deg_inv_sqrt[row] * deg_inv_sqrt[col]
+        # else:
+        #     # make norm the identity
+        #     norm = torch.ones(edge_index.size(1), device=x.device)
 
         return self.propagate(edge_index, x=x, weight_matrix=weight_matrix, norm=norm)
         
@@ -89,13 +88,13 @@ import torch
 from torch_geometric.nn import MessagePassing
 
 class ValueMessagePassing(MessagePassing):
-    def __init__(self, activation, normalize_msg=False, aggr='add'):
-        super(ValueMessagePassing, self).__init__(aggr=aggr, flow="source_to_target")
+    def __init__(self, activation):
+        super(ValueMessagePassing, self).__init__(aggr="add", flow="source_to_target")
         # Initialize the activation function and its derivative
         self.activation, self.f_prime = set_activation(activation)
-        self.normalize_msg = normalize_msg
+        
 
-    def forward(self, x, edge_index, weight_matrix):
+    def forward(self, x, edge_index, weight_matrix, norm):
         # x: Node features (values, errors, predictions)
         # edge_index: Graph connectivity (2, num_edges)
         # edge_weight: Edge weights (num_edges,)
@@ -104,16 +103,17 @@ class ValueMessagePassing(MessagePassing):
         if x.dim() == 3 and x.size(2) == 1:
             x = x.squeeze(2)  # Now x should have shape (num_nodes, 3)
 
-        #  Step 3: Compute normalization.
-        if self.normalize_msg: 
-            row, col = edge_index
-            deg = degree(col, x.size(0), dtype=x.dtype)
-            deg_inv_sqrt = deg.pow(-0.5)
-            deg_inv_sqrt[deg_inv_sqrt == float('inf')] = 0
-            norm = deg_inv_sqrt[row] * deg_inv_sqrt[col]
-        else:
-            # make norm the identity
-            norm = torch.ones(edge_index.size(1), device=x.device)
+        # #  Step 3: Compute normalization.
+        """ COmputed ones since the graph are the same"""
+        # if self.normalize_msg: 
+        #     row, col = edge_index
+        #     deg = degree(col, x.size(0), dtype=x.dtype)
+        #     deg_inv_sqrt = deg.pow(-0.5)
+        #     deg_inv_sqrt[deg_inv_sqrt == float('inf')] = 0
+        #     norm = deg_inv_sqrt[row] * deg_inv_sqrt[col]
+        # else:
+        #     # make norm the identity
+        #     norm = torch.ones(edge_index.size(1), device=x.device)
 
         return self.propagate(edge_index, x=x, weight_matrix=weight_matrix, norm=norm)
         # return self.propagate(edge_index, x=x, weight_matrix=weight_matrix)

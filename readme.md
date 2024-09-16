@@ -13,7 +13,11 @@ Foobar is a Python library for dealing with word pluralization.
 
 
 1. parser.add_argument('--connectivity_prob', type=float, default=0.08, help='Probability of connectivity.')
-2. Find a goal  
+2. Find a clear goal (for the project/ for life) 
+3. Clear my head
+4. make wandb workbook available. 
+
+
 
 ## Files
 
