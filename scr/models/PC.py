@@ -188,11 +188,13 @@ class PCGraphConv(torch.nn.Module):
             # self.norm_single_batch = self.compute_normalization(self.edge_index_single_graph, self.num_vertices, self.device)
             print("-----compute_normalization-----")
         else:
-            self.norm_single_batch = torch.ones(self.edge_index_single_graph.size(1), device=self.device)
+            self.norm_single_batch = torch.ones(self.edge_index_single_graph.size(1))
             # self.norm = self.norm_single_batch.repeat(1, self.batchsize).to(self.device)
+            
             
             self.norm = torch.tensor(1)
 
+        self.norm = self.norm.cpu()
 
         # Apply mask to weights
         # self.weights.data *= self.mask
@@ -301,12 +303,23 @@ class PCGraphConv(torch.nn.Module):
         # num_nodes, (features)
         weights_batched_graph = self.weights.repeat(1, self.batchsize).to(self.device)
 
+
+        current_memory_allocated = torch.cuda.memory_allocated()
+        current_memory_reserved = torch.cuda.memory_reserved()
+        print("1 current_memory_allocated", current_memory_allocated)
+        print("1 current_memory_reserved", current_memory_reserved)
+
         with torch.no_grad():
 
             delta_x = self.values_mp(self.data.x.to(self.device), self.data.edge_index.to(self.device), weights_batched_graph, norm=self.norm.to(self.device)).squeeze()
         
             delta_x = delta_x.detach()
         
+
+        current_memory_allocated = torch.cuda.memory_allocated()
+        current_memory_reserved = torch.cuda.memory_reserved()
+        print("1.1 current_memory_allocated", current_memory_allocated)
+        print("1.1 current_memory_reserved", current_memory_reserved)
         
         # delta_x = self.values_mp(self.data.x.to(self.device), self.data.edge_index.to(self.device), self.weights)
 
@@ -444,6 +457,7 @@ class PCGraphConv(torch.nn.Module):
         # with a single batch of n items the weights are shared/the same (self.weights.to(self.device))
         weights_batched_graph = self.weights.repeat(1, self.batchsize).to(self.device)
 
+        
 
         with torch.no_grad():
 
@@ -473,7 +487,15 @@ class PCGraphConv(torch.nn.Module):
         """
         self.get_graph()
 
+        current_memory_allocated = torch.cuda.memory_allocated()
+        current_memory_reserved = torch.cuda.memory_reserved()
+        print("get_graph done 2x current_memory_allocated", current_memory_allocated)
+        print("get_graph done 2x current_memory_reserved", current_memory_reserved)
+
         self.predictions = self.get_predictions(self.data)
+
+     
+        
         self.data.x[:, 2] = self.predictions.detach()
         
         # print("predictions shape", self.predictions.shape)
@@ -571,7 +593,19 @@ class PCGraphConv(torch.nn.Module):
         # self.values, _pred_ , self.errors, = data.x[:, 0], data.x[:, 1], data.x[:, 2]
 
         print("Aaaa", self.data.x.shape)
+        current_memory_allocated = torch.cuda.memory_allocated()
+        current_memory_reserved = torch.cuda.memory_reserved()
+        print("get_graph current_memory_allocated", current_memory_allocated)
+        print("get_graph current_memory_reserved", current_memory_reserved)
+
         self.get_graph()
+
+        print("Aaaa", self.data.x.shape)
+        current_memory_allocated = torch.cuda.memory_allocated()
+        current_memory_reserved = torch.cuda.memory_reserved()
+        print("get_graph done current_memory_allocated", current_memory_allocated)
+        print("get_graph donecurrent_memory_reserved", current_memory_reserved)
+
 
         energy = self.energy(self.data)
 
@@ -667,6 +701,12 @@ class PCGraphConv(torch.nn.Module):
         
     def learning(self, data):
 
+        
+        current_memory_allocated = torch.cuda.memory_allocated()
+        current_memory_reserved = torch.cuda.memory_reserved()
+        print("current_memory_allocated", current_memory_allocated)
+        print("current_memory_reserved", current_memory_reserved)
+
         self.data = data
 
         # random inint value of internal nodes
@@ -687,6 +727,11 @@ class PCGraphConv(torch.nn.Module):
         # self.restart_activity()
         # self.set_sensory_nodes()
 
+        current_memory_allocated = torch.cuda.memory_allocated()
+        current_memory_reserved = torch.cuda.memory_reserved()
+        print("0 current_memory_allocated", current_memory_allocated)
+        print("0 current_memory_reserved", current_memory_reserved)
+
         ## 2. Then, the total energy of Eq. (2) is minimized in two phases: inference and weight update. 
         ## INFERENCE: This process of iteratively updating the value nodes distributes the output error throughout the PC graph. 
         self.set_phase('inference')
@@ -700,6 +745,10 @@ class PCGraphConv(torch.nn.Module):
 
         energy = self.energy(self.data)
 
+        current_memory_allocated = torch.cuda.memory_allocated()
+        current_memory_reserved = torch.cuda.memory_reserved()
+        print("2 current_memory_allocated", current_memory_allocated)
+        print("2 current_memory_reserved", current_memory_reserved)
 
     def weight_update(self, data):
 
