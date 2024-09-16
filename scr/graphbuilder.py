@@ -30,7 +30,7 @@ graph_type_options = {
         "stochastic_block": {
             "params": {
                 "num_communities": 50,      # Number of communities
-                "community_size": 30,       # Size of each community
+                "community_size": 10,       # Size of each community
                 "p_intra": 0.1,             # Probability of edges within the same community
                 "p_inter": 0.1,             # Probability of edges between different communities
                 "remove_sens_2_sens": True, 

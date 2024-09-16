@@ -41,6 +41,7 @@ class PredictionMessagePassing(MessagePassing):
         if x.dim() == 3 and x.size(2) == 1:
             x = x.squeeze(2)  # Now x should have shape (num_nodes, 3)
 
+        
         #  Step 3: Compute normalization.
         # if self.normalize_msg: 
         #     row, col = edge_index

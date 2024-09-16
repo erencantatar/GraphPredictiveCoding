@@ -175,12 +175,25 @@ class PCGraphConv(torch.nn.Module):
         # self.mask = self.initialize_mask(graph_structure)
         
         if normalize_msg:
-            self.norm_single_batch = self.compute_normalization(self.edge_index_single_graph, self.num_vertices, self.device)
-        else:
-            self.norm_single_batch = torch.ones(self.self.edge_index_single_graph.size(1), device=self.device)
+
+            edge_index_batch = torch.cat([self.edge_index_single_graph for _ in range(batch_size)], dim=1)
+
+            # Compute normalization for the entire batch edge_index, num_nodes, device):
+            self.norm = self.compute_normalization(edge_index_batch, self.num_vertices * batch_size, device)
+
+            print(self.edge_index_single_graph.shape)
+            print(self.norm.shape)
             
-        self.norm = self.norm_single_batch.repeat(1, self.batchsize).to(self.device)
-        
+            assert self.norm.shape[0] == self.edge_index_single_graph.shape[1], "Norm shape must match the number of edges"
+            # self.norm_single_batch = self.compute_normalization(self.edge_index_single_graph, self.num_vertices, self.device)
+            print("-----compute_normalization-----")
+        else:
+            self.norm_single_batch = torch.ones(self.edge_index_single_graph.size(1), device=self.device)
+            # self.norm = self.norm_single_batch.repeat(1, self.batchsize).to(self.device)
+            
+            self.norm = torch.tensor(1)
+
+
         # Apply mask to weights
         # self.weights.data *= self.mask
 
@@ -243,10 +256,14 @@ class PCGraphConv(torch.nn.Module):
     def compute_normalization(self, edge_index, num_nodes, device):
         # Calculate degree for normalization
         row, col = edge_index
-        deg = degree(col, num_nodes, dtype=torch.float32).to(device)
+        deg = degree(col, num_nodes, dtype=torch.int16)
         deg_inv_sqrt = deg.pow(-0.5)
         deg_inv_sqrt[deg_inv_sqrt == float('inf')] = 0
         norm = deg_inv_sqrt[row] * deg_inv_sqrt[col]
+
+        # Using sparse matrix for normalization to reduce memory consumption
+        # norm = torch.sparse_coo_tensor(edge_index, deg_inv_sqrt[row] * deg_inv_sqrt[col], size=(num_nodes, num_nodes)).to(device)
+
         return norm
 
 
@@ -283,7 +300,14 @@ class PCGraphConv(torch.nn.Module):
 
         # num_nodes, (features)
         weights_batched_graph = self.weights.repeat(1, self.batchsize).to(self.device)
-        delta_x = self.values_mp(self.data.x.to(self.device), self.data.edge_index.to(self.device), weights_batched_graph, norm=self.norm).squeeze()
+
+        with torch.no_grad():
+
+            delta_x = self.values_mp(self.data.x.to(self.device), self.data.edge_index.to(self.device), weights_batched_graph, norm=self.norm.to(self.device)).squeeze()
+        
+            delta_x = delta_x.detach()
+        
+        
         # delta_x = self.values_mp(self.data.x.to(self.device), self.data.edge_index.to(self.device), self.weights)
 
         # self.values.data[self.nodes_2_update, :] += delta_x[self.nodes_2_update, :]
@@ -421,9 +445,12 @@ class PCGraphConv(torch.nn.Module):
         weights_batched_graph = self.weights.repeat(1, self.batchsize).to(self.device)
 
 
-        self.predictions = self.prediction_mp(self.data.x.to(self.device), self.data.edge_index.to(self.device), weights_batched_graph, norm=self.norm)
-        # self.predictions = self.prediction_mp(self.data.x.to(self.device), self.data.edge_index.to(self.device), self.weights)
+        with torch.no_grad():
 
+            self.predictions = self.prediction_mp(self.data.x.to(self.device), self.data.edge_index.to(self.device), weights_batched_graph, norm=self.norm.to(self.device))
+            # self.predictions = self.prediction_mp(self.data.x.to(self.device), self.data.edge_index.to(self.device), self.weights)
+
+            self.predictions = self.predictions.detach()
 
         return self.predictions
 
@@ -679,8 +706,8 @@ class PCGraphConv(torch.nn.Module):
         self.get_graph()                
         # self.values, self.errors, self.predictions, = self.data.x[:, 0], self.data.x[:, 1], self.data.x[:, 2]
         
-        errors = self.errors.squeeze() 
-        f_x    = self.f(self.values).squeeze()  #* self.mask  # * self.mask
+        errors = self.errors.squeeze().detach() 
+        f_x    = self.f(self.values).squeeze().detach()  #* self.mask  # * self.mask
 
         print(errors.shape, f_x.shape)
 
