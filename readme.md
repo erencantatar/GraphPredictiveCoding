@@ -83,6 +83,3 @@ Foobar is a Python library for dealing with word pluralization.
 
 Thank u Parva
 
-## License
-
-[MIT](https://choosealicense.com/licenses/mit/)
