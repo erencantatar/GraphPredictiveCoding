@@ -58,7 +58,7 @@ Foobar is a Python library for dealing with word pluralization.
 
 ## Usage
 1. ```python              
-srun python -u train.py \
+   python -u train.py \
     --model_type PC \  # Specifies the model type (either "PC" or "IPC")
     --normalize_msg False \  # No normalization during message passing
     --dataset_transform none \  # No dataset transformations
