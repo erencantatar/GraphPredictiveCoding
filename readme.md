@@ -56,29 +56,27 @@ Foobar is a Python library for dealing with word pluralization.
 3. 
 
 
-
-1. Base Example: Get a free API Key at [https://example.com](https://example.com)
-2. Clone the repo
-   ```sh
-   git clone https://github.com/github_username/repo_name.git
-   ```
-3. Install NPM packages
-   ```sh
-   npm install
-   ```
-4. Enter your API in `config.js`
-   ```js
-   const API_KEY = 'ENTER YOUR API';
-   ```
-5. Change git remote url to avoid accidental pushes to base project
-   ```sh
-   git remote set-url origin github_username/repo_name
-   git remote -v # confirm the changes
-   ```
-
 ## Usage
-python train.py --batch_size 32 --epochs 5 --dataset_transform normalize_mnist_mean_std
-
+1. ```python              
+srun python -u train.py \
+    --model_type PC \  # Specifies the model type (either "PC" or "IPC")
+    --normalize_msg False \  # No normalization during message passing
+    --dataset_transform none \  # No dataset transformations
+    --numbers_list 0,1,3,4,5,6,7 \  # Specifies the classes of digits to be used
+    --N 20 \  # Use 20 instances per class
+    --supervision_label_val 10 \  # Supervision label strength
+    --num_internal_nodes 1500 \  # Number of internal nodes in the graph
+    --graph_type fully_connected \  # Specifies the graph type (e.g., fully connected)
+    --weight_init xavier \  # Weight initialization method (e.g., xavier, uniform)
+    --T 40 \  # Number of gradient descent iterations
+    --lr_values 0.001 \  # Learning rate for model parameters
+    --lr_weights 0.01 \  # Learning rate for weights
+    --activation_func swish \  # Activation function (e.g., swish, relu, tanh)
+    --epochs 20 \  # Number of training epochs
+    --batch_size 32 \  # Batch size for training
+    --seed 42 \  # Random seed for reproducibility
+    --optimizer False  # Use default optimizer
+   ```
 
 
 ## Contributing
