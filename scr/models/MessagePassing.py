@@ -67,7 +67,8 @@ class PredictionMessagePassing(MessagePassing):
         
         # return thetaJI * self.activation(x_j[:, 0]).view(-1, 1)
 
-        return weight_matrix.view(-1, 1) * self.f(x_j[:, 0]).view(-1, 1) * norm 
+        return weight_matrix.view(-1, 1) * self.f(x_j[:, 0]).view(-1, 1) 
+        # return weight_matrix.view(-1, 1) * self.f(x_j[:, 0]).view(-1, 1) * norm 
         # return norm.view(-1, 1) * edge_weight.view(-1, 1) * self.activation(x_j[:, 0]).view(-1, 1)
 
     def update(self, aggr_out, x):
@@ -130,7 +131,8 @@ class ValueMessagePassing(MessagePassing):
         # return edge_weight.view(-1, 1) * errors_j
 
         errors_j = x_j[:, 1].view(-1, 1)
-        return weight_matrix.view(-1, 1) * errors_j * norm 
+        return weight_matrix.view(-1, 1) * errors_j
+        # return weight_matrix.view(-1, 1) * errors_j * norm 
 
 
     def update(self, aggr_out, x):
