@@ -18,10 +18,46 @@ Foobar is a Python library for dealing with word pluralization.
 4. make wandb workbook available. 
 
 
+## File Structure
 
-## Files
+- `dataset.py` - Contains code related to data processing and creation of custom datasets.
+- `eval_tasks.py` - Includes evaluation tasks such as classification, denoising, and generation.
+- `evaluate.py` - Script for evaluating the trained models.
+- `graphbuilder.py` - Builds different types of graphs used in training.
+- `helper/` - Contains helper functions such as argument parsing, activation functions, and plotting utilities.
+- `models/` - Directory containing model definitions for predictive coding and inference-based models.
+- `trained_models/` - Directory to store trained models and their configurations.
+- `train.py` - Script to train the model using the defined datasets and parameters.
 
-1. Get a free API Key at [https://example.com](https://example.com)
+
+
+## Example usage 
+
+
+1. Load the model and graph params.
+2. ```python
+              
+   from models.PC import PCGNN
+
+   model = PCGNN(**model_params,   
+      log_tensorboard=False,
+      wandb_logger=run if args.use_wandb in ['online', 'run'] else None,
+      debug=False, device=device)
+
+   model.pc_conv1.set_mode("training")
+
+   history_epoch = model.learning(batch)
+
+   # Log energy values for this batch/epoch to wandb
+   wandb.log({...})
+
+   model.pc_conv1.restart_activity()
+   ```
+3. 
+
+
+
+1. Base Example: Get a free API Key at [https://example.com](https://example.com)
 2. Clone the repo
    ```sh
    git clone https://github.com/github_username/repo_name.git
@@ -41,6 +77,7 @@ Foobar is a Python library for dealing with word pluralization.
    ```
 
 ## Usage
+python train.py --batch_size 32 --epochs 5 --dataset_transform normalize_mnist_mean_std
 
 
 
