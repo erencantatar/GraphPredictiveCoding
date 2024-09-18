@@ -169,15 +169,16 @@ graph_params = {
     "supervised_learning": True,  # Whether the task involves supervised learning
     "graph_type": 
 
-      {    
-        "name": args.graph_type, # Options: "fully_connected", "fully_connected_w_self", "barabasi", "stochastic_block"
-        "params": graph_type_options[args.graph_type]["params"]
-      },      
-  
+    {    
+    "name": args.graph_type, # Options: "fully_connected", "fully_connected_w_self", "barabasi", "stochastic_block"
+    "params": graph_type_options[args.graph_type]["params"]
+    },       
 }
 
 if graph_params["graph_type"]["name"] == "stochastic_block":
-  assert graph_params["internal_nodes"] == (graph_params["graph_type"]["params"]["num_communities"] * graph_params["graph_type"]["params"]["community_size"])
+    
+    # override internal nodes if doing clustering
+    graph_params["internal_nodes"] == (graph_params["graph_type"]["params"]["num_communities"] * graph_params["graph_type"]["params"]["community_size"])
 
 from dataset import CustomGraphDataset
 

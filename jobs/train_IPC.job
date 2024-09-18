@@ -51,7 +51,7 @@ for graph_type in "${graph_types[@]}"; do
                         echo "Trial $trial_count/$total_trials: Running with graph_type=${graph_type}, batch_size=${batch_size}, T=${T}, weight_init=${weight_init}, lr_val=${lr_val}, lr_weight=${lr_weight}"
                         
                         srun python -u train.py \
-                            --model_type online \
+                            --use_wandb online \
                             --model_type IPC \
                             --normalize_msg False \
                             --dataset_transform none \
