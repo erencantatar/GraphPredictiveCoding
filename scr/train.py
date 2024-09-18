@@ -60,7 +60,7 @@ parser.add_argument('--num_internal_nodes', type=int, default=1500, help='Number
 parser.add_argument('--graph_type', type=str, default="fully_connected", help='Type of Graph', choices=list(graph_type_options.keys()))
 
 # -MessagePassing-
-parser.add_argument('--normalize_msg', type=bool, required=True, default=False, help='normalize_msg during message passing')
+parser.add_argument('--normalize_msg', choices=['True', 'False'], required=True,  help='Normalize message passing, expected True or False')
 
 # -----model----- 
 parser.add_argument('--model_type', type=str, default="PC", help='Predictive Model type: [PC,IPC] ', choices=["PC", "IPC"])
@@ -97,6 +97,8 @@ print(f"Seed used", args.seed)
 if torch.cuda.is_available():
     print("Device name: ", torch.cuda.get_device_name(0))
 
+# Make True of False bool
+args.normalize_msg = args.normalize_msg == 'True'
 
 import torchvision.transforms as transforms
 import numpy as np
@@ -805,3 +807,4 @@ wandb.log({"accuracy_mean": accuracy_mean})
 
 
 wandb.finish()
+print(f"Training completed in {end_time - start_time:.2f} seconds for {args.epochs} epochs")

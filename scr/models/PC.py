@@ -62,6 +62,8 @@ class PCGraphConv(torch.nn.Module):
             "supervised_energy_testing": []
         }
 
+
+        self.use_bias = False 
         self.gradients_minus_1 = 1 # or -1 
         # self.gradients_minus_1 = -1 # or -1 #NEVER 
 
@@ -174,6 +176,7 @@ class PCGraphConv(torch.nn.Module):
         # using graph_structure to initialize mask Data(x=x, edge_index=edge_index, y=label)
         # self.mask = self.initialize_mask(graph_structure)
         
+        print("normalize_msg", normalize_msg)
         if normalize_msg:
 
             edge_index_batch = torch.cat([self.edge_index_single_graph for _ in range(batch_size)], dim=1)
@@ -959,7 +962,6 @@ class PCGNN(torch.nn.Module):
             os.makedirs(path)
 
         W = self.pc_conv1.weights
-        b = self.pc_conv1.biases 
         graph = self.pc_conv1.edge_index
 
         # save to '"trained_models/weights.pt"' 
@@ -967,6 +969,7 @@ class PCGNN(torch.nn.Module):
         torch.save(graph, f"{path}/graph.pt")
 
         if self.pc_conv1.use_bias:
+            b = self.pc_conv1.biases 
             torch.save(b, f"{path}/bias.pt")
 
 
