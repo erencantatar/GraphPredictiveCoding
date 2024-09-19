@@ -320,7 +320,28 @@ learning_params['dataset_transform'] = args.dataset_transform
 
 learning_params['graph_structure'] = (learning_params['graph_structure']).cpu().numpy().tolist()
 
-model_params_name = f"num_internal_nodes_{args.num_internal_nodes}_T_{args.T}_lr_weights_{args.lr_weights}_lr_values_{args.lr_values}_batch_size_{train_loader.batch_size}"
+# model_params_name = f"num_internal_nodes_{args.num_internal_nodes}_T_{args.T}_lr_weights_{args.lr_weights}_lr_values_{args.lr_values}_batch_size_{train_loader.batch_size}"
+
+optimizer_str = str(args.optimizer) if isinstance(args.optimizer, float) else str(args.optimizer)
+model_params_name = (
+    f"model_{args.model_type}_"
+    f"num_internal_nodes_{args.num_internal_nodes}_"
+    f"T_{args.T}_"
+    f"lr_values_{args.lr_values}_"
+    f"lr_weights_{args.lr_weights}_"
+    f"batch_size_{args.batch_size}_"
+    f"activation_{args.activation_func}_"
+    f"weight_init_{args.weight_init}_"
+    f"graph_type_{args.graph_type}_"
+    f"supervision_val_{args.supervision_label_val}_"
+    f"normalize_msg_{args.normalize_msg}_"
+    f"numbers_list_{'_'.join(map(str, args.numbers_list))}_"
+    f"N_{args.N}_"
+    f"epochs_{args.epochs}_"
+    f"optimizer_{optimizer_str}_"
+    f"dataset_transform_{'_'.join(args.dataset_transform) if args.dataset_transform else 'none'}"
+)
+
 
 def default(obj):
     if type(obj).__module__ == np.__name__:
@@ -615,22 +636,23 @@ plot_model_weights(model, GRAPH_TYPE, model_dir=save_path)
 
 
 
-
+# Append to the appropriate file based on whether the training crashed or completed successfully
 if earlystop:
     print("Stopping program-------")
     # Open the file in write mode
-    with open(model_dir + "early_stopped_training.txt", 'w') as file:
-        # Write each list to the file
-
-        file.write("Stopped training :\n")
-
+    with open('trained_models/crashed_training.txt', 'a') as file:
+        file.write(f"{model_params_name}\n")
+    # Log in wandb that the run crashed
     wandb.log({"crashed": True})
 
     exit()
 
+# If training completed successfully, log to the finished runs file
+with open('trained_models/finished_training.txt', 'a') as file:
+    file.write(f"{model_params_name}\n")
+
 save_path = os.path.join(model_dir, 'parameter_info')
 model.save_weights(path=save_path)
-
 
 # Save model weights 
 ######################################################################################################### 

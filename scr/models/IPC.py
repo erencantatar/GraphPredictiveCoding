@@ -14,18 +14,11 @@ from models.PC import PCGraphConv
 
 
 class IPCGraphConv(PCGraphConv): 
-    def __init__(self, num_vertices, sensory_indices, internal_indices, 
-                 learning_rate, T, graph_structure,
-                 batch_size, use_learning_optimizer, weight_init, clamping,
-                 supervised_learning=False, debug=False, activation=None, 
-                 log_tensorboard=True, wandb_logger=None, device="cpu"):
-        super(IPCGraphConv, self).__init__(num_vertices, sensory_indices, internal_indices,
-                                           learning_rate, T, graph_structure,
-                                           batch_size, use_learning_optimizer, weight_init, clamping,
-                                           supervised_learning, debug, activation,
-                                           log_tensorboard, wandb_logger, device)  # 'add' aggregation
+    def __init__(self, *args, **kwargs):
+        # Call the parent class (PCGraphConv) initializer with all arguments passed through
+        super(IPCGraphConv, self).__init__(*args, **kwargs)
         
-        self.wandb_logger = wandb_logger  # Make sure the logger is passed
+        # self.wandb_logger = wandb_logger  # Make sure the logger is passed
 
 
     # Overwrite the learning function
