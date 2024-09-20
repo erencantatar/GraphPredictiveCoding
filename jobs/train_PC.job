@@ -27,7 +27,8 @@ echo "----PC----"
 echo "Running simple training"
 
 # Parameter arrays
-graph_types=("fully_connected" "fully_connected_w_self" "fully_connected_no_sens2sup" "stochastic_block")
+# graph_types=("fully_connected" "fully_connected_w_self" "fully_connected_no_sens2sup" "stochastic_block")
+graph_types=("fully_connected_no_sens2sup" "stochastic_block")
 batch_sizes=(1 8)
 weight_inits=("0.01" "0.001" "uniform" "0.0001")
 Ts=(10 40 200)
@@ -51,6 +52,7 @@ for graph_type in "${graph_types[@]}"; do
                         echo "Trial $trial_count/$total_trials: Running with graph_type=${graph_type}, batch_size=${batch_size}, T=${T}, weight_init=${weight_init}, lr_val=${lr_val}, lr_weight=${lr_weight}"
                         
                         srun python -u train.py \
+                            --mode training \
                             --use_wandb online \
                             --model_type PC \
                             --normalize_msg False \

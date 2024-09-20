@@ -46,6 +46,9 @@ from helper.activation_func import activation_functions
 # Parsing command-line arguments
 parser = argparse.ArgumentParser(description='Train a model with specified parameters.')
 
+# Training mode 
+parser.add_argument('--mode', choices=['training', 'experimenting'], required=True,  help="Mode")
+
 # -----dataset----- 
 parser.add_argument('--dataset_transform', nargs='*', default=[], help='List of transformations to apply.', choices=['normalize_min1_plus1', 'normalize_mnist_mean_std', 'random_rotation', 'none'])
 parser.add_argument('--numbers_list', type=valid_int_list, default=[0, 1, 3, 4, 5, 6, 7], help="A comma-separated list of integers describing which distinct classes we take during training alone")
@@ -265,8 +268,18 @@ for batch, clean_image in train_loader:
 ####                                            VALIDATION                                          #####
 ######################################################################################################### 
  
-# from helper.validate_MP import validate_messagePassing
+# from helper.validation import validate_messagePassing
 # validate_messagePassing()
+
+
+from helper.validation import compare_class_args
+
+from models.PC import PCGNN, PCGraphConv
+from models.IPC import IPCGNN, IPCGraphConv
+
+# Usage example: comparing IPCGraphConv and PCGraphConv
+compare_class_args(IPCGraphConv, PCGraphConv)
+
 
 ######################################################################################################### 
 ####                                            FIND OPTIMAL LR                                     #####
@@ -319,11 +332,30 @@ learning_params['supervised_learning'] = list(learning_params['supervised_learni
 learning_params['dataset_transform'] = args.dataset_transform
 
 learning_params['graph_structure'] = (learning_params['graph_structure']).cpu().numpy().tolist()
-
-# model_params_name = f"num_internal_nodes_{args.num_internal_nodes}_T_{args.T}_lr_weights_{args.lr_weights}_lr_values_{args.lr_values}_batch_size_{train_loader.batch_size}"
-
 optimizer_str = str(args.optimizer) if isinstance(args.optimizer, float) else str(args.optimizer)
+
+model_params_short = f"num_iternode_{args.num_internal_nodes}_T_{args.T}_lr_w_{args.lr_weights}_lr_val_{args.lr_values}_Bsize_{train_loader.batch_size}"
+print(len(model_params_short), model_params_short)
 model_params_name = (
+    f"{args.model_type}_"
+    f"nodes_{args.num_internal_nodes}_"
+    f"T_{args.T}_"
+    f"lr_vals_{args.lr_values}_"
+    f"lr_wts_{args.lr_weights}_"
+    f"bs_{args.batch_size}_"
+    f"act_{args.activation_func}_"
+    f"init_{args.weight_init}_"
+    f"graph_{args.graph_type}_"
+    f"sup_{args.supervision_label_val}_"
+    f"norm_{args.normalize_msg}_"
+    f"nums_{'_'.join(map(str, args.numbers_list))}_"
+    f"N_{args.N}_"
+    f"ep_{args.epochs}_"
+    f"opt_{optimizer_str}_"
+    f"trans_{'_'.join(args.dataset_transform) if args.dataset_transform else 'none'}"
+)
+
+model_params_name_full = (
     f"model_{args.model_type}_"
     f"num_internal_nodes_{args.num_internal_nodes}_"
     f"T_{args.T}_"
@@ -341,7 +373,6 @@ model_params_name = (
     f"optimizer_{optimizer_str}_"
     f"dataset_transform_{'_'.join(args.dataset_transform) if args.dataset_transform else 'none'}"
 )
-
 
 def default(obj):
     if type(obj).__module__ == np.__name__:
@@ -370,8 +401,10 @@ GRAPH_TYPE = graph_params["graph_type"]["name"]    #"fully_connected"
 
 date_hour = datetime.now().strftime("%Y-%m-%d_%H_%M_%S")
 
-# model_dir = f"trained_models/test/{GRAPH_TYPE}/{model_params_name}_{date_hour}/"
-model_dir = f"trained_models/{args.model_type.lower()}/{GRAPH_TYPE}/{model_params_name}_{date_hour}/"
+if args.mode == "experimenting":
+    model_dir = f"trained_models/experimenting/{GRAPH_TYPE}/{model_params_name}_{date_hour}/"
+else:
+    model_dir = f"trained_models/{args.model_type.lower()}/{GRAPH_TYPE}/{model_params_name}_{date_hour}/"
 
 # Define the directory path
 print("Saving model, params, graph_structure to :", model_dir)
@@ -406,7 +439,7 @@ run = wandb.init(
     # entity="Erencan Tatar", 
     project=f"PredCod",
     name=f"T_{args.T}_lr_value_{args.lr_values}_lr_weights_{args.lr_weights}_",
-    id=f"{model_params_name}_{date_hour}",
+    id=f"{model_params_short}_{date_hour}",
     # tags= 
     dir=model_dir,
     
@@ -474,9 +507,10 @@ print(f"Using batch size of \t: {train_loader.batch_size}")
 print("Device \t\t\t:",          device)
 print("Model type", args.model_type.lower())
 
+
+
 if args.model_type.lower() == "pc":
         
-    from models.PC import PCGNN
 
     model = PCGNN(**model_params,   
         log_tensorboard=False,
@@ -487,7 +521,6 @@ if args.model_type.lower() == "pc":
 
 if args.model_type.lower() == "ipc":
         
-    from models.IPC import IPCGNN
 
     model = IPCGNN(**model_params,   
         log_tensorboard=False,
@@ -641,15 +674,18 @@ if earlystop:
     print("Stopping program-------")
     # Open the file in write mode
     with open('trained_models/crashed_training.txt', 'a') as file:
-        file.write(f"{model_params_name}\n")
+        file.write(f"{model_params_name_full}\n")
     # Log in wandb that the run crashed
     wandb.log({"crashed": True})
+
+    # log that crashed 
+    
 
     exit()
 
 # If training completed successfully, log to the finished runs file
 with open('trained_models/finished_training.txt', 'a') as file:
-    file.write(f"{model_params_name}\n")
+    file.write(f"{model_params_name_full}\n")
 
 save_path = os.path.join(model_dir, 'parameter_info')
 model.save_weights(path=save_path)
@@ -814,18 +850,31 @@ with open(model_dir + "eval/eval_scores.txt", 'w') as file:
     file.write("avg_MSE_mean: " + str(avg_MSE_mean) + "\n")
     file.write("avg_MSE_max: " + str(avg_MSE_max) + "\n")
 
+
+
+# Log all the evaluation metrics to wandb
+wandb.log({
+    "Mean_MSE_values_denoise_sup": np.mean(MSE_values_denoise_sup),
+    "Mean_MSE_values_denoise": np.mean(MSE_values_denoise),
+    "Mean_MSE_values_occ_noise": np.mean(MSE_values_occ_noise),
+    "Mean_MSE_values_occ": np.mean(MSE_values_occ),
+    "accuracy_mean": accuracy_mean,
+    "y_true": y_true,
+    "y_pred": y_pred,
+    "avg_SSIM_mean": avg_SSIM_mean,
+    "avg_SSIM_max": avg_SSIM_max,
+    "avg_MSE_mean": avg_MSE_mean,
+    "avg_MSE_max": avg_MSE_max
+})
+
+
 from datetime import datetime
 # Get the current date and time
 current_datetime = datetime.now()
 # Print the current date and time
 print("Current date and time:", current_datetime)
 
-
-
-wandb.log({"accuracy_mean": accuracy_mean})
 # wandb.log({"energy_sensory": energy["sensory_energy"]})
-
-
 
 
 wandb.finish()

@@ -10,13 +10,14 @@ from helper.activation_func import set_activation
 import os
 
 # import base PC-graph arch.
-from models.PC import PCGraphConv 
+from models.PC import PCGraphConv
+
 
 class IPCGraphConv(PCGraphConv): 
     def __init__(self, *args, **kwargs):
-        # Initialize using the parent class constructor
+        # Call the parent class (PCGraphConv) initializer with all arguments passed through
         super(IPCGraphConv, self).__init__(*args, **kwargs)
-
+        
         # self.wandb_logger = wandb_logger  # Make sure the logger is passed
 
 
@@ -113,24 +114,11 @@ class IPCGraphConv(PCGraphConv):
 
 
 
-# class IPCGNN(torch.nn.Module):
-#     def __init__(self, num_vertices, sensory_indices, internal_indices, 
-#                  lr_params, T, graph_structure, 
-#                  batch_size, 
-#                  use_learning_optimizer=False, weight_init="xavier", clamping=None, supervised_learning=False, 
-#                  debug=False, activation=None, log_tensorboard=True, wandb_logger=None, device='cpu'):
-#         super(IPCGNN, self).__init__()
-        
-from models.PC import PCGNN
-
-
-
 class IPCGNN(torch.nn.Module):
     def __init__(self, num_vertices, sensory_indices, internal_indices, 
                  lr_params, T, graph_structure, 
                  batch_size, 
                  use_learning_optimizer=False, weight_init="xavier", clamping=None, supervised_learning=False, 
-                 normalize_msg=False, 
                  debug=False, activation=None, log_tensorboard=True, wandb_logger=None, device='cpu'):
         super(IPCGNN, self).__init__()
         
@@ -139,7 +127,6 @@ class IPCGNN(torch.nn.Module):
         self.pc_conv1 = IPCGraphConv(num_vertices, sensory_indices, internal_indices, 
                                     lr_params, T, graph_structure, 
                                     batch_size, use_learning_optimizer, weight_init, clamping, supervised_learning, 
-                                    normalize_msg, 
                                     debug, activation, log_tensorboard, wandb_logger, device)
 
         self.original_weights = None  # Placeholder for storing the original weights
@@ -160,19 +147,6 @@ class IPCGNN(torch.nn.Module):
         
         return history
     
-    def trace(self, values=False, errors=False):
-        
-        self.pc_conv1.trace = {
-            "values": [], 
-            "errors": [],
-         }
-    
-        if values:
-            self.pc_conv1.trace_activity_values = True 
-            
-        if errors:
-            self.pc_conv1.trace_activity_errors = True  
-
 
     def Disable_connection(self, from_indices, to_indices):
         """
@@ -186,16 +160,13 @@ class IPCGNN(torch.nn.Module):
             # Make a copy of the original weights the first time a connection is disabled
             self.original_weights = self.pc_conv1.weights.clone()
 
-        masks = []
         for from_idx in from_indices:
             for to_idx in to_indices:
                 # Find the corresponding edge in the graph
                 edge_mask = (self.pc_conv1.edge_index_single_graph[0] == from_idx) & \
                             (self.pc_conv1.edge_index_single_graph[1] == to_idx)
                 # Temporarily set the weights of these edges to zero
-                masks.append(edge_mask)
-                self.pc_conv1.weights.data[edge_mask] = 0
-        return masks
+                self.pc_conv1.weights[edge_mask] = 0
 
     def enable_all_connections(self):
         """
@@ -252,6 +223,7 @@ class IPCGNN(torch.nn.Module):
             os.makedirs(path)
 
         W = self.pc_conv1.weights
+        b = self.pc_conv1.biases 
         graph = self.pc_conv1.edge_index
 
         # save to '"trained_models/weights.pt"' 
@@ -259,14 +231,12 @@ class IPCGNN(torch.nn.Module):
         torch.save(graph, f"{path}/graph.pt")
 
         if self.pc_conv1.use_bias:
-            b = self.pc_conv1.biases 
             torch.save(b, f"{path}/bias.pt")
 
 
     def query(self, method, data=None):
         
         print("Random init values of all internal nodes")
-
         data.x[:, 0][self.pc_conv1.internal_indices] = torch.rand(data.x[:, 0][self.pc_conv1.internal_indices].shape).to(self.pc_conv1.device)
 
 
@@ -351,23 +321,3 @@ class IPCGNN(torch.nn.Module):
         print("Inference completed.")
         return True
  
-
-# class IPCGNN(PCGNN):
-#     def __init__(self, *args, **kwargs):
-#         super(IPCGNN, self).__init__()
-        
-#         """ TODO: in_channels, hidden_channels, out_channels, """
-#         # INSIDE LAYERS CAN HAVE PREDCODING - intra-layer 
-#         self.pc_conv1 = IPCGraphConv(num_vertices, sensory_indices, internal_indices, 
-#                                     lr_params, T, graph_structure, 
-#                                     batch_size, use_learning_optimizer, weight_init, clamping, supervised_learning, 
-#                                     normalize_msg, 
-#                                     debug, activation, log_tensorboard, wandb_logger, device)
-
-# class IPCGNN(PCGNN):  # Inherit from PCGNN instead of torch.nn.Module
-#     def __init__(self, *args, **kwargs):
-#         # Call the parent class initializer
-#         super(IPCGNN, self).__init__(*args, **kwargs)
-
-#         # Override or modify self.pc_conv1 to use IPCGraphConv
-#         self.pc_conv1 = IPCGraphConv(*args, **kwargs)

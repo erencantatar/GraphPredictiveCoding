@@ -15,6 +15,26 @@ from models.MessagePassing import PredictionMessagePassing, ValueMessagePassing
 from helper.activation_func import set_activation
 
 
+import inspect
+
+def compare_class_args(class1, class2):
+    # Get the signature (i.e., the argument details) of both class initializers
+    sig1 = inspect.signature(class1.__init__)
+    sig2 = inspect.signature(class2.__init__)
+    
+    # Extract the parameter names, ignoring 'self'
+    params1 = [param.name for param in sig1.parameters.values() if param.name != 'self' and param.kind != param.VAR_POSITIONAL and param.kind != param.VAR_KEYWORD]
+    params2 = [param.name for param in sig2.parameters.values() if param.name != 'self' and param.kind != param.VAR_POSITIONAL and param.kind != param.VAR_KEYWORD]
+    
+    # Compare parameter sets
+    diff_class1 = set(params1) - set(params2)
+    diff_class2 = set(params2) - set(params1)
+
+    print(f"Arguments in {class1.__name__} but not in {class2.__name__}: {diff_class1}")
+    print(f"Arguments in {class2.__name__} but not in {class1.__name__}: {diff_class2}")
+
+
+
 def verify_prediction_message_passing(activation_functions):
 
     act = random.choice(list(activation_functions))
