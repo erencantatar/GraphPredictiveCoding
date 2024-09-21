@@ -1,5 +1,6 @@
 # ignore .job outputs
 *.out
+jobs/outputs/*
 
 # Ignore the data folder
 data/
