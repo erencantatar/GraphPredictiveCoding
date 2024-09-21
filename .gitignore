@@ -4,6 +4,9 @@ jobs/outputs/*
 
 # Ignore the data folder
 data/
+jobs/outputs/*
+jobs/outputs/PC/*
+jobs/outputs/IPC/*
 
 notebooks/trained_models/*/
 notebooks/trained_models/**/*
