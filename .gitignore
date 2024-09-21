@@ -1,6 +1,9 @@
 # ignore .job outputs
 *.out
 jobs/outputs/*
+jobs/outputs/*
+jobs/outputs/PC/*
+jobs/outputs/IPC/*
 
 # Ignore the data folder
 data/
