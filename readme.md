@@ -35,7 +35,8 @@ Foobar is a Python library for dealing with word pluralization.
 
 
 1. Load the model and graph params.
-2. ```python
+2. Training the model 
+```python
               
    from models.PC import PCGNN
 
@@ -53,7 +54,35 @@ Foobar is a Python library for dealing with word pluralization.
 
    model.pc_conv1.restart_activity()
    ```
-3. 
+3. Testing the model
+```python
+              
+   from eval_tasks import classification, denoise, occlusion, generation #, reconstruction
+
+   model.pc_conv1.restart_activity()
+
+
+   model.pc_conv1.set_mode("testing", task="reconstruction")
+   test_params = {
+    "model_dir": model_dir,
+    "T": 300,
+    "supervised_learning":True, 
+    "num_samples": 5,
+    "add_sens_noise": False,
+   }
+   MSE_values_occ = occlusion(test_loader, model, test_params)
+
+   #### 
+   test_params = {
+      "model_dir": model_dir,
+      "T":300,
+      "supervised_learning":False, 
+      "num_samples": 30,
+   }
+   model.pc_conv1.set_mode("testing", task="classification")
+   y_true, y_pred, accuracy_mean = classification(test_loader, model, test_params)
+
+   ```
 
 
 ## Usage

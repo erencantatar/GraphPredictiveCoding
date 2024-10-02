@@ -506,6 +506,7 @@ import seaborn as sns
 def classification(test_loader, model, 
                    test_params, num_samples=5):
         
+        
     model.pc_conv1.set_mode("testing", task="classification")
     
 

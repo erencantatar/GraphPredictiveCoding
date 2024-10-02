@@ -685,7 +685,7 @@ if earlystop:
     import shutil 
     shutil.rmtree(model_dir)
 
-    print("REmoved folder ", model_dir)
+    print("Removed folder ", model_dir)
 
     exit()
 
