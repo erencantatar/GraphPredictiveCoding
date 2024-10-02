@@ -85,26 +85,27 @@ Foobar is a Python library for dealing with word pluralization.
    ```
 
 
-## Usage
+## Trainig parameters
 1. ```python              
    python -u train.py \
-    --model_type PC \  # Specifies the model type (either "PC" or "IPC")
-    --normalize_msg False \  # No normalization during message passing
+    --mode \                  # training /experimenting to specify where to store the model,  
+    --model_type PC \         # Specifies the model type (either "PC" or "IPC")
+    --normalize_msg False \   # No normalization during message passing
     --dataset_transform none \  # No dataset transformations
     --numbers_list 0,1,3,4,5,6,7 \  # Specifies the classes of digits to be used
-    --N 20 \  # Use 20 instances per class
+    --N 20 \                  # Use 20 instances per class
     --supervision_label_val 10 \  # Supervision label strength
     --num_internal_nodes 1500 \  # Number of internal nodes in the graph
     --graph_type fully_connected \  # Specifies the graph type (e.g., fully connected)
-    --weight_init xavier \  # Weight initialization method (e.g., xavier, uniform)
-    --T 40 \  # Number of gradient descent iterations
-    --lr_values 0.001 \  # Learning rate for model parameters
-    --lr_weights 0.01 \  # Learning rate for weights
-    --activation_func swish \  # Activation function (e.g., swish, relu, tanh)
-    --epochs 20 \  # Number of training epochs
-    --batch_size 32 \  # Batch size for training
-    --seed 42 \  # Random seed for reproducibility
-    --optimizer False  # Use default optimizer
+    --weight_init xavier \    # Weight initialization method (e.g., xavier, uniform)
+    --T 40 \                  # Number of gradient descent iterations
+    --lr_values 0.001 \       # Learning rate for model parameters
+    --lr_weights 0.01 \       # Learning rate for weights
+    --activation_func swish \ # Activation function (e.g., swish, relu, tanh)
+    --epochs 20 \             # Number of training epochs
+    --batch_size 32 \         # Batch size for training
+    --seed 42 \               # Random seed for reproducibility
+    --optimizer False \       # Use default optimizer
    ```
 
 
