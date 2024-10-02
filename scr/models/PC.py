@@ -1,14 +1,12 @@
 import torch
 import torch.nn as nn
-import torch.optim as optim
 import torch.nn.init as init
 import numpy as np
 import math
 from torch_geometric.utils import to_dense_adj, degree
 from models.MessagePassing import PredictionMessagePassing, ValueMessagePassing
 from helper.activation_func import set_activation
-
-import os
+from helper.grokfast import gradfilter_ema, gradfilter_ma
 
 
 class PCGraphConv(torch.nn.Module): 
@@ -89,7 +87,7 @@ class PCGraphConv(torch.nn.Module):
         self.batchsize = batch_size
         # TODO use torch.nn.Parameter instead of torch.zeros
         
-        self.use_optimzers = use_learning_optimizer
+        self.use_optimizers = use_learning_optimizer
 
         self.grad_accum_method = "mean" 
         assert self.grad_accum_method in ["sum", "mean"]
@@ -136,19 +134,23 @@ class PCGraphConv(torch.nn.Module):
         # self.weights = torch.nn.Parameter(torch.ones(self.num_vertices, self.num_vertices))
         # self.initialize_weights(init_method="uniform")
 
-
+        # graph object is stored as one big graph with one edge_index vector with disconnected sub graphs as batch items 
         self.values_dummy = torch.nn.Parameter(torch.zeros(self.batchsize * self.num_vertices, device=self.device), requires_grad=True) # requires_grad=False)                
         self.values = None
         self.errors = None
         self.predictions = None  
 
+        self.optimizer_values, self.optimizer_weights = None, None 
+        
+        if self.use_optimizers:
+            
+            
 
-        if self.use_optimzers:
-            weight_decay = self.use_optimzers[0]
+            weight_decay = self.use_optimizers[0]
 
             print("------------Using optimizers for values/weights updating ------------")
-            # self.optimizer_weights = torch.optim.Adam([self.weights], lr=self.lr_weights, weight_decay=weight_decay) #weight_decay=1e-2)        
-            self.optimizer_weights = torch.optim.SGD([self.weights], lr=self.lr_weights)
+            self.optimizer_weights = torch.optim.Adam([self.weights], lr=self.lr_weights, weight_decay=weight_decay) #weight_decay=1e-2)        
+            # self.optimizer_weights = torch.optim.SGD([self.weights], lr=self.lr_weights)
 
             # self.optimizer_weights = torch.optim.SGD([self.weights], lr=self.gamma) #weight_decay=1e-2)
 
@@ -156,7 +158,11 @@ class PCGraphConv(torch.nn.Module):
             
             self.weights.grad = torch.zeros_like(self.weights)
             self.values_dummy.grad = torch.zeros_like(self.values_dummy)
-            
+
+            # for grokfast 
+            self.grads_values  = None
+            self.grads_weights = None
+ 
         
         self.effective_learning = {}
         self.effective_learning["w_mean"] = []
@@ -300,7 +306,94 @@ class PCGraphConv(torch.nn.Module):
             init.kaiming_normal_(self.weights, nonlinearity='relu')
         else:
             raise ValueError(f"Unknown init_method: {init_method}")
+    
+    
+    def copy_node_values_to_dummy(self, node_values):
+        """
+        Copy node values from the graph to the dummy parameter.
+        Args:
+            node_values (torch.Tensor): The node values from the graph's node features.
+        """
+
+        self.values_dummy.data = node_values.view(-1).detach().clone()  # Copy node values into dummy parameter
         
+    def copy_dummy_to_node_values(self):
+        """
+        Copy updated dummy parameter values back to the graph's node features.
+        Args:
+            node_values (torch.Tensor): The node values to be updated in the graph's node features.
+        """
+        self.data.x[self.nodes_2_update, 0] = self.values_dummy.data[self.nodes_2_update].unsqueeze(-1).detach()  # Detach to avoid retaining the computation graph
+        # node_values.data = self.values_dummy.view(node_values.shape).detach()  
+
+    def gradient_descent_update(self, type, parameter, delta, learning_rate, nodes_2_update, optimizer=None, use_optimizer=False):
+        """
+        Perform a gradient descent update on a parameter (weights or values).
+
+        Args:
+            type (str): either 'values' or 'weights' if we want specific dynamics or either parameter update. 
+            parameter (torch.nn.Parameter): The parameter to be updated (weights or values).
+            delta (torch.Tensor): The computed delta (change) for the parameter.
+            learning_rate (float): The learning rate to be applied to the delta.
+            optimizer (torch.optim.Optimizer, optional): Optimizer to be used for updates (if specified).
+            use_optimizer (bool): Whether to use the optimizer for updating the parameter.
+            nodes_2_update (torch.Tensor, optional): Indices of the nodes to update (for partial updates).
+        """
+
+        self.use_grokfast = True  
+
+        # MAYBE SHOULD NOT DO GROKFAST FOR BOTH VALUE NODE UPDATES AND WEIGHTS UPDATE (ONLY this one) 
+        self.grokfast_type = "ema"
+        """ 
+            Grokfast-EMA (with alpha = 0.8, lamb = 0.1) achieved 22x faster generalization compared to the baseline.
+            Grokfast-MA (with window size = 100, lamb = 5.0) achieved slower generalization improvement compared to EMA, but was still faster than the baseline. 
+        """
+
+        if self.use_grokfast:
+            if type == "values":
+                self.grads  = self.grads_values
+                param_type = "values_dummy"
+            else:    
+                self.grads  = self.grads_weights
+                param_type = "weights"
+
+            params = {n: p for n, p in self.named_parameters() if type in n}  # Filter only the weight parameters
+
+            # Apply Grokfast filters before optimizer step
+            if self.grokfast_type == 'ema':
+                self.tmp = gradfilter_ema(self, grads=self.grads, alpha=0.8, lamb=0.1, param_type=param_type)
+            elif self.grokfast_type == 'ma':
+                self.tmp = gradfilter_ma(self, grads=self.grads, window_size=100, lamb=5.0, filter_type='mean', param_type=param_type)
+
+            if type == "values":
+                self.grads_values = self.tmp
+            else:
+                self.grads_weights = self.tmp
+
+
+        if use_optimizer and optimizer:
+            # Using optimizer to update the parameter
+            optimizer.zero_grad()
+            
+            if parameter.grad is None:
+                parameter.grad = torch.zeros_like(parameter)
+
+            if nodes_2_update == "all":
+                parameter.grad = delta  # Apply full delta to the parameter
+            else:
+                parameter.grad[nodes_2_update] = delta[nodes_2_update]  # Update only specific nodes
+
+            optimizer.step()
+        else:
+            # Manually update the parameter using gradient descent
+            if nodes_2_update == "all":
+                parameter.data += learning_rate * delta
+            else:    
+                parameter.data[nodes_2_update] += learning_rate * delta[nodes_2_update]
+            
+
+
+
     # def update(self, aggr_out, x):
     def update_values(self, data):
 
@@ -321,15 +414,30 @@ class PCGraphConv(torch.nn.Module):
     
         self.helper_GPU(self.print_GPU)
 
-
         with torch.no_grad():
 
             delta_x = self.values_mp(self.data.x.to(self.device), self.data.edge_index.to(self.device), weights_batched_graph, norm=self.norm.to(self.device)).squeeze()
-        
             delta_x = delta_x.detach()
         
+        # self.copy_node_values_to_dummy(self.values)
+        self.copy_node_values_to_dummy(self.data.x[:, 0])
+                
+        # Use the gradient descent update for updating values
+        self.gradient_descent_update(
+            type="values",
+            parameter=self.values_dummy,  # Assuming values are in self.data.x[:, 0]
+            delta=delta_x,
+            learning_rate=self.lr_values,
+            nodes_2_update=self.nodes_2_update,  # Mandatory
+            optimizer=self.optimizer_values if self.use_optimizers else None,
+            use_optimizer=self.use_optimizers
+        )
 
-    
+        self.copy_dummy_to_node_values()
+        # self.data.x[self.nodes_2_update, 0] = self.values_dummy.data[self.nodes_2_update].unsqueeze(-1).detach()  # Detach to avoid retaining the computation graph
+
+
+
         # delta_x = self.values_mp(self.data.x.to(self.device), self.data.edge_index.to(self.device), self.weights)
 
         # self.values.data[self.nodes_2_update, :] += delta_x[self.nodes_2_update, :]
@@ -387,25 +495,25 @@ class PCGraphConv(torch.nn.Module):
         # https://chatgpt.com/share/54c649d0-e7de-48be-9c00-442bef5a24b8
         # This confirms that the optimizer internally performs the subtraction of the gradient (grad), which is why you should assign theta.grad = grad rather than theta.grad = -grad. If you set theta.grad = -grad, it would result in adding the gradient to the weights, which would maximize the loss instead of minimizing it.
 
-        if self.use_optimzers:
-            self.optimizer_values.zero_grad()
-            if self.values_dummy.grad is None:
-                self.values_dummy.grad = torch.zeros_like(self.values_dummy)
-            else:
-                self.values_dummy.grad.zero_()  # Reset the gradients to zero
+        # if self.use_optimizers:
+        #     self.optimizer_values.zero_grad()
+        #     if self.values_dummy.grad is None:
+        #         self.values_dummy.grad = torch.zeros_like(self.values_dummy)
+        #     else:
+        #         self.values_dummy.grad.zero_()  # Reset the gradients to zero
             
-            # print("ai ai ")
-            self.values_dummy.grad[self.nodes_2_update] = delta_x[self.nodes_2_update]
-            self.optimizer_values.step()
+        #     # print("ai ai ")
+        #     self.values_dummy.grad[self.nodes_2_update] = delta_x[self.nodes_2_update]
+        #     self.optimizer_values.step()
 
-            # print(self.data.x[self.nodes_2_update, 0].shape)
-            # print(self.values_dummy.data[self.nodes_2_update].shape)
-            self.data.x[self.nodes_2_update, 0] = self.values_dummy.data[self.nodes_2_update].unsqueeze(-1).detach()  # Detach to avoid retaining the computation graph
-            # self.values[self.nodes_2_update] = self.values_dummy.data
+        #     # print(self.data.x[self.nodes_2_update, 0].shape)
+        #     # print(self.values_dummy.data[self.nodes_2_update].shape)
+        #     self.data.x[self.nodes_2_update, 0] = self.values_dummy.data[self.nodes_2_update].unsqueeze(-1).detach()  # Detach to avoid retaining the computation graph
+        #     # self.values[self.nodes_2_update] = self.values_dummy.data
     
-        else:
-            # self.values_dummy.data[self.nodes_2_update] += self.gamma * delta_x[self.nodes_2_update].detach() 
-            self.data.x[self.nodes_2_update, 0] += self.gradients_minus_1 * self.lr_values * delta_x[self.nodes_2_update].unsqueeze(-1).detach()  # Detach to avoid retaining the computation graph
+        # else:
+        #     # self.values_dummy.data[self.nodes_2_update] += self.gamma * delta_x[self.nodes_2_update].detach() 
+        #     self.data.x[self.nodes_2_update, 0] += self.gradients_minus_1 * self.lr_values * delta_x[self.nodes_2_update].unsqueeze(-1).detach()  # Detach to avoid retaining the computation graph
         
 
 
@@ -449,14 +557,13 @@ class PCGraphConv(torch.nn.Module):
      
         # old 
         # self.data.x[self.nodes_2_update, 0] += self.lr_values * delta_x[self.nodes_2_update, :].detach()  # Detach to avoid retaining the computation graph
-        
-
+    
 
         # Calculate the effective learning rate
-        effective_lr = self.lr_values * delta_x
-        self.effective_learning["v_mean"].append(effective_lr.mean().item())
-        self.effective_learning["v_max"].append(effective_lr.max().item())
-        self.effective_learning["v_min"].append(effective_lr.min().item())
+        # effective_lr = self.lr_values * delta_x
+        # self.effective_learning["v_mean"].append(effective_lr.mean().item())
+        # self.effective_learning["v_max"].append(effective_lr.max().item())
+        # self.effective_learning["v_min"].append(effective_lr.min().item())
 
 
 
@@ -572,7 +679,7 @@ class PCGraphConv(torch.nn.Module):
             self.values_dummy.data.zero_()  # Zero out values_dummy without creating a new tensor
 
         # Reset optimizer gradients if needed
-        if self.use_optimzers:
+        if self.use_optimizers:
             self.optimizer_values.zero_grad()
             self.optimizer_weights.zero_grad()
 
@@ -710,6 +817,8 @@ class PCGraphConv(torch.nn.Module):
         # random inint value of internal nodes
         data.x[:, 0][self.internal_indices] = torch.rand(data.x[:, 0][self.internal_indices].shape).to(self.device)
 
+        self.copy_node_values_to_dummy(self.data.x[:, 0])
+
         # random inint errors of internal nodes
         # data.x[:, 1][self.internal_indices] = torch.rand(data.x[:, 1][self.internal_indices].shape).to(self.device)
 
@@ -788,46 +897,55 @@ class PCGraphConv(torch.nn.Module):
         
         # print("self.delta_w shape", delta_w.shape)
 
-        if self.use_optimzers:
+        self.gradient_descent_update(
+            type="weights",
+            parameter=self.weights,
+            delta=delta_w,
+            learning_rate=self.lr_weights,
+            nodes_2_update="all",               # Update certain nodes values/weights 
+            optimizer=self.optimizer_weights if self.use_optimizers else None,
+            use_optimizer=self.use_optimizers, 
+        )
             
-            # self.optimizer_weights.zero_grad()             self.optimizer_values.grad = torch.zeros_like(self.values.grad)  # .zero_grad()
-            # self.weights.grad = torch.zeros_like(self.weights.grad)  # .zero_grad()
-            self.optimizer_weights.zero_grad()
-            self.weights.grad = delta_w
-            self.optimizer_weights.step()
+        # if self.use_optimzers:
+            
+        #     # self.optimizer_weights.zero_grad()             self.optimizer_values.grad = torch.zeros_like(self.values.grad)  # .zero_grad()
+        #     # self.weights.grad = torch.zeros_like(self.weights.grad)  # .zero_grad()
+        #     self.optimizer_weights.zero_grad()
+        #     self.weights.grad = delta_w
+        #     self.optimizer_weights.step()
 
+        #     # self.optimizer_weights.zero_grad()
+        #     # # Accumulate gradients
+        #     # self.weights.backward(delta_w)
+        #     # # Optional: Gradient clipping
+        #     # torch.nn.utils.clip_grad_norm_(self.weights, max_norm=1.0)
+        #     # # Update weights
+        #     # self.optimizer_weights.step()
 
-            # self.optimizer_weights.zero_grad()
-            # # Accumulate gradients
-            # self.weights.backward(delta_w)
-            # # Optional: Gradient clipping
-            # torch.nn.utils.clip_grad_norm_(self.weights, max_norm=1.0)
-            # # Update weights
-            # self.optimizer_weights.step()
+        # else:
+        #     print(self.lr_weights, delta_w.shape)
+        #     print(self.weights.data.shape)
 
-        else:
-            print(self.lr_weights, delta_w.shape)
-            print(self.weights.data.shape)
-
-            self.weights.data += self.gradients_minus_1 * (self.lr_weights * delta_w)
-            # self.weights.data += self.lr_weights * self.delta_w
+        #     self.weights.data += self.gradients_minus_1 * (self.lr_weights * delta_w)
+        #     # self.weights.data += self.lr_weights * self.delta_w
         
-            # self.weights.data = (1 - self.damping_factor) * self.w_t_min_1 + self.damping_factor * (self.weights.data)
+        #     # self.weights.data = (1 - self.damping_factor) * self.w_t_min_1 + self.damping_factor * (self.weights.data)
         
-            self.w_t_min_1 = self.weights.data.clone()
+        #     self.w_t_min_1 = self.weights.data.clone()
         
-        # Calculate the effective learning rate
-        effective_lr = self.lr_weights * delta_w
+        # # Calculate the effective learning rate
+        # effective_lr = self.lr_weights * delta_w
 
 
-        self.effective_learning["w_mean"].append(effective_lr.mean().item())
-        self.effective_learning["w_max"].append(effective_lr.max().item())
-        self.effective_learning["w_min"].append(effective_lr.min().item())
+        # self.effective_learning["w_mean"].append(effective_lr.mean().item())
+        # self.effective_learning["w_max"].append(effective_lr.max().item())
+        # self.effective_learning["w_min"].append(effective_lr.min().item())
 
-        print("leeen", len(self.effective_learning["w_mean"]))
+        # print("leeen", len(self.effective_learning["w_mean"]))
 
-        ## clamp weights to be above zero
-        print("--------------------CLAMP THE WEIGHTS TO BE ABOVE ZERO-----------")
+        # ## clamp weights to be above zero
+        # print("--------------------CLAMP THE WEIGHTS TO BE ABOVE ZERO-----------")
         # self.weights.data = torch.clamp(self.weights.data, min=0)
 
         print("----------------NO CLAMPING----------------")

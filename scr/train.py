@@ -681,7 +681,11 @@ if earlystop:
     wandb.log({"crashed": True})
 
     # log that crashed 
-    
+    # remove the folder to save storage 
+    import shutil 
+    shutil.rmtree(model_dir)
+
+    print("REmoved folder ", model_dir)
 
     exit()
 
