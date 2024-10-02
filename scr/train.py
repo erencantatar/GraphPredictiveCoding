@@ -47,7 +47,7 @@ from helper.activation_func import activation_functions
 parser = argparse.ArgumentParser(description='Train a model with specified parameters.')
 
 # Training mode 
-parser.add_argument('--mode', choices=['training', 'experimenting'], required=True,  help="Mode")
+parser.add_argument('--mode', choices=['training', 'experimenting'], required=True,  help="Mode for training the model or testing new features.")
 
 # -----dataset----- 
 parser.add_argument('--dataset_transform', nargs='*', default=[], help='List of transformations to apply.', choices=['normalize_min1_plus1', 'normalize_mnist_mean_std', 'random_rotation', 'none'])
@@ -183,7 +183,7 @@ graph_params = {
 if graph_params["graph_type"]["name"] == "stochastic_block":
     
     # override internal nodes if doing clustering
-    graph_params["internal_nodes"] == (graph_params["graph_type"]["params"]["num_communities"] * graph_params["graph_type"]["params"]["community_size"])
+    graph_params["internal_nodes"] = (graph_params["graph_type"]["params"]["num_communities"] * graph_params["graph_type"]["params"]["community_size"])
 
 from dataset import CustomGraphDataset
 
@@ -402,9 +402,11 @@ GRAPH_TYPE = graph_params["graph_type"]["name"]    #"fully_connected"
 date_hour = datetime.now().strftime("%Y-%m-%d_%H_%M_%S")
 
 if args.mode == "experimenting":
-    model_dir = f"trained_models/experimenting/{GRAPH_TYPE}/{model_params_name}_{date_hour}/"
-else:
+    model_dir = f"trained_models/experimenting/{args.model_type.lower()}/{GRAPH_TYPE}/{model_params_name}_{date_hour}/"
+elif args.mode == "training":
     model_dir = f"trained_models/{args.model_type.lower()}/{GRAPH_TYPE}/{model_params_name}_{date_hour}/"
+else:
+    raise ValueError("Invalid mode")
 
 # Define the directory path
 print("Saving model, params, graph_structure to :", model_dir)
@@ -674,7 +676,7 @@ if earlystop:
     print("Stopping program-------")
     # Open the file in write mode
     with open('trained_models/crashed_training.txt', 'a') as file:
-        file.write(f"{model_params_name_full}\n")
+        file.write(f"{model_dir}\n")
     # Log in wandb that the run crashed
     wandb.log({"crashed": True})
 
@@ -685,7 +687,7 @@ if earlystop:
 
 # If training completed successfully, log to the finished runs file
 with open('trained_models/finished_training.txt', 'a') as file:
-    file.write(f"{model_params_name_full}\n")
+    file.write(f"{model_dir}\n")
 
 save_path = os.path.join(model_dir, 'parameter_info')
 model.save_weights(path=save_path)

@@ -28,7 +28,8 @@ echo "Running simple training"
 
 # Parameter arrays
 # graph_types=("fully_connected" "fully_connected_w_self" "fully_connected_no_sens2sup" "stochastic_block")
-graph_types=("fully_connected_no_sens2sup" "stochastic_block")
+# graph_types=("fully_connected_no_sens2sup" "stochastic_block" "fully_connected_w_self")
+graph_types=("stochastic_block")
 batch_sizes=(1 8)
 weight_inits=("0.01" "0.001" "uniform" "0.0001")
 Ts=(10 40 200)

@@ -29,16 +29,15 @@ graph_type_options = {
         },
         "stochastic_block": {
             "params": {
-                "num_communities": 50,      # Number of communities
-                "community_size": 30,       # Size of each community
+                "num_communities": 100,      # Number of communities
+                "community_size": 80,       # Size of each community
                 "p_intra": 0.1,             # Probability of edges within the same community
                 "p_inter": 0.1,             # Probability of edges between different communities
-                "remove_sens_2_sens": True, 
-                "remove_sens_2_sup": True
+                "remove_sens_2_sens": False, 
+                "remove_sens_2_sup": False, 
                 }
         },
         
-    
 
         "stochastic_block_w_supvision_clusters": {
             "params": {
@@ -113,6 +112,9 @@ class GraphBuilder:
 
         self.edge_index = []
 
+
+        print(f"Creating graph structure for {self.graph_type["name"]}")
+
         if self.graph_type["name"] == "fully_connected":
             self.fully_connected(self_connection=False)
         elif self.graph_type["name"] == "fully_connected_w_self":
@@ -128,13 +130,12 @@ class GraphBuilder:
         elif self.graph_type["name"] == "fully_connected_no_sens2sup":
             self.fully_connected_no_sens2sup()
         
-        # 
-
-
 
         # Convert edge_index to tensor only if it's not already a tensor
         if not isinstance(self.edge_index, torch.Tensor):
             self.edge_index = torch.tensor(self.edge_index, dtype=torch.long)
+        
+        print("graph created")
 
         # Transpose if edge_index was manually created
         if self.graph_type["name"] in ["fully_connected", "fully_connected_w_self", "fully_connected_no_sens2sup", "barabasi"]:
@@ -196,7 +197,9 @@ class GraphBuilder:
         # Given code parameters; else take default 40, 50
         num_communities = self.graph_params.get("num_communities", 40)  # Example block sizes
         community_size = self.graph_params.get("community_size",   50)
-
+        p_intra = self.graph_params.get("p_intra", 0.5)  # Probability of edges within the same community
+        p_inter = self.graph_params.get("p_inter", 0.1)  # Probability of edges between different communities
+        
         print(num_communities, community_size,  len(self.num_internal_nodes) )
         assert (num_communities * community_size) == len(self.num_internal_nodes), "must be equal"
         # Sizes of communitieser
@@ -212,9 +215,7 @@ class GraphBuilder:
         community_sizes = sizes
 
         num_communities = len(community_sizes)
-        p_intra = 0.5  # Probability of edges within the same community
-        p_inter = 0.1  # Probability of edges between different communities
-
+  
         # Create the stochastic block model graph
         p = np.full((num_communities, num_communities), p_inter)
         np.fill_diagonal(p, p_intra)
@@ -233,8 +234,11 @@ class GraphBuilder:
             p[0, -1] = 0 
             p[-1, 0] = 0 
 
+        print("Got the sizes", sizes)
         G = nx.stochastic_block_model(sizes, p, directed=True)
-     
+        
+        print("Created the graph stochastic_block_model") 
+
         # Convert the graph to an adjacency matrix
         # adj_matrix = nx.adjacency_matrix(G).todense()
 
@@ -244,7 +248,7 @@ class GraphBuilder:
         # Extract the edge_index tensor
         self.edge_index = data.edge_index
 
-        print("Creating Stochastic Block Model graph")
+        print("done creating Stochastic Block Model graph")
 
     def stochastic_block_w_supervision_clusters(self):
 
