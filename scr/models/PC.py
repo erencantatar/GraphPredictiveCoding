@@ -349,6 +349,7 @@ class PCGraphConv(torch.nn.Module):
             Grokfast-MA (with window size = 100, lamb = 5.0) achieved slower generalization improvement compared to EMA, but was still faster than the baseline. 
         """
 
+        ### -------------------- optional --------------------
         if self.use_grokfast:
             if type == "values":
                 self.grads  = self.grads_values
@@ -369,6 +370,7 @@ class PCGraphConv(torch.nn.Module):
                 self.grads_values = self.tmp
             else:
                 self.grads_weights = self.tmp
+        ### -------------------- optional --------------------
 
 
         if use_optimizer and optimizer:
