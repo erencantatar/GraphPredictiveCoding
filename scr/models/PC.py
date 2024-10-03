@@ -61,7 +61,6 @@ class PCGraphConv(torch.nn.Module):
         }
 
 
-        self.use_bias = False 
         self.gradients_minus_1 = 1 # or -1 
         # self.gradients_minus_1 = -1 # or -1 #NEVER 
 
@@ -104,14 +103,25 @@ class PCGraphConv(torch.nn.Module):
         self.weights = torch.nn.Parameter(torch.zeros(self.edge_index_single_graph.size(1), device=self.device))
         # init.uniform_(self.weights.data, -k, k)
         
+        self.use_bias = True 
+        
+        if self.use_bias:
+            self.biases = torch.nn.Parameter(torch.zeros(self.batchsize * self.num_vertices, device=self.device), requires_grad=False) # requires_grad=False)                
+            # TODO 
+            print("INIT BIAS WITH THE MEAN OF THE DATASET???")
+            # self.biases..data.fill_(0.01) 
+            # self.biases.data = torch.full_like(self.biases.data, 0.01)
+
         if type(self.weight_init) == float:
             # VAL = 0.001
             VAL = weight_init
             print("VAL VS K", VAL, k)
             self.weights.data = torch.full_like(self.weights.data, VAL)
+            self.biases.data = torch.full_like(self.biases.data, VAL)
 
         if self.weight_init == "uniform":
             nn.init.uniform_(self.weights, -k, k)
+            nn.init.uniform_(self.biases, -k, k)
 
         self.w_t_min_1 = self.weights.clone().detach()
 
@@ -144,8 +154,6 @@ class PCGraphConv(torch.nn.Module):
         
         if self.use_optimizers:
             
-            
-
             weight_decay = self.use_optimizers[0]
 
             print("------------Using optimizers for values/weights updating ------------")
@@ -340,7 +348,7 @@ class PCGraphConv(torch.nn.Module):
             nodes_2_update (torch.Tensor, optional): Indices of the nodes to update (for partial updates).
         """
 
-        self.use_grokfast = True  
+        self.use_grokfast = False 
 
         # MAYBE SHOULD NOT DO GROKFAST FOR BOTH VALUE NODE UPDATES AND WEIGHTS UPDATE (ONLY this one) 
         self.grokfast_type = "ema"
@@ -583,6 +591,14 @@ class PCGraphConv(torch.nn.Module):
             # self.predictions = self.prediction_mp(self.data.x.to(self.device), self.data.edge_index.to(self.device), self.weights)
 
             self.predictions = self.predictions.detach()
+
+
+            if self.use_bias:
+                # print(self.predictions.shape)
+                # print(self.biases.shape)
+                self.predictions += self.biases.unsqueeze(-1)
+
+
 
         return self.predictions
 
@@ -909,6 +925,13 @@ class PCGraphConv(torch.nn.Module):
             use_optimizer=self.use_optimizers, 
         )
             
+        if self.use_bias:
+            # print((self.lr_weights * self.errors[self.internal_indices].detach()).shape)
+            # print(self.biases.data[self.internal_indices].shape)
+
+            self.biases.data[self.internal_indices] += (self.lr_weights * self.errors[self.internal_indices].detach()).squeeze()
+
+
         # if self.use_optimzers:
             
         #     # self.optimizer_weights.zero_grad()             self.optimizer_values.grad = torch.zeros_like(self.values.grad)  # .zero_grad()
