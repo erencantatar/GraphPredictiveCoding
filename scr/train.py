@@ -449,25 +449,33 @@ run = wandb.init(
     # tags=["param_search", str(model_params["weight_init"]), model_params["activation"],  *learning_params['dataset_transform']], 
     # Track hyperparameters and run metadata
     config={
-        "supervised_learning": (graph_params["supervised_learning"]),
-
-        "lr_params": (args.lr_values, args.lr_weights), 
+        # Model-related parameters
+        "model_type": args.model_type.lower(),
         "T": args.T,
+        "weight_init": model_params["weight_init"],  # xavier, 'uniform', 'based_on_f', 'zero', 'kaiming'
+        "activation": model_params["activation"],
+        "clamping": model_params["clamping"],  # (0, torch.inf) or 'None'
+        "use_learning_optimizer": model_params["use_learning_optimizer"],  # False or optimizer settings
+        
+        # Graph-related parameters
+        "graph_structure": args.graph_type,
+        "supervised_learning": graph_params["supervised_learning"],
 
-        "graph_structure": args.graph_type, 
-        "model_type": args.model_type.lower(), 
-        # "graph_structure": custom_dataset_train.edge_index_tensor, 
-        # "include_self_connections": dataset_params['include_self_connections'],
-        "batch_size": train_loader.batch_size, 
-        "use_learning_optimizer": model_params["use_learning_optimizer"],    # False or [0], [(weight_decay=)]
-        "weight_init":  model_params["weight_init"],   # xavier, 'uniform', 'based_on_f', 'zero', 'kaiming'
-        "activation":  model_params["activation"],  
-        "clamping": model_params["clamping"], # (0, torch.inf) or 'None' 
+        # Learning-related parameters
+        "lr_values": args.lr_values,
+        "lr_weights": args.lr_weights,
+        "optimizer": args.optimizer,  # Add the optimizer type here (False or float)
+        "epochs": args.epochs,  # Track the number of epochs
 
-        "numbers_list":         dataset_params["numbers_list"],    
-        "N":                    dataset_params['N'],     # taking the first n instances of each digit or use "all"
-
+        # Dataset and batching
+        "batch_size": train_loader.batch_size,
+        "numbers_list": dataset_params["numbers_list"],
+        "N": dataset_params['N'],  # Use first n instances of each digit or 'all'
         "transform": learning_params['dataset_transform'],
+        
+        # Other run details
+        "seed": args.seed,  # Track the random seed for reproducibility
+        "checkpoint_dir": model_dir,  # Track where model checkpoints are saved
     },
 )
 
@@ -606,8 +614,11 @@ for epoch in range(args.epochs):
 
             print(f"------------------ Epoch {epoch}: Batch {idx} ------------------")
 
-            # Periodic checkpoint saving and plotting
-
+            # if internal_energy_mean or sensory_energy_mean is nan or inf, break
+            if not np.isfinite(history_epoch["internal_energy_mean"]) or not np.isfinite(history_epoch["sensory_energy_mean"]):
+                print("Energy is not finite, stopping training")
+                earlystop = True
+                break
 
             # Early stopping based on loss change
             if abs(last_loss - history_epoch["internal_energy_mean"]) < threshold_earlystop:
@@ -674,19 +685,22 @@ plot_model_weights(model, GRAPH_TYPE, model_dir=save_path)
 # Append to the appropriate file based on whether the training crashed or completed successfully
 if earlystop:
     print("Stopping program-------")
-    # Open the file in write mode
-    with open('trained_models/crashed_training.txt', 'a') as file:
-        file.write(f"{model_dir}\n")
-    # Log in wandb that the run crashed
+
+    # Log in WandB that the run crashed
     wandb.log({"crashed": True})
 
-    # log that crashed 
-    # remove the folder to save storage 
-    import shutil 
+    # Finish WandB logging first
+    try:
+        wandb.finish()
+    except Exception as e:
+        print(f"WandB logging failed: {e}")
+
+    # Now remove the folder to save storage
+    import shutil
     shutil.rmtree(model_dir)
-
+    
     print("Removed folder ", model_dir)
-
+    
     exit()
 
 # If training completed successfully, log to the finished runs file
@@ -695,6 +709,9 @@ with open('trained_models/finished_training.txt', 'a') as file:
 
 save_path = os.path.join(model_dir, 'parameter_info')
 model.save_weights(path=save_path)
+
+wandb.log({"run_complete": True})
+wandb.log({"model_dir": model_dir})
 
 # Save model weights 
 ######################################################################################################### 

@@ -7,7 +7,7 @@ from torch_geometric.utils import to_dense_adj, degree
 from models.MessagePassing import PredictionMessagePassing, ValueMessagePassing
 from helper.activation_func import set_activation
 from helper.grokfast import gradfilter_ema, gradfilter_ma
-
+import os 
 
 class PCGraphConv(torch.nn.Module): 
     def __init__(self, num_vertices, sensory_indices, internal_indices, 
@@ -103,7 +103,7 @@ class PCGraphConv(torch.nn.Module):
         self.weights = torch.nn.Parameter(torch.zeros(self.edge_index_single_graph.size(1), device=self.device))
         # init.uniform_(self.weights.data, -k, k)
         
-        self.use_bias = True 
+        self.use_bias = False 
         
         if self.use_bias:
             self.biases = torch.nn.Parameter(torch.zeros(self.batchsize * self.num_vertices, device=self.device), requires_grad=False) # requires_grad=False)                
@@ -117,11 +117,16 @@ class PCGraphConv(torch.nn.Module):
             VAL = weight_init
             print("VAL VS K", VAL, k)
             self.weights.data = torch.full_like(self.weights.data, VAL)
-            self.biases.data = torch.full_like(self.biases.data, VAL)
+
+            if self.use_bias:
+                self.biases.data = torch.full_like(self.biases.data, VAL)
 
         if self.weight_init == "uniform":
             nn.init.uniform_(self.weights, -k, k)
-            nn.init.uniform_(self.biases, -k, k)
+
+            if self.use_bias:
+    
+                nn.init.uniform_(self.biases, -k, k)
 
         self.w_t_min_1 = self.weights.clone().detach()
 

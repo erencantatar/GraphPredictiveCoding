@@ -30,6 +30,9 @@ Foobar is a Python library for dealing with word pluralization.
 - `train.py` - Script to train the model using the defined datasets and parameters.
 
 
+## Logs
+
+1. [Wandb logs](https://wandb.ai/etatar-atdamen/PredCod?nw=nwuseretataratdamen)
 
 ## Example usage 
 
