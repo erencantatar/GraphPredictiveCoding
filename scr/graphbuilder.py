@@ -10,9 +10,6 @@ import numpy as np
 import torch 
 
 
-        # self.graph_params = graph_type["params"]
-
-
 graph_type_options = {
         "fully_connected": {
             "params": {
@@ -34,11 +31,7 @@ graph_type_options = {
             }
         }, 
 
-        "barabasi": {
-            "params": {
-                "num_edges_to_attach": 5  # Example parameter for Barabasi graph
-            }
-        },
+        
         "stochastic_block": {
             "params": {
                 "num_communities": 50,      # Number of communities
@@ -61,11 +54,13 @@ graph_type_options = {
                 "remove_sens_2_sup": True
                 }
         },
-        
 
+        "barabasi": {
+            "params": {
+                "num_edges_to_attach": 5  # Example parameter for Barabasi graph
+            }
+        },
     }
-
-
 
 
 class GraphBuilder:

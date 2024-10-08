@@ -168,6 +168,9 @@ dataset_params = {
 print("------------------Importing Graph Params ---------------- ")
 from graphbuilder import graph_type_options
 
+
+
+
 # Define the graph type
 # Options: "fully_connected", "fully_connected_w_self", "barabasi", "stochastic_block", "fully_connected_no_sens2sup"
 graph_params = {
@@ -211,8 +214,6 @@ train_loader = DataLoader(custom_dataset_train,
                           generator=generator_seed,
                           num_workers=1
                           )
-
-
 
 
 NUM_SENSORY = 28*28  # 10
@@ -400,6 +401,9 @@ save_model_params = False
 GRAPH_TYPE = graph_params["graph_type"]["name"]    #"fully_connected"
 # GRAPH_TYPE = "test"    #"fully_connected"
 
+# Fetch the graph parameters based on the selected graph type
+
+
 date_hour = datetime.now().strftime("%Y-%m-%d_%H_%M_%S")
 
 if args.mode == "experimenting":
@@ -460,6 +464,7 @@ run = wandb.init(
         
         # Graph-related parameters
         "graph_structure": args.graph_type,
+        **graph_params["graph_type"]["params"],  # Merge the dynamic graph parameters
         "supervised_learning": graph_params["supervised_learning"],
 
         # Learning-related parameters
