@@ -165,6 +165,7 @@ dataset_params = {
     "supervision_label_val":    args.supervision_label_val,         # Strength of label signal within the graph. MNIST ~0-1, label_vector[label] = self.supervision_label_val
 } 
 
+print("------------------Importing Graph Params ---------------- ")
 from graphbuilder import graph_type_options
 
 # Define the graph type

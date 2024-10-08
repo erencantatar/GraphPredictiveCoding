@@ -1,25 +1,37 @@
+import os 
+import json 
 
-from torch_geometric.utils import from_networkx, to_dense_adj
+# from torch_geometric.utils import from_networkx, to_dense_adj
 import networkx as nx
-import matplotlib.pyplot as plt
-
-from torch_geometric.data import Data
-from torch_geometric.nn import MessagePassing
+# import matplotlib.pyplot as plt
+# from torch_geometric.data import Data
+# from torch_geometric.nn import MessagePassing
 import numpy as np 
 import torch 
 
 
+        # self.graph_params = graph_type["params"]
+
 
 graph_type_options = {
         "fully_connected": {
-            "params": None
+            "params": {
+                "remove_sens_2_sens": False, 
+                "remove_sens_2_sup": False, 
+            }
         },
         "fully_connected_w_self": {
-            "params": None
+            "params": {
+                "remove_sens_2_sens": False, 
+                "remove_sens_2_sup": False, 
+            }
         },
 
         "fully_connected_no_sens2sup": {
-            "params": None
+            "params": {
+                "remove_sens_2_sens": False, 
+                "remove_sens_2_sup": False, 
+            }
         }, 
 
         "barabasi": {
@@ -56,10 +68,6 @@ graph_type_options = {
 
 
 
-
-
-
-
 class GraphBuilder:
 
     def __init__(self, graph_type_options, internal_nodes, supervised_learning, graph_type):
@@ -78,9 +86,13 @@ class GraphBuilder:
         print("--------Init base indices for sensory, internal, supervision nodes--------")
         
         self.SENSORY_NODES = 784
-        self.num_sensor_nodes = range(self.SENSORY_NODES)
+        # self.num_sensor_nodes = range(self.SENSORY_NODES)
+        # self.num_internal_nodes = range(self.SENSORY_NODES, self.SENSORY_NODES + self.NUM_INTERNAL_NODES)
+
+        self.num_sensor_nodes = list(range(self.SENSORY_NODES))
+        self.num_internal_nodes = list(range(self.SENSORY_NODES, self.SENSORY_NODES + self.NUM_INTERNAL_NODES))
+
         self.NUM_INTERNAL_NODES = internal_nodes
-        self.num_internal_nodes = range(self.SENSORY_NODES, self.SENSORY_NODES + self.NUM_INTERNAL_NODES)
         self.INTERNAL = self.num_internal_nodes
 
         self.supervised_learning = supervised_learning
@@ -101,24 +113,70 @@ class GraphBuilder:
         self.internal_indices = list(self.num_internal_nodes)
 
         self.graph_params = graph_type["params"]
-        self.create_graph()
+
+        ### TODO 
+        self.create_new_graph = False  
+        self.save_graph = True 
+        self.dir = f"scr/graphs/{self.graph_type['name']}"
+    
 
 
-    def get_data():
+        if self.create_new_graph:
+            self.graph = self.create_graph()
+        else:
+            self.graph = self.use_old_graph()
+            if not self.graph:
+                self.graph = self.create_graph()
 
-        return 
+
+    def use_old_graph(self):
+            
+        # List all subdirectories in self.dir
+        if not os.path.exists(self.dir):
+            print(f"Directory {self.dir} does not exist.")
+            return False
+
+        # Get all subdirectories with numeric names
+        subdirectories = [f for f in os.listdir(self.dir) if os.path.isdir(os.path.join(self.dir, f)) and f.isdigit()]
+        
+        for subdir in sorted(subdirectories, key=int):  # Sort to check in ascending order
+            graph_folder = os.path.join(self.dir, subdir)
+            graph_file = os.path.join(graph_folder, "edge_index.pt")
+            params_file = os.path.join(graph_folder, "graph_type.json")
+
+            # Check if both files exist in the folder
+            if os.path.exists(graph_file) and os.path.exists(params_file):
+                print(f"Found existing graph files in {graph_folder}")
+
+                # Load the saved graph parameters from the JSON file
+                with open(params_file, "r") as f:
+                    saved_graph_params = json.load(f)
+
+                # Compare saved parameters with current graph parameters
+                if saved_graph_params == self.graph_type:
+                    print("Graph parameters match, loading the existing graph.")
+                    # Load the existing edge_index tensor
+                    self.edge_index = torch.load(graph_file)
+                    return True
+                else:
+                    print(f"Graph parameters in {graph_folder} do not match.")
+        
+        print("No matching existing graph found in any directory.")
+        return False
 
     def create_graph(self):
 
         self.edge_index = []
 
-
         print(f"Creating graph structure for {self.graph_type['name']}")
-
         if self.graph_type["name"] == "fully_connected":
-            self.fully_connected(self_connection=False)
+            self.fully_connected(self_connection=False, 
+                                 no_sens2sens=self.graph_params["remove_sens_2_sens"], 
+                                 no_sens2supervised=self.graph_params["remove_sens_2_sup"])
         elif self.graph_type["name"] == "fully_connected_w_self":
-            self.fully_connected(self_connection=True)
+            self.fully_connected(self_connection=True,
+                                 no_sens2sens=self.graph_params["remove_sens_2_sens"], 
+                                 no_sens2supervised=self.graph_params["remove_sens_2_sup"])
         elif self.graph_type["name"] == "barabasi":
             self.barabasi()
         elif self.graph_type["name"] == "stochastic_block":
@@ -144,6 +202,42 @@ class GraphBuilder:
 
         assert self.edge_index.shape[0] == 2
         print("self.edge_index", self.edge_index.shape)
+
+
+        # save to self.dir 
+        if self.save_graph:
+            self.save_graph_to_file()
+
+        
+    def save_graph_to_file(self):
+
+        # Enumerate existing folders in self.dir and create a new folder with n+1 name
+        if not os.path.exists(self.dir):
+            os.makedirs(self.dir)
+
+        existing_folders = [f for f in os.listdir(self.dir) if os.path.isdir(os.path.join(self.dir, f))]
+        
+        # Determine the next folder name (n+1)
+        if existing_folders:
+            # Extract numerical folder names and find the highest
+            folder_numbers = [int(f) for f in existing_folders if f.isdigit()]
+            new_folder_num = max(folder_numbers) + 1 if folder_numbers else 1
+        else:
+            new_folder_num = 1
+
+        new_folder_path = os.path.join(self.dir, str(new_folder_num))
+        os.makedirs(new_folder_path)
+
+        # Save edge_index as a torch file in the new folder
+        torch.save(self.edge_index, os.path.join(new_folder_path, "edge_index.pt"))
+
+        # Save graph_type["params"] as a JSON file in the new folder
+        with open(os.path.join(new_folder_path, "graph_type.json"), "w") as f:
+            json.dump(self.graph_type, f)
+
+        print(f"Graph data saved in {new_folder_path}")
+        
+
 
     def fully_connected_no_sens2sup(self):
 
@@ -175,15 +269,81 @@ class GraphBuilder:
                     self.edge_index.append([j, i])
             
 
+    def fully_connected(self, self_connection, no_sens2sens=False, no_sens2supervised=False):
 
-    def fully_connected(self, self_connection):
-        if self_connection:
-            print("Creating fully connected directed graph with self connections")
-            self.edge_index += [[i, j] for i in self.num_all_nodes for j in self.num_all_nodes]
+        if (not no_sens2sens) and (not no_sens2supervised):
+            if self_connection:
+                print("Creating fully connected directed graph with self connections")
+                self.edge_index += [[i, j] for i in self.num_all_nodes for j in self.num_all_nodes]
+            else:
+                print("Creating fully connected directed graph without self connections")
+                self.edge_index += [[i, j] for i in self.num_all_nodes for j in self.num_all_nodes if i != j]
+
         else:
-            print("Creating fully connected directed graph without self connections")
-            self.edge_index += [[i, j] for i in self.num_all_nodes for j in self.num_all_nodes if i != j]
-        
+
+            print(f"Doing from scratch; Creating fully connected directed graph with self connections: {self_connection}")
+
+            # 1. Sensory to all others (sensory, internal, supervision)
+            for i in self.sensory_indices:
+                # Sensory to sensory
+                if not no_sens2sens:
+                    for j in self.sensory_indices:
+                        if i != j or self_connection:  # Allow self-connection only if specified
+                            self.edge_index.append([i, j])
+
+                # Sensory to internal (and vice versa)
+                for j in self.internal_indices:
+                    self.edge_index.append([i, j])  # Sensory to internal
+                    self.edge_index.append([j, i])  # Internal to sensory
+
+                # Sensory to supervision (and vice versa)
+                if self.supervised_learning and not no_sens2supervised:
+                    for j in self.supervision_indices:
+                        self.edge_index.append([i, j])  # Sensory to supervision
+                        self.edge_index.append([j, i])  # Supervision to sensory
+
+            # 2. Internal to all others (sensory, internal, supervision)
+            for i in self.internal_indices:
+                # Internal to internal
+                for j in self.internal_indices:
+                    if i != j or self_connection:  # Internal to internal (both ways)
+                        self.edge_index.append([i, j])
+
+                # Internal to sensory (and vice versa)
+                for j in self.sensory_indices:
+                    self.edge_index.append([i, j])  # Internal to sensory
+                    self.edge_index.append([j, i])  # Sensory to internal
+
+                # Internal to supervision (and vice versa)
+                if self.supervised_learning:
+                    for j in self.supervision_indices:
+                        self.edge_index.append([i, j])  # Internal to supervision
+                        self.edge_index.append([j, i])  # Supervision to internal
+
+            # 3. Supervision to all others (sensory, internal, supervision)
+            if self.supervised_learning:
+                for i in self.supervision_indices:
+                    # Supervision to sensory (and vice versa)
+                    if not no_sens2supervised:
+                        for j in self.sensory_indices:
+                            self.edge_index.append([i, j])  # Supervision to sensory
+                            self.edge_index.append([j, i])  # Sensory to supervision
+
+                    # Supervision to internal (and vice versa)
+                    for j in self.internal_indices:
+                        self.edge_index.append([i, j])  # Supervision to internal
+                        self.edge_index.append([j, i])  # Internal to supervision
+
+                    # Supervision to supervision
+                    for j in self.supervision_indices:
+                        if i != j or self_connection:  # Supervision to supervision (both ways)
+                            self.edge_index.append([i, j])
+
+            print("Fully connected graph creation complete.")
+
+
+
+
     def barabasi(self):
         num_nodes = len(self.num_all_nodes)
         m = self.graph_params.get("m", 5)  # Number of edges to attach from a new node to existing nodes
@@ -201,7 +361,10 @@ class GraphBuilder:
         p_inter = self.graph_params.get("p_inter", 0.1)  # Probability of edges between different communities
         
         print(num_communities, community_size,  len(self.num_internal_nodes) )
-        assert (num_communities * community_size) == len(self.num_internal_nodes), "must be equal"
+
+        assert (num_communities * community_size) == self.NUM_INTERNAL_NODES, "must be equal"
+        # assert (num_communities * community_size) == len(self.num_internal_nodes), "must be equal"
+
         # Sizes of communitieser
         sizes = [community_size for _ in  range(num_communities)]
         # SENSORY_NODES = range(0, range(self.SENSORY_NODES))

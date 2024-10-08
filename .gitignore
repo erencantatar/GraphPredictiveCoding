@@ -6,6 +6,9 @@ jobs/outputs/PC/*
 jobs/outputs/IPC/*
 jobs/outputs/PC/slurm_output_7878391_simple.out
 
+
+
+
 # Ignore the data folder
 data/
 jobs/outputs/*
@@ -24,6 +27,8 @@ jobs/create_jobs/**/*
 scr/trained_models/*/
 scr/trained_models/**/*
 
+scr/graphs/**/*
+scr/graphs/*/
 # Don't ignore the specific file you want to track
 !/scr/trained_models/most_promising_model.txt
 
