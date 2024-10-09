@@ -588,8 +588,6 @@ class PCGraphConv(torch.nn.Module):
         # with a single batch of n items the weights are shared/the same (self.weights.to(self.device))
         weights_batched_graph = self.weights.repeat(1, self.batchsize).to(self.device)
 
-        
-
         with torch.no_grad():
 
             self.predictions = self.prediction_mp(self.data.x.to(self.device), self.data.edge_index.to(self.device), weights_batched_graph, norm=self.norm.to(self.device))
@@ -597,12 +595,10 @@ class PCGraphConv(torch.nn.Module):
 
             self.predictions = self.predictions.detach()
 
-
             if self.use_bias:
                 # print(self.predictions.shape)
                 # print(self.biases.shape)
                 self.predictions += self.biases.unsqueeze(-1)
-
 
 
         return self.predictions

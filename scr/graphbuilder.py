@@ -13,21 +13,21 @@ import random
 graph_type_options = {
         "fully_connected": {
             "params": {
-                "remove_sens_2_sens": True, 
-                "remove_sens_2_sup": False, 
+                # "remove_sens_2_sens": True, 
+                # "remove_sens_2_sup": False, 
             }
         },
         "fully_connected_w_self": {
             "params": {
-                "remove_sens_2_sens": False, 
-                "remove_sens_2_sup": False, 
+                # "remove_sens_2_sens": True, 
+                # "remove_sens_2_sup": False, 
             }
         },
 
         "fully_connected_no_sens2sup": {
             "params": {
-                "remove_sens_2_sens": False, 
-                "remove_sens_2_sup": False, 
+                # "remove_sens_2_sens": True, 
+                # "remove_sens_2_sup": False, 
             }
         }, 
 
@@ -38,8 +38,8 @@ graph_type_options = {
                 "community_size": 30,       # Size of each community
                 "p_intra": 0.1,             # Probability of edges within the same community
                 "p_inter": 0.1,             # Probability of edges between different communities
-                "remove_sens_2_sens": False, 
-                "remove_sens_2_sup": False, 
+                # "remove_sens_2_sens": False, 
+                # "remove_sens_2_sup": False, 
                 }
         },
         
@@ -50,8 +50,8 @@ graph_type_options = {
                 "community_size": 30,       # Size of each community
                 "p_intra": 0.5,             # Probability of edges within the same community
                 "p_inter": 0.1,             # Probability of edges between different communities
-                "remove_sens_2_sens": True, 
-                "remove_sens_2_sup": True
+                # "remove_sens_2_sens": True, 
+                # "remove_sens_2_sup": True
                 }
         },
 

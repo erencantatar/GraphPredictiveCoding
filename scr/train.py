@@ -62,6 +62,10 @@ from graphbuilder import graph_type_options
 parser.add_argument('--num_internal_nodes', type=int, default=1500, help='Number of internal nodes.')
 parser.add_argument('--graph_type', type=str, default="fully_connected", help='Type of Graph', choices=list(graph_type_options.keys()))
 
+parser.add_argument('--remove_sens_2_sens', type=bool, required=True, help='Whether to remove sensory-to-sensory connections.')
+parser.add_argument('--remove_sens_2_sup', type=bool,  required=True, help='Whether to remove sensory-to-supervised connections.')
+
+
 # -MessagePassing-
 parser.add_argument('--normalize_msg', choices=['True', 'False'], required=True,  help='Normalize message passing, expected True or False')
 
@@ -175,13 +179,19 @@ graph_params = {
     "supervised_learning": True,  # Whether the task involves supervised learning
     "graph_type": {    
         "name": args.graph_type, # Options: "fully_connected", "fully_connected_w_self", "barabasi", "stochastic_block"
-        "params": graph_type_options[args.graph_type]["params"]
+        "params": graph_type_options[args.graph_type]["params"], 
+        # "params_general": {
+        #     "remove_sens_2_sens": args.remove_sens_2_sens,  # Set from command line
+        #     "remove_sens_2_sup": args.remove_sens_2_sup,    # Set from command line
+        #     },
         },  
     "seed": args.seed,   
 }
 
-assert "remove_sens_2_sens" in graph_params["graph_type"]["params"]
-assert "remove_sens_2_sup" in graph_params["graph_type"]["params"]
+# add graph specific info: 
+graph_params["graph_type"]["params"]["remove_sens_2_sens"] = args.remove_sens_2_sens  
+graph_params["graph_type"]["params"]["remove_sens_2_sup"]  = args.remove_sens_2_sup 
+
 
 if graph_params["graph_type"]["name"] == "stochastic_block":
     
