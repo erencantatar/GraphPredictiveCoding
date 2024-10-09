@@ -168,21 +168,20 @@ dataset_params = {
 print("------------------Importing Graph Params ---------------- ")
 from graphbuilder import graph_type_options
 
-
-
-
 # Define the graph type
 # Options: "fully_connected", "fully_connected_w_self", "barabasi", "stochastic_block", "fully_connected_no_sens2sup"
 graph_params = {
     "internal_nodes": args.num_internal_nodes,  # Number of internal nodes
     "supervised_learning": True,  # Whether the task involves supervised learning
-    "graph_type": 
-
-    {    
-    "name": args.graph_type, # Options: "fully_connected", "fully_connected_w_self", "barabasi", "stochastic_block"
-    "params": graph_type_options[args.graph_type]["params"]
-    },       
+    "graph_type": {    
+        "name": args.graph_type, # Options: "fully_connected", "fully_connected_w_self", "barabasi", "stochastic_block"
+        "params": graph_type_options[args.graph_type]["params"]
+        },  
+    "seed": args.seed,   
 }
+
+assert "remove_sens_2_sens" in graph_params["graph_type"]["params"]
+assert "remove_sens_2_sup" in graph_params["graph_type"]["params"]
 
 if graph_params["graph_type"]["name"] == "stochastic_block":
     
@@ -403,15 +402,29 @@ GRAPH_TYPE = graph_params["graph_type"]["name"]    #"fully_connected"
 
 # Fetch the graph parameters based on the selected graph type
 
-
 date_hour = datetime.now().strftime("%Y-%m-%d_%H_%M_%S")
-
+path = ""
+# Initialize base path depending on mode (training or experimenting)
 if args.mode == "experimenting":
-    model_dir = f"trained_models/experimenting/{args.model_type.lower()}/{GRAPH_TYPE}/{model_params_name}_{date_hour}/"
+    path = f"trained_models_experimenting/{args.model_type.lower()}"
 elif args.mode == "training":
-    model_dir = f"trained_models/{args.model_type.lower()}/{GRAPH_TYPE}/{model_params_name}_{date_hour}/"
+    path = f"trained_models/{args.model_type.lower()}/{graph_params['graph_type']['name']}/"
+    
+    # Modify the path based on the graph configuration (removing sens2sens or sens2sup)
+    if graph_params["graph_type"]["params"]["remove_sens_2_sens"] and graph_params["graph_type"]["params"]["remove_sens_2_sup"]:
+        path += "_no_sens2sens_no_sens2sup"
+    elif graph_params["graph_type"]["params"]["remove_sens_2_sens"]:
+        path += "_no_sens2sens"
+    elif graph_params["graph_type"]["params"]["remove_sens_2_sup"]:
+        path += "_no_sens2sup"
+    else:
+        path += "_normal"  # If neither are removed, label the folder as 'normal'
 else:
     raise ValueError("Invalid mode")
+
+# Append graph type, model parameters, and timestamp to the path
+path += f"/{model_params_name}_{date_hour}/"
+model_dir = path
 
 # Define the directory path
 print("Saving model, params, graph_structure to :", model_dir)

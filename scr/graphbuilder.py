@@ -1,19 +1,19 @@
 import os 
 import json 
 
-# from torch_geometric.utils import from_networkx, to_dense_adj
+from torch_geometric.utils import from_networkx, to_dense_adj
 import networkx as nx
 # import matplotlib.pyplot as plt
 # from torch_geometric.data import Data
 # from torch_geometric.nn import MessagePassing
 import numpy as np 
 import torch 
-
+import random 
 
 graph_type_options = {
         "fully_connected": {
             "params": {
-                "remove_sens_2_sens": False, 
+                "remove_sens_2_sens": True, 
                 "remove_sens_2_sup": False, 
             }
         },
@@ -65,9 +65,12 @@ graph_type_options = {
 
 class GraphBuilder:
 
-    def __init__(self, graph_type_options, internal_nodes, supervised_learning, graph_type):
+    def __init__(self, graph_type_options, internal_nodes, supervised_learning, graph_type, seed):
 
-        
+        # Initialize the seed if provided
+        self.seed = seed
+        self.set_seed(self.seed)  
+
         # allowed_topologies = ["fully_connected", "fully_connected_w_self", "barabasi", "stochastic_block", "fully_connected_no_sens2sup"]
         allowed_topologies = list(graph_type_options.keys())
         
@@ -84,10 +87,9 @@ class GraphBuilder:
         # self.num_sensor_nodes = range(self.SENSORY_NODES)
         # self.num_internal_nodes = range(self.SENSORY_NODES, self.SENSORY_NODES + self.NUM_INTERNAL_NODES)
 
+        self.NUM_INTERNAL_NODES = internal_nodes
         self.num_sensor_nodes = list(range(self.SENSORY_NODES))
         self.num_internal_nodes = list(range(self.SENSORY_NODES, self.SENSORY_NODES + self.NUM_INTERNAL_NODES))
-
-        self.NUM_INTERNAL_NODES = internal_nodes
         self.INTERNAL = self.num_internal_nodes
 
         self.supervised_learning = supervised_learning
@@ -112,9 +114,18 @@ class GraphBuilder:
         ### TODO 
         self.create_new_graph = False  
         self.save_graph = True 
-        self.dir = f"scr/graphs/{self.graph_type['name']}"
+        self.dir = f"graphs/{self.graph_type['name']}/"
     
-
+        # Modify the path based on the graph configuration (removing sens2sens or sens2sup)
+        if self.graph_params["remove_sens_2_sens"] and self.graph_params["remove_sens_2_sup"]:
+            self.dir += "_no_sens2sens_no_sens2sup"
+        elif self.graph_params["remove_sens_2_sens"]:
+            self.dir += "_no_sens2sens"
+        elif self.graph_params["remove_sens_2_sup"]:
+            self.dir += "_no_sens2sup"
+        else:
+            self.dir += "_normal"  # If neither are removed, label the folder as 'normal'
+                
 
         if self.create_new_graph:
             self.graph = self.create_graph()
@@ -125,38 +136,29 @@ class GraphBuilder:
 
 
     def use_old_graph(self):
-            
-        # List all subdirectories in self.dir
-        if not os.path.exists(self.dir):
-            print(f"Directory {self.dir} does not exist.")
-            return False
+        # Check if the directory for the specific seed exists
+        graph_folder = os.path.join(self.dir, str(self.seed))
+        graph_file = os.path.join(graph_folder, "edge_index.pt")
+        params_file = os.path.join(graph_folder, "graph_type.json")
 
-        # Get all subdirectories with numeric names
-        subdirectories = [f for f in os.listdir(self.dir) if os.path.isdir(os.path.join(self.dir, f)) and f.isdigit()]
-        
-        for subdir in sorted(subdirectories, key=int):  # Sort to check in ascending order
-            graph_folder = os.path.join(self.dir, subdir)
-            graph_file = os.path.join(graph_folder, "edge_index.pt")
-            params_file = os.path.join(graph_folder, "graph_type.json")
+        # Check if both files exist in the folder
+        if os.path.exists(graph_file) and os.path.exists(params_file):
+            print(f"Found existing graph files in {graph_folder}")
 
-            # Check if both files exist in the folder
-            if os.path.exists(graph_file) and os.path.exists(params_file):
-                print(f"Found existing graph files in {graph_folder}")
+            # Load the saved graph parameters from the JSON file
+            with open(params_file, "r") as f:
+                saved_graph_params = json.load(f)
 
-                # Load the saved graph parameters from the JSON file
-                with open(params_file, "r") as f:
-                    saved_graph_params = json.load(f)
-
-                # Compare saved parameters with current graph parameters
-                if saved_graph_params == self.graph_type:
-                    print("Graph parameters match, loading the existing graph.")
-                    # Load the existing edge_index tensor
-                    self.edge_index = torch.load(graph_file)
-                    return True
-                else:
-                    print(f"Graph parameters in {graph_folder} do not match.")
-        
-        print("No matching existing graph found in any directory.")
+            # Compare saved parameters with current graph parameters
+            if saved_graph_params == self.graph_type:
+                print("Graph parameters match, loading the existing graph.", graph_file)
+                # Load the existing edge_index tensor
+                self.edge_index = torch.load(graph_file)
+                return True
+            else:
+                print(f"Graph parameters in {graph_folder} do not match.")
+        else:
+            print(f"No graph found for seed {self.seed}.")
         return False
 
     def create_graph(self):
@@ -203,25 +205,15 @@ class GraphBuilder:
         if self.save_graph:
             self.save_graph_to_file()
 
-        
     def save_graph_to_file(self):
-
-        # Enumerate existing folders in self.dir and create a new folder with n+1 name
-        if not os.path.exists(self.dir):
-            os.makedirs(self.dir)
-
-        existing_folders = [f for f in os.listdir(self.dir) if os.path.isdir(os.path.join(self.dir, f))]
+        print("---------save_graph_to_file--------------------")
         
-        # Determine the next folder name (n+1)
-        if existing_folders:
-            # Extract numerical folder names and find the highest
-            folder_numbers = [int(f) for f in existing_folders if f.isdigit()]
-            new_folder_num = max(folder_numbers) + 1 if folder_numbers else 1
-        else:
-            new_folder_num = 1
-
-        new_folder_path = os.path.join(self.dir, str(new_folder_num))
-        os.makedirs(new_folder_path)
+        # Use the seed as the folder name
+        new_folder_path = os.path.join(self.dir, str(self.seed))
+        
+        # Create the directory if it doesn't exist
+        if not os.path.exists(new_folder_path):
+            os.makedirs(new_folder_path)
 
         # Save edge_index as a torch file in the new folder
         torch.save(self.edge_index, os.path.join(new_folder_path, "edge_index.pt"))
@@ -231,7 +223,17 @@ class GraphBuilder:
             json.dump(self.graph_type, f)
 
         print(f"Graph data saved in {new_folder_path}")
-        
+    
+    def set_seed(self, seed):
+        if seed is not None:
+            print(f"Setting seed: {seed}")
+            np.random.seed(seed)  # Seed for numpy
+            torch.manual_seed(seed)  # Seed for torch
+            if torch.cuda.is_available():
+                torch.cuda.manual_seed_all(seed)  # Seed for GPU
+            random.seed(seed)  # Seed for random module (if used)
+        else:
+            print("No seed provided. Using default behavior.")
 
 
     def fully_connected_no_sens2sup(self):
@@ -342,7 +344,7 @@ class GraphBuilder:
     def barabasi(self):
         num_nodes = len(self.num_all_nodes)
         m = self.graph_params.get("m", 5)  # Number of edges to attach from a new node to existing nodes
-        G = nx.barabasi_albert_graph(num_nodes, m)
+        G = nx.barabasi_albert_graph(num_nodes, m, seed=self.seed)
         self.edge_index = [[u, v] for u, v in G.edges()]
         print(f"Creating Barabási-Albert graph with {num_nodes} nodes and {m} edges to attach per new node")
 
@@ -393,7 +395,7 @@ class GraphBuilder:
             p[-1, 0] = 0 
 
         print("Got the sizes", sizes)
-        G = nx.stochastic_block_model(sizes, p, directed=True)
+        G = nx.stochastic_block_model(sizes, p, directed=True, seed=self.seed)
         
         print("Created the graph stochastic_block_model") 
 
@@ -469,7 +471,7 @@ class GraphBuilder:
             p[-1, 0] = 0
 
         # Build stochastic block model
-        G = nx.stochastic_block_model(total_community_sizes, p, directed=True)
+        G = nx.stochastic_block_model(total_community_sizes, p, directed=True, seed=self.seed)
 
         # Convert the graph to PyTorch Geometric format
         data = from_networkx(G)

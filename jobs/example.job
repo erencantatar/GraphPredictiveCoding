@@ -28,7 +28,7 @@ echo "Running simple training"
 
 srun python -u train.py \
     --mode training \
-    --use_wandb online \
+    --use_wandb disabled \
     --model_type IPC \
     --normalize_msg False \
     --dataset_transform none \
