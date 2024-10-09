@@ -45,11 +45,12 @@ class PCGraphConv(torch.nn.Module):
         self.clamping = clamping
         self.wandb_logger = wandb_logger
 
-        self.trace_activity_values, self.trace_activity_errors = False, False  
+        self.trace_activity_values, self.trace_activity_errors, self.trace_activity_preds = False, False, False  
         self.trace = {
             "values": [], 
             "errors": [],
-         }
+            "preds" : [],
+        }
 
         self.energy_vals = {
             "internal_energy": [],
@@ -600,7 +601,8 @@ class PCGraphConv(torch.nn.Module):
                 # print(self.biases.shape)
                 self.predictions += self.biases.unsqueeze(-1)
 
-
+            if self.trace_activity_preds:
+                self.trace["preds"].append(self.predictions.detach())
         return self.predictions
 
 
@@ -719,7 +721,13 @@ class PCGraphConv(torch.nn.Module):
         """
 
         assert self.mode in ['training', 'testing', 'classification'], "Mode not set, (training or testing / classification )"
-
+        
+        # restart trace 
+        self.trace = {
+            "values": [], 
+            "errors": [],
+            "preds" : [],
+         }
 
         # self.edge_weights = self.extract_edge_weights(edge_index=self.edge_index, weights=self.weights, mask=self.mask)
         self.data = data

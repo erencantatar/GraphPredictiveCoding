@@ -291,6 +291,13 @@ def generation(test_loader, model, test_params, clean_images, num_samples=8, ver
     """
 
 
+    # model.pc_conv1.trace_activity_predictions = True 
+    model.pc_conv1.restart_activity()
+    model.pc_conv1.trace['values'] = []
+    model.pc_conv1.trace['preds'] = []
+
+
+
     model.pc_conv1.T = test_params["T"]
 
     model.pc_conv1.mode = "testing"
@@ -417,7 +424,8 @@ def generation(test_loader, model, test_params, clean_images, num_samples=8, ver
         # Creating a subplot mosaic
         fig, ax = plt.subplot_mosaic([
             ["A", "B", "C", "D", "E"],
-            ["F", "F", "F", "G", "G"]
+            ["1", "2", "3", "4", "5" ],
+            ["F", "F", "F", "G", "G"],
         ], figsize=(15, 8))
 
         # Plotting the images
@@ -439,7 +447,21 @@ def generation(test_loader, model, test_params, clean_images, num_samples=8, ver
         ax["E"].set_title("Diff clean - denoised_scaled")
         print("Denoised val", max(values[0:784].view(28, 28).cpu().detach().numpy().flatten()), min(values[0:784].view(28, 28).cpu().detach().numpy().flatten()))
 
-        for a in ["A", "B", "C", "D", "E", "G"]:
+        tr = model.pc_conv1.trace["values"]
+        # tr = model.pc_conv1.trace["preds"]
+        print("!!!!", len(tr), int(model.pc_conv1.T))
+        # assert len(tr) == int(model.pc_conv1.T)  
+        tmp = int(model.pc_conv1.T // 5) 
+
+        ax["1"].imshow(tr[0][0:784].view(28,28).cpu().detach().numpy(), cmap=cmap)
+        
+        ax["2"].imshow(tr[tmp][0:784].view(28,28).cpu().detach().numpy(), cmap=cmap)
+        ax["3"].imshow(tr[2*tmp][0:784].view(28,28).cpu().detach().numpy(),  cmap=cmap)
+        ax["4"].imshow(tr[-2*tmp][0:784].view(28,28).cpu().detach().numpy(), cmap=cmap)
+
+        ax["5"].imshow(tr[-1][0:784].view(28,28).cpu().detach().numpy(), cmap=cmap)
+
+        for a in ["A", "B", "C", "D", "E", "G", "1", "2", "3", "4", "5"]:
             ax[a].axis('off')
 
         # Plotting the line graphs
@@ -450,6 +472,12 @@ def generation(test_loader, model, test_params, clean_images, num_samples=8, ver
 
         ax["G"].imshow(values[0:784].view(28,28).cpu().detach().numpy(), vmin=0, vmax=1, cmap=cmap)
         ax["G"].set_title("values")
+
+        # Apply tight layout
+        plt.tight_layout()
+
+        # Adjust subplot spacing if needed
+        plt.subplots_adjust(wspace=0.05, hspace=0.05)  # Adjust spacing between subplots
 
         if test_params["model_dir"]:
             fig.savefig(f'{test_params["model_dir"]}eval/generation/generation_condition_label_T_{idx}_{model.pc_conv1.T}_{noisy_batch.y.item()}.png')

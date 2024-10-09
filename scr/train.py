@@ -61,7 +61,6 @@ parser.add_argument('--supervision_label_val', default=10, type=int, required=Tr
 from graphbuilder import graph_type_options
 parser.add_argument('--num_internal_nodes', type=int, default=1500, help='Number of internal nodes.')
 parser.add_argument('--graph_type', type=str, default="fully_connected", help='Type of Graph', choices=list(graph_type_options.keys()))
-# Using str2bool to handle boolean values properly
 parser.add_argument('--remove_sens_2_sens', type=str2bool, required=True, help='Whether to remove sensory-to-sensory connections.')
 parser.add_argument('--remove_sens_2_sup', type=str2bool, required=True, help='Whether to remove sensory-to-supervised connections.')
 
