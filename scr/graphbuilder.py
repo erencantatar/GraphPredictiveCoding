@@ -36,7 +36,7 @@ graph_type_options = {
             "params": {
                 "num_communities": 50,      # Number of communities
                 "community_size": 30,       # Size of each community
-                "p_intra": 0.1,             # Probability of edges within the same community
+                "p_intra": 0.3,             # Probability of edges within the same community
                 "p_inter": 0.1,             # Probability of edges between different communities
                 # "remove_sens_2_sens": False, 
                 # "remove_sens_2_sup": False, 
@@ -63,18 +63,15 @@ graph_type_options = {
     }
 
 
+
 class GraphBuilder:
 
-    def __init__(self, graph_type_options, internal_nodes, supervised_learning, graph_type, seed):
+    def __init__(self, internal_nodes, supervised_learning, graph_type, seed):
 
         # Initialize the seed if provided
         self.seed = seed
         self.set_seed(self.seed)  
 
-        # allowed_topologies = ["fully_connected", "fully_connected_w_self", "barabasi", "stochastic_block", "fully_connected_no_sens2sup"]
-        allowed_topologies = list(graph_type_options.keys())
-        
-        assert graph_type["name"].lower() in allowed_topologies, "Graph structure unkown"
         self.graph_type = graph_type
 
         # check if graph tpye aligns with the needed graph_params 
@@ -116,6 +113,9 @@ class GraphBuilder:
         self.save_graph = True 
         self.dir = f"graphs/{self.graph_type['name']}/"
     
+
+        print(self.graph_params)
+
         # Modify the path based on the graph configuration (removing sens2sens or sens2sup)
         if self.graph_params["remove_sens_2_sens"] and self.graph_params["remove_sens_2_sup"]:
             self.dir += "_no_sens2sens_no_sens2sup"

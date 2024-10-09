@@ -63,9 +63,8 @@ class CustomGraphDataset(Dataset):
             self.edge_index_tensor = self.edge_index
         else:
 
-            from graphbuilder import graph_type_options
-
-            loader = GraphBuilder(graph_type_options, **graph_params)
+            print("graph_params", graph_params)
+            loader = GraphBuilder(**graph_params)
             
             self.edge_index = loader.edge_index
             self.edge_index_tensor = self.edge_index

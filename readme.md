@@ -16,6 +16,7 @@ Foobar is a Python library for dealing with word pluralization.
 2. Find a clear goal (for the project/ for life) 
 3. Clear my head
 4. make wandb workbook available. 
+5. see `compare_class_args(IPCGraphConv, PCGraphConv)` 
 
 
 ## File Structure

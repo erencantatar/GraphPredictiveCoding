@@ -40,7 +40,7 @@ import os
 
 import os
 import argparse
-from helper.args import true_with_float, valid_str_or_float, valid_int_or_all, valid_int_list
+from helper.args import true_with_float, valid_str_or_float, valid_int_or_all, valid_int_list, str2bool
 from helper.activation_func import activation_functions
 
 # Parsing command-line arguments
@@ -61,10 +61,9 @@ parser.add_argument('--supervision_label_val', default=10, type=int, required=Tr
 from graphbuilder import graph_type_options
 parser.add_argument('--num_internal_nodes', type=int, default=1500, help='Number of internal nodes.')
 parser.add_argument('--graph_type', type=str, default="fully_connected", help='Type of Graph', choices=list(graph_type_options.keys()))
-
-parser.add_argument('--remove_sens_2_sens', type=bool, required=True, help='Whether to remove sensory-to-sensory connections.')
-parser.add_argument('--remove_sens_2_sup', type=bool,  required=True, help='Whether to remove sensory-to-supervised connections.')
-
+# Using str2bool to handle boolean values properly
+parser.add_argument('--remove_sens_2_sens', type=str2bool, required=True, help='Whether to remove sensory-to-sensory connections.')
+parser.add_argument('--remove_sens_2_sup', type=str2bool, required=True, help='Whether to remove sensory-to-supervised connections.')
 
 # -MessagePassing-
 parser.add_argument('--normalize_msg', choices=['True', 'False'], required=True,  help='Normalize message passing, expected True or False')
@@ -188,10 +187,15 @@ graph_params = {
     "seed": args.seed,   
 }
 
+
+
+
 # add graph specific info: 
+print("zzz", args.remove_sens_2_sens, args.remove_sens_2_sup)
 graph_params["graph_type"]["params"]["remove_sens_2_sens"] = args.remove_sens_2_sens  
 graph_params["graph_type"]["params"]["remove_sens_2_sup"]  = args.remove_sens_2_sup 
 
+print("graph_params 1 ", graph_params)
 
 if graph_params["graph_type"]["name"] == "stochastic_block":
     
@@ -289,7 +293,7 @@ from models.PC import PCGNN, PCGraphConv
 from models.IPC import IPCGNN, IPCGraphConv
 
 # Usage example: comparing IPCGraphConv and PCGraphConv
-compare_class_args(IPCGraphConv, PCGraphConv)
+# compare_class_args(IPCGraphConv, PCGraphConv)
 
 
 ######################################################################################################### 
