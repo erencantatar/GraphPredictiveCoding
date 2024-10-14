@@ -9,6 +9,10 @@ Foobar is a Python library for dealing with word pluralization.
 3. myquota
 
 
+## Branches
+- master
+- dynamic graph; during training update the graph with new neurons/clusters
+
 ## TODO
 
 0. Check for seed match when loading existing graph 
