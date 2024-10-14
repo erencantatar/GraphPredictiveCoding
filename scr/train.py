@@ -570,6 +570,10 @@ if args.model_type.lower() == "ipc":
         debug=False, device=device)
     print("-----------Loading IPC model-----------")
 
+
+for name, param in model.named_parameters():
+    print(name, param.requires_grad) 
+    
 # Magic
 wandb.watch(model, 
             log="all",   # (str) One of "gradients", "parameters", "all", or None

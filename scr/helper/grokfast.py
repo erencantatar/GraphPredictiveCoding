@@ -46,16 +46,16 @@ def gradfilter_ema(
     if grads is None:
         if param_type == 'values_dummy':
             grads = {'values_dummy': m.values_dummy.grad.detach()}
-            print("grads", grads)
+
         elif param_type == 'weights':
             grads = {'weights': m.weights.grad.detach()}
         else:
             grads = {}
 
-    if param_type == 'values_dummy':
-        grads['values_dummy'] = grads['values_dummy'] * alpha + m.values_dummy.grad.detach() * (1 - alpha)
-        m.values_dummy.grad = m.values_dummy.grad + grads['values_dummy'] * lamb
-    elif param_type == 'weights':
+    # if param_type == 'values_dummy':
+    #     grads['values_dummy'] = grads['values_dummy'] * alpha + m.values_dummy.grad.detach() * (1 - alpha)
+    #     m.values_dummy.grad = m.values_dummy.grad + grads['values_dummy'] * lamb
+    if param_type == 'weights':
         grads['weights'] = grads['weights'] * alpha + m.weights.grad.detach() * (1 - alpha)
         m.weights.grad = m.weights.grad + grads['weights'] * lamb
 

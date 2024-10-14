@@ -15,7 +15,7 @@ from models.PC import PCGraphConv
 class IPCGraphConv(PCGraphConv): 
     def __init__(self, *args, **kwargs):
         # Initialize using the parent class constructor
-        super(IPCGraphConv, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
 
         # self.wandb_logger = wandb_logger  # Make sure the logger is passed
 
@@ -125,231 +125,249 @@ from models.PC import PCGNN
 
 
 
-class IPCGNN(torch.nn.Module):
-    def __init__(self, num_vertices, sensory_indices, internal_indices, 
-                 lr_params, T, graph_structure, 
-                 batch_size, 
-                 use_learning_optimizer=False, weight_init="xavier", clamping=None, supervised_learning=False, 
-                 normalize_msg=False, 
-                 debug=False, activation=None, log_tensorboard=True, wandb_logger=None, device='cpu'):
-        super(IPCGNN, self).__init__()
-        
-        """ TODO: in_channels, hidden_channels, out_channels, """
-        # INSIDE LAYERS CAN HAVE PREDCODING - intra-layer 
-        self.pc_conv1 = IPCGraphConv(num_vertices, sensory_indices, internal_indices, 
-                                    lr_params, T, graph_structure, 
-                                    batch_size, use_learning_optimizer, weight_init, clamping, supervised_learning, 
-                                    normalize_msg, 
-                                    debug, activation, log_tensorboard, wandb_logger, device)
 
+class IPCGNN(PCGNN):
+    def __init__(self, num_vertices, sensory_indices, internal_indices, lr_params, T, graph_structure,
+                 batch_size, use_learning_optimizer=False, weight_init="xavier", clamping=None,
+                 supervised_learning=False, normalize_msg=False, debug=False, activation=None,
+                 log_tensorboard=True, wandb_logger=None, device='cpu'):
+        super().__init__(num_vertices, sensory_indices, internal_indices, lr_params, T,
+                                     graph_structure, batch_size, use_learning_optimizer, weight_init, clamping,
+                                     supervised_learning, normalize_msg, debug, activation, log_tensorboard,
+                                     wandb_logger, device)
+
+        # Use IPCGraphConv instead of PCGraphConv
+        self.pc_conv1 = IPCGraphConv(num_vertices, sensory_indices, internal_indices, lr_params, T, graph_structure,
+                                     batch_size, use_learning_optimizer, weight_init, clamping, supervised_learning,
+                                     normalize_msg, debug, activation, log_tensorboard, wandb_logger, device)
+        
         self.original_weights = None  # Placeholder for storing the original weights
 
 
-    def log():
-        pass
+# class IPCGNN(torch.nn.Module):
+#     def __init__(self, num_vertices, sensory_indices, internal_indices, 
+#                  lr_params, T, graph_structure, 
+#                  batch_size, 
+#                  use_learning_optimizer=False, weight_init="xavier", clamping=None, supervised_learning=False, 
+#                  normalize_msg=False, 
+#                  debug=False, activation=None, log_tensorboard=True, wandb_logger=None, device='cpu'):
+#         super(IPCGNN, self).__init__()
+        
+#         """ TODO: in_channels, hidden_channels, out_channels, """
+#         # INSIDE LAYERS CAN HAVE PREDCODING - intra-layer 
+#         self.pc_conv1 = IPCGraphConv(num_vertices, sensory_indices, internal_indices, 
+#                                     lr_params, T, graph_structure, 
+#                                     batch_size, use_learning_optimizer, weight_init, clamping, supervised_learning, 
+#                                     normalize_msg, 
+#                                     debug, activation, log_tensorboard, wandb_logger, device)
+
+#         self.original_weights = None  # Placeholder for storing the original weights
+
+    # def log():
+    #     pass
     
-    def learning(self, batch):       
+    # def learning(self, batch):       
         
-        self.pc_conv1.mode = "training"
-        self.pc_conv1.learning(batch)
+    #     self.pc_conv1.mode = "training"
+    #     self.pc_conv1.learning(batch)
         
-        history = {
-            "internal_energy_mean": np.mean(self.pc_conv1.energy_vals["internal_energy"]),
-            "sensory_energy_mean": np.mean(self.pc_conv1.energy_vals["sensory_energy"]),
-            }
+    #     history = {
+    #         "internal_energy_mean": np.mean(self.pc_conv1.energy_vals["internal_energy"]),
+    #         "sensory_energy_mean": np.mean(self.pc_conv1.energy_vals["sensory_energy"]),
+    #         }
         
-        return history
+    #     return history
     
-    def trace(self, values=False, errors=False):
+    # def trace(self, values=False, errors=False):
         
-        self.pc_conv1.trace = {
-            "values": [], 
-            "errors": [],
-         }
+    #     self.pc_conv1.trace = {
+    #         "values": [], 
+    #         "errors": [],
+    #      }
     
-        if values:
-            self.pc_conv1.trace_activity_values = True 
+    #     if values:
+    #         self.pc_conv1.trace_activity_values = True 
             
-        if errors:
-            self.pc_conv1.trace_activity_errors = True  
+    #     if errors:
+    #         self.pc_conv1.trace_activity_errors = True  
 
 
-    def Disable_connection(self, from_indices, to_indices):
-        """
-        Temporarily disable connections between specified nodes by setting their weights to zero.
+    # def Disable_connection(self, from_indices, to_indices):
+    #     """
+    #     Temporarily disable connections between specified nodes by setting their weights to zero.
 
-        Parameters:
-        - from_indices: list of node indices from which connections originate.
-        - to_indices: list of node indices to which connections lead.
-        """
-        if self.original_weights is None:
-            # Make a copy of the original weights the first time a connection is disabled
-            self.original_weights = self.pc_conv1.weights.clone()
+    #     Parameters:
+    #     - from_indices: list of node indices from which connections originate.
+    #     - to_indices: list of node indices to which connections lead.
+    #     """
+    #     if self.original_weights is None:
+    #         # Make a copy of the original weights the first time a connection is disabled
+    #         self.original_weights = self.pc_conv1.weights.clone()
 
-        masks = []
-        for from_idx in from_indices:
-            for to_idx in to_indices:
-                # Find the corresponding edge in the graph
-                edge_mask = (self.pc_conv1.edge_index_single_graph[0] == from_idx) & \
-                            (self.pc_conv1.edge_index_single_graph[1] == to_idx)
-                # Temporarily set the weights of these edges to zero
-                masks.append(edge_mask)
-                self.pc_conv1.weights.data[edge_mask] = 0
-        return masks
+    #     masks = []
+    #     for from_idx in from_indices:
+    #         for to_idx in to_indices:
+    #             # Find the corresponding edge in the graph
+    #             edge_mask = (self.pc_conv1.edge_index_single_graph[0] == from_idx) & \
+    #                         (self.pc_conv1.edge_index_single_graph[1] == to_idx)
+    #             # Temporarily set the weights of these edges to zero
+    #             masks.append(edge_mask)
+    #             self.pc_conv1.weights.data[edge_mask] = 0
+    #     return masks
 
-    def enable_all_connections(self):
-        """
-        Restore the original weights for all connections that were disabled.
-        """
-        if self.original_weights is not None:
-            self.pc_conv1.weights.data = self.original_weights
-            self.original_weights = None  # Clear the backup after restoration
+    # def enable_all_connections(self):
+    #     """
+    #     Restore the original weights for all connections that were disabled.
+    #     """
+    #     if self.original_weights is not None:
+    #         self.pc_conv1.weights.data = self.original_weights
+    #         self.original_weights = None  # Clear the backup after restoration
 
-    def retrieve_connection_strength(self, from_group, to_group):
-        """
-        Retrieve the connection strengths (weights) between two specific groups of nodes.
+    # def retrieve_connection_strength(self, from_group, to_group):
+    #     """
+    #     Retrieve the connection strengths (weights) between two specific groups of nodes.
 
-        Parameters:
-        - from_group: list of node indices from which connections originate (e.g., sensory_indices).
-        - to_group: list of node indices to which connections lead (e.g., supervision_label_indices).
+    #     Parameters:
+    #     - from_group: list of node indices from which connections originate (e.g., sensory_indices).
+    #     - to_group: list of node indices to which connections lead (e.g., supervision_label_indices).
 
-        Returns:
-        - connection_strengths: A dictionary with keys as tuples (from_idx, to_idx) and values as the corresponding weights.
-        """
-        connection_strengths = {}
+    #     Returns:
+    #     - connection_strengths: A dictionary with keys as tuples (from_idx, to_idx) and values as the corresponding weights.
+    #     """
+    #     connection_strengths = {}
         
-        for from_idx in from_group:
-            for to_idx in to_group:
-                # Find the corresponding edge in the graph
-                edge_mask = (self.pc_conv1.edge_index_single_graph[0] == from_idx) & \
-                            (self.pc_conv1.edge_index_single_graph[1] == to_idx)
-                # Retrieve the connection weight for this edge
-                connection_weights = self.pc_conv1.weights[edge_mask]
+    #     for from_idx in from_group:
+    #         for to_idx in to_group:
+    #             # Find the corresponding edge in the graph
+    #             edge_mask = (self.pc_conv1.edge_index_single_graph[0] == from_idx) & \
+    #                         (self.pc_conv1.edge_index_single_graph[1] == to_idx)
+    #             # Retrieve the connection weight for this edge
+    #             connection_weights = self.pc_conv1.weights[edge_mask]
                 
-                if connection_weights.numel() > 0:  # If there is a connection
-                    connection_strengths[(from_idx, to_idx)] = connection_weights.item()
+    #             if connection_weights.numel() > 0:  # If there is a connection
+    #                 connection_strengths[(from_idx, to_idx)] = connection_weights.item()
 
-        return connection_strengths
+    #     return connection_strengths
 
 
-    def load_weights(self, W, graph, b=None):
+    # def load_weights(self, W, graph, b=None):
 
-        print("Settng weights of self.pc_conv1")
-        self.pc_conv1.weights = W 
-        self.pc_conv1.edge_index = graph 
+    #     print("Settng weights of self.pc_conv1")
+    #     self.pc_conv1.weights = W 
+    #     self.pc_conv1.edge_index = graph 
 
-        if self.pc_conv1.use_bias:
-            self.pc_conv1.bias = b  
+    #     if self.pc_conv1.use_bias:
+    #         self.pc_conv1.bias = b  
 
-        self.pc_conv1.values = torch.zeros(self.num_vertices,self.batch_size,device=self.device) # requires_grad=False)                
+    #     self.pc_conv1.values = torch.zeros(self.num_vertices,self.batch_size,device=self.device) # requires_grad=False)                
 
     
-    def save_weights(self, path):
+    # def save_weights(self, path):
         
 
-        # make dir if not exist
-        if not os.path.exists(path):
-            os.makedirs(path)
+    #     # make dir if not exist
+    #     if not os.path.exists(path):
+    #         os.makedirs(path)
 
-        W = self.pc_conv1.weights
-        graph = self.pc_conv1.edge_index
+    #     W = self.pc_conv1.weights
+    #     graph = self.pc_conv1.edge_index
 
-        # save to '"trained_models/weights.pt"' 
-        torch.save(W, f"{path}/weights.pt")
-        torch.save(graph, f"{path}/graph.pt")
+    #     # save to '"trained_models/weights.pt"' 
+    #     torch.save(W, f"{path}/weights.pt")
+    #     torch.save(graph, f"{path}/graph.pt")
 
-        if self.pc_conv1.use_bias:
-            b = self.pc_conv1.biases 
-            torch.save(b, f"{path}/bias.pt")
+    #     if self.pc_conv1.use_bias:
+    #         b = self.pc_conv1.biases 
+    #         torch.save(b, f"{path}/bias.pt")
 
 
-    def query(self, method, data=None):
+    # def query(self, method, data=None):
         
-        print("Random init values of all internal nodes")
+    #     print("Random init values of all internal nodes")
 
-        data.x[:, 0][self.pc_conv1.internal_indices] = torch.rand(data.x[:, 0][self.pc_conv1.internal_indices].shape).to(self.pc_conv1.device)
+    #     data.x[:, 0][self.pc_conv1.internal_indices] = torch.rand(data.x[:, 0][self.pc_conv1.internal_indices].shape).to(self.pc_conv1.device)
 
 
-        self.pc_conv1.energy_vals["internal_energy_testing"] = []
-        self.pc_conv1.energy_vals["sensory_energy_testing"] = []
+    #     self.pc_conv1.energy_vals["internal_energy_testing"] = []
+    #     self.pc_conv1.energy_vals["sensory_energy_testing"] = []
 
-        assert self.pc_conv1.mode == "testing"
-        assert data is not None, "We must get the labels (conditioning) or the image data (initialization)"
+    #     assert self.pc_conv1.mode == "testing"
+    #     assert data is not None, "We must get the labels (conditioning) or the image data (initialization)"
 
-        self.pc_conv1.set_phase('---reconstruction---')
-        print("TASK IS", self.pc_conv1.task)
+    #     self.pc_conv1.set_phase('---reconstruction---')
+    #     print("TASK IS", self.pc_conv1.task)
 
-        if method == "query_by_initialization":
-            if self.pc_conv1.task == "denoising":
-                self.pc_conv1.set_sensory_nodes(data, generaton=False, mode='initialization')
-                self.pc_conv1.inference()
-            elif self.pc_conv1.task == "reconstruction":
-                self.pc_conv1.set_sensory_nodes(data, generaton=False, mode='initialization')
-                self.pc_conv1.inference()
-            elif self.pc_conv1.task == "occlusion":
+    #     if method == "query_by_initialization":
+    #         if self.pc_conv1.task == "denoising":
+    #             self.pc_conv1.set_sensory_nodes(data, generaton=False, mode='initialization')
+    #             self.pc_conv1.inference()
+    #         elif self.pc_conv1.task == "reconstruction":
+    #             self.pc_conv1.set_sensory_nodes(data, generaton=False, mode='initialization')
+    #             self.pc_conv1.inference()
+    #         elif self.pc_conv1.task == "occlusion":
                 
-                # x.view(-1)[i]
-                self.pc_conv1.set_sensory_nodes(data, generaton=False, mode='initialization')
-                self.pc_conv1.inference()
+    #             # x.view(-1)[i]
+    #             self.pc_conv1.set_sensory_nodes(data, generaton=False, mode='initialization')
+    #             self.pc_conv1.inference()
             
-                print("TODO")
-            else:
-                raise Exception(f"Unknown task given {method}")
+    #             print("TODO")
+    #         else:
+    #             raise Exception(f"Unknown task given {method}")
         
-        elif method == "query_by_conditioning":
-            assert len(self.pc_conv1.supervised_labels) > 0, "Can't do conditioning on labels without labels"
+    #     elif method == "query_by_conditioning":
+    #         assert len(self.pc_conv1.supervised_labels) > 0, "Can't do conditioning on labels without labels"
 
-            '''            
-            While each value node is randomly re-initialized, the value nodes of
-            specific vertices are fixed to some desired value, and hence not allowed to change during the energy
-            minimization process. The unconstrained sensory vertices will then converge to the minimum of the
-            energy given the fixed vertices, thus computing the conditional expectation of the latent vertices given
-            the observed stimulus.
-            '''
+    #         '''            
+    #         While each value node is randomly re-initialized, the value nodes of
+    #         specific vertices are fixed to some desired value, and hence not allowed to change during the energy
+    #         minimization process. The unconstrained sensory vertices will then converge to the minimum of the
+    #         energy given the fixed vertices, thus computing the conditional expectation of the latent vertices given
+    #         the observed stimulus.
+    #         '''
 
-            if self.pc_conv1.task == "classification":
-                # classification, where internal nodes are fixed to the pixels of an image, and the sensory nodes are
-                # ... fixed to a 1-hot vector with the labels
+    #         if self.pc_conv1.task == "classification":
+    #             # classification, where internal nodes are fixed to the pixels of an image, and the sensory nodes are
+    #             # ... fixed to a 1-hot vector with the labels
 
-                self.pc_conv1.set_sensory_nodes(data, generaton=False, mode='conditioning')
+    #             self.pc_conv1.set_sensory_nodes(data, generaton=False, mode='conditioning')
 
-            else:
-                # conditioning model on the label 
-                one_hot = torch.zeros(10)
-                one_hot[data.y] = 1
-                # one_hot = one_hot.view(-1, 1)
-                one_hot = one_hot.to(self.device)
-                self.pc_conv1.values.data[self.pc_conv1.supervised_labels] = one_hot
+    #         else:
+    #             # conditioning model on the label 
+    #             one_hot = torch.zeros(10)
+    #             one_hot[data.y] = 1
+    #             # one_hot = one_hot.view(-1, 1)
+    #             one_hot = one_hot.to(self.device)
+    #             self.pc_conv1.values.data[self.pc_conv1.supervised_labels] = one_hot
                 
-                if self.pc_conv1.task == "generation":
-                    # here the single value node encoding the class information is fixed, 
-                    # .. and the value nodes of the sensory nodes converge to an image of that clas
-                    print()
-                elif self.pc_conv1.task == "reconstruction":
+    #             if self.pc_conv1.task == "generation":
+    #                 # here the single value node encoding the class information is fixed, 
+    #                 # .. and the value nodes of the sensory nodes converge to an image of that clas
+    #                 print()
+    #             elif self.pc_conv1.task == "reconstruction":
                     
-                    self.pc_conv1.set_sensory_nodes(data, generaton=False, mode='conditioning')
+    #                 self.pc_conv1.set_sensory_nodes(data, generaton=False, mode='conditioning')
 
-                    # such as image completion, where a fraction of the sensory nodes are fixed to # the available pixels of an image, 
-                else:
-                    raise Exception(f"unkown task given {method}")
-        elif method == "pass":
-            print("Pass")
-        else:
-            raise Exception(f"unkown method: {method}")
+    #                 # such as image completion, where a fraction of the sensory nodes are fixed to # the available pixels of an image, 
+    #             else:
+    #                 raise Exception(f"unkown task given {method}")
+    #     elif method == "pass":
+    #         print("Pass")
+    #     else:
+    #         raise Exception(f"unkown method: {method}")
 
         
-        self.inference(data)
+    #     self.inference(data)
         
-        print("QUery by condition or query by init")
+    #     print("QUery by condition or query by init")
 
-        return self.pc_conv1.get_graph()
+    #     return self.pc_conv1.get_graph()
         
    
     
-    def inference(self, data):
-        self.pc_conv1.inference(data)
-        print("Inference completed.")
-        return True
+    # def inference(self, data):
+    #     self.pc_conv1.inference(data)
+    #     print("Inference completed.")
+    #     return True
  
 
 # class IPCGNN(PCGNN):

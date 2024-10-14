@@ -163,8 +163,8 @@ class PCGraphConv(torch.nn.Module):
             weight_decay = self.use_optimizers[0]
 
             print("------------Using optimizers for values/weights updating ------------")
-            self.optimizer_weights = torch.optim.Adam([self.weights], lr=self.lr_weights, weight_decay=weight_decay) #weight_decay=1e-2)        
-            # self.optimizer_weights = torch.optim.SGD([self.weights], lr=self.lr_weights)
+            # self.optimizer_weights = torch.optim.Adam([self.weights], lr=self.lr_weights, weight_decay=weight_decay) #weight_decay=1e-2)        
+            self.optimizer_weights = torch.optim.SGD([self.weights], lr=self.lr_weights)
 
             # self.optimizer_weights = torch.optim.SGD([self.weights], lr=self.gamma) #weight_decay=1e-2)
 
@@ -174,9 +174,11 @@ class PCGraphConv(torch.nn.Module):
             self.values_dummy.grad = torch.zeros_like(self.values_dummy)
 
             # for grokfast 
-            self.grads_values  = None
-            self.grads_weights = None
- 
+            self.grads = {
+                "values" : None,
+                "weights": None, 
+            }
+            
         
         self.effective_learning = {}
         self.effective_learning["w_mean"] = []
@@ -340,7 +342,7 @@ class PCGraphConv(torch.nn.Module):
         self.data.x[self.nodes_2_update, 0] = self.values_dummy.data[self.nodes_2_update].unsqueeze(-1).detach()  # Detach to avoid retaining the computation graph
         # node_values.data = self.values_dummy.view(node_values.shape).detach()  
 
-    def gradient_descent_update(self, type, parameter, delta, learning_rate, nodes_2_update, optimizer=None, use_optimizer=False):
+    def gradient_descent_update(self, grad_type, parameter, delta, learning_rate, nodes_2_update, optimizer=None, use_optimizer=False):
         """
         Perform a gradient descent update on a parameter (weights or values).
 
@@ -354,7 +356,8 @@ class PCGraphConv(torch.nn.Module):
             nodes_2_update (torch.Tensor, optional): Indices of the nodes to update (for partial updates).
         """
 
-        self.use_grokfast = False 
+        # self.use_grokfast = False 
+        self.use_grokfast = True  
 
         # MAYBE SHOULD NOT DO GROKFAST FOR BOTH VALUE NODE UPDATES AND WEIGHTS UPDATE (ONLY this one) 
         self.grokfast_type = "ema"
@@ -364,41 +367,43 @@ class PCGraphConv(torch.nn.Module):
         """
 
         ### -------------------- optional --------------------
-        if self.use_grokfast:
-            if type == "values":
-                self.grads  = self.grads_values
-                param_type = "values_dummy"
-            else:    
-                self.grads  = self.grads_weights
-                param_type = "weights"
+        
+            # # Apply Grokfast filters before optimizer step
+            # if self.grokfast_type == 'ema':
+            #     self.tmp = gradfilter_ema(self, grads=self.grads['values'], alpha=0.8, lamb=0.1, param_type=param_type)
+            # elif self.grokfast_type == 'ma':
+            #     self.tmp = gradfilter_ma(self, grads=self.grads, window_size=100, lamb=5.0, filter_type='mean', param_type=param_type)
 
-            params = {n: p for n, p in self.named_parameters() if type in n}  # Filter only the weight parameters
-
-            # Apply Grokfast filters before optimizer step
-            if self.grokfast_type == 'ema':
-                self.tmp = gradfilter_ema(self, grads=self.grads, alpha=0.8, lamb=0.1, param_type=param_type)
-            elif self.grokfast_type == 'ma':
-                self.tmp = gradfilter_ma(self, grads=self.grads, window_size=100, lamb=5.0, filter_type='mean', param_type=param_type)
-
-            if type == "values":
-                self.grads_values = self.tmp
-            else:
-                self.grads_weights = self.tmp
+            # if type == "values":
+            #     self.grads['values'] = self.tmp
+            # else:
+            #     self.grads['weights'] = self.tmp
         ### -------------------- optional --------------------
 
 
         if use_optimizer and optimizer:
-            # Using optimizer to update the parameter
+            # Clear 
             optimizer.zero_grad()
-            
             if parameter.grad is None:
                 parameter.grad = torch.zeros_like(parameter)
 
+            # set the gradients
             if nodes_2_update == "all":
                 parameter.grad = delta  # Apply full delta to the parameter
             else:
                 parameter.grad[nodes_2_update] = delta[nodes_2_update]  # Update only specific nodes
 
+            # Optionally adjust gradients based on grokfast 
+            if self.use_grokfast:
+        
+                if grad_type == "weights" and self.use_grokfast:
+                    param_type = "weights"
+                    if self.grokfast_type == 'ema':
+                        self.grads[grad_type] = gradfilter_ema(self, grads=self.grads[grad_type], alpha=0.8, lamb=0.1, param_type=param_type)
+                    elif self.grokfast_type == 'ma':
+                        self.grads[grad_type] = gradfilter_ma(self, grads=self.grads[grad_type], window_size=100, lamb=5.0, filter_type='mean', param_type=param_type)
+
+            # perform optimizer weight update step
             optimizer.step()
         else:
             # Manually update the parameter using gradient descent
@@ -423,6 +428,9 @@ class PCGraphConv(torch.nn.Module):
         during inference. The sensory vertices will then converge to the minimum found by gradient descent,
         when provided with that specific initialization. 
         """ 
+
+        # self.optimizer_values.zero_grad()  # Reset value node gradients
+
         self.get_graph()
 
         # num_nodes, (features)
@@ -440,7 +448,7 @@ class PCGraphConv(torch.nn.Module):
                 
         # Use the gradient descent update for updating values
         self.gradient_descent_update(
-            type="values",
+            grad_type="values",
             parameter=self.values_dummy,  # Assuming values are in self.data.x[:, 0]
             delta=delta_x,
             learning_rate=self.lr_values,
@@ -880,6 +888,8 @@ class PCGraphConv(torch.nn.Module):
         self.helper_GPU(self.print_GPU)
 
     def weight_update(self, data):
+        
+        # self.optimizer_weights.zero_grad()  # Reset weight gradients
 
         self.get_graph()                
         # self.values, self.errors, self.predictions, = self.data.x[:, 0], self.data.x[:, 1], self.data.x[:, 2]
@@ -925,7 +935,7 @@ class PCGraphConv(torch.nn.Module):
         # print("self.delta_w shape", delta_w.shape)
 
         self.gradient_descent_update(
-            type="weights",
+            grad_type="weights",
             parameter=self.weights,
             delta=delta_w,
             learning_rate=self.lr_weights,
@@ -1125,11 +1135,12 @@ class PCGNN(torch.nn.Module):
             torch.save(b, f"{path}/bias.pt")
 
 
-    def query(self, method, data=None):
+    def query(self, method, random_internal=True, data=None):
         
         print("Random init values of all internal nodes")
 
-        data.x[:, 0][self.pc_conv1.internal_indices] = torch.rand(data.x[:, 0][self.pc_conv1.internal_indices].shape).to(self.pc_conv1.device)
+        if random_internal:
+            data.x[:, 0][self.pc_conv1.internal_indices] = torch.rand(data.x[:, 0][self.pc_conv1.internal_indices].shape).to(self.pc_conv1.device)
 
 
         self.pc_conv1.energy_vals["internal_energy_testing"] = []
