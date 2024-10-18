@@ -425,16 +425,18 @@ elif args.mode == "training":
     
     # Modify the path based on the graph configuration (removing sens2sens or sens2sup)
     if graph_params["graph_type"]["params"]["remove_sens_2_sens"] and graph_params["graph_type"]["params"]["remove_sens_2_sup"]:
-        path += "_no_sens2sens_no_sens2sup"
+        graph_type_ = "_no_sens2sens_no_sens2sup"
     elif graph_params["graph_type"]["params"]["remove_sens_2_sens"]:
-        path += "_no_sens2sens"
+        graph_type_ = "_no_sens2sens"
     elif graph_params["graph_type"]["params"]["remove_sens_2_sup"]:
-        path += "_no_sens2sup"
+        graph_type_ = "_no_sens2sup"
     else:
-        path += "_normal"  # If neither are removed, label the folder as 'normal'
+        graph_type_ = "_normal"  # If neither are removed, label the folder as 'normal'
+
+    path += graph_type_
 else:
     raise ValueError("Invalid mode")
-
+ 
 # Append graph type, model parameters, and timestamp to the path
 path += f"/{model_params_name}_{date_hour}/"
 model_dir = path
@@ -465,7 +467,15 @@ plot_adj_matrix(single_graph, model_dir,
 plot_adj_matrix(full_batch, model_dir, node_types=None)
 
 
+config_dict = vars(args)  # Convert argparse Namespace to dictionary
 
+config_dict.update({
+    'graph_type_conn': graph_type_,  # Adding model type manually
+    'remove_sens_2_sens_': args.remove_sens_2_sens,  # Custom boolean flag for data augmentation
+    'remove_sens_2_sup_': args.remove_sens_2_sup,  # Custom boolean flag for data augmentation
+    "checkpoint_dir": model_dir,  # Track where model checkpoints are saved
+    **graph_params["graph_type"]["params"],  # Merge dynamic graph parameters
+})
 
 run = wandb.init(
     mode=args.use_wandb,
@@ -475,40 +485,10 @@ run = wandb.init(
     id=f"{model_params_short}_{date_hour}",
     # tags= 
     dir=model_dir,
-    
 
     # tags=["param_search", str(model_params["weight_init"]), model_params["activation"],  *learning_params['dataset_transform']], 
     # Track hyperparameters and run metadata
-    config={
-        # Model-related parameters
-        "model_type": args.model_type.lower(),
-        "T": args.T,
-        "weight_init": model_params["weight_init"],  # xavier, 'uniform', 'based_on_f', 'zero', 'kaiming'
-        "activation": model_params["activation"],
-        "clamping": model_params["clamping"],  # (0, torch.inf) or 'None'
-        "use_learning_optimizer": model_params["use_learning_optimizer"],  # False or optimizer settings
-        
-        # Graph-related parameters
-        "graph_structure": args.graph_type,
-        **graph_params["graph_type"]["params"],  # Merge the dynamic graph parameters
-        "supervised_learning": graph_params["supervised_learning"],
-
-        # Learning-related parameters
-        "lr_values": args.lr_values,
-        "lr_weights": args.lr_weights,
-        "optimizer": args.optimizer,  # Add the optimizer type here (False or float)
-        "epochs": args.epochs,  # Track the number of epochs
-
-        # Dataset and batching
-        "batch_size": train_loader.batch_size,
-        "numbers_list": dataset_params["numbers_list"],
-        "N": dataset_params['N'],  # Use first n instances of each digit or 'all'
-        "transform": learning_params['dataset_transform'],
-        
-        # Other run details
-        "seed": args.seed,  # Track the random seed for reproducibility
-        "checkpoint_dir": model_dir,  # Track where model checkpoints are saved
-    },
+    config=config_dict,  # Pass the updated config dictionary to wandb.init
 )
 
 # Contains graph edge matrix and other parameters so quite big to open.
@@ -570,10 +550,6 @@ if args.model_type.lower() == "ipc":
         debug=False, device=device)
     print("-----------Loading IPC model-----------")
 
-
-for name, param in model.named_parameters():
-    print(name, param.requires_grad) 
-    
 # Magic
 wandb.watch(model, 
             log="all",   # (str) One of "gradients", "parameters", "all", or None
@@ -863,6 +839,9 @@ test_params = {
 
 # model.pc_conv1.lr_values = 0.1
 # model.pc_conv1.lr_values = model_params["lr_params"][0]
+
+model.pc_conv1.trace_activity_values = True 
+model.pc_conv1.trace_activity_preds = True 
 
 avg_SSIM_mean, avg_SSIM_max, avg_MSE_mean, avg_MSE_max = generation(test_loader, model, test_params, clean_images, verbose=0)
 
