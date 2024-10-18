@@ -45,6 +45,9 @@ class PCGraphConv(torch.nn.Module):
         self.clamping = clamping
         self.wandb_logger = wandb_logger
 
+       
+
+
         self.trace_activity_values, self.trace_activity_errors, self.trace_activity_preds = False, False, False  
         self.trace = {
             "values": [], 
@@ -210,6 +213,13 @@ class PCGraphConv(torch.nn.Module):
         self.effective_learning["v_max"] = []
         self.effective_learning["v_min"] = []
 
+        if self.wandb_logger:
+
+            self.wandb_logger.watch(self, log="all", log_freq=40)
+
+            # watch the parameters weights and 
+            self.wandb_logger.watch(self.weights, log="all", log_freq=40)
+            
         # 2. during training set batch.e
 
         # k = 1.0 / num_vertices ** 0.5

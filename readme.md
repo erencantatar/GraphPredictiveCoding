@@ -16,7 +16,7 @@ Foobar is a Python library for dealing with word pluralization.
 ## TODO
 
 0. add energy drop in "ipc"
-
+0. self.graph = self.use_old_graph(), for SBM --> make graph save folder name the **params
 0. fix bug in wandb.watch(model)
 0. Check for seed match when loading existing graph 
 1. parser.add_argument('--connectivity_prob', type=float, default=0.08, help='Probability of connectivity.')

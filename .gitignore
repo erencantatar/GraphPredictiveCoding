@@ -40,3 +40,5 @@ cache/
 
 # Ignore Python cache files
 __pycache__/
+scr/wandb/debug-cli.etatar.log
+jobs/example.job

@@ -38,6 +38,7 @@ graph_type_options = {
                 "community_size": 30,       # Size of each community
                 "p_intra": 0.3,             # Probability of edges within the same community
                 "p_inter": 0.1,             # Probability of edges between different communities
+                "full_con_last_cluster_w_sup": True,
                 # "remove_sens_2_sens": False, 
                 # "remove_sens_2_sup": False, 
                 }
@@ -109,7 +110,7 @@ class GraphBuilder:
         self.graph_params = graph_type["params"]
 
         ### TODO 
-        self.create_new_graph = False  
+        self.create_new_graph = True   
         self.save_graph = True 
         self.dir = f"graphs/{self.graph_type['name']}/"
     
@@ -126,7 +127,6 @@ class GraphBuilder:
         else:
             self.dir += "_normal"  # If neither are removed, label the folder as 'normal'
                 
-
         if self.create_new_graph:
             self.graph = self.create_graph()
         else:
@@ -181,9 +181,8 @@ class GraphBuilder:
 
         elif self.graph_type["name"] == "stochastic_block_w_supvision_clusters":
             self.stochastic_block_w_supervision_clusters()
-
-        elif self.graph_type["name"] == "fully_connected_no_sens2sup":
-            self.fully_connected_no_sens2sup()
+        else:
+            raise ValueError(f"Invalid graph type: {self.graph_type['name']}")
         
 
         # Convert edge_index to tensor only if it's not already a tensor
@@ -393,6 +392,14 @@ class GraphBuilder:
             # remove sensory to supervised
             p[0, -1] = 0 
             p[-1, 0] = 0 
+
+        fully_connect_last_cluster = self.graph_params.get("full_con_last_cluster_w_sup", False)
+        # If requested, fully connect the last community with the supervised nodes
+        if fully_connect_last_cluster and self.supervised_learning:
+            last_cluster_idx = num_communities - 2  # Last internal community
+            supervision_cluster_idx = num_communities - 1  # Supervised nodes
+            p[last_cluster_idx, supervision_cluster_idx] = 1.0
+            p[supervision_cluster_idx, last_cluster_idx] = 1.0
 
         print("Got the sizes", sizes)
         G = nx.stochastic_block_model(sizes, p, directed=True, seed=self.seed)
