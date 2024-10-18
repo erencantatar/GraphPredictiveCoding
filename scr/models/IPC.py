@@ -131,7 +131,7 @@ class IPCGNN(PCGNN):
                  batch_size, use_learning_optimizer=False, weight_init="xavier", clamping=None,
                  supervised_learning=False, normalize_msg=False, debug=False, activation=None,
                  log_tensorboard=True, wandb_logger=None, device='cpu'):
-        super().__init__(num_vertices, sensory_indices, internal_indices, lr_params, T,
+        super(IPCGNN, self).__init__(num_vertices, sensory_indices, internal_indices, lr_params, T,
                                      graph_structure, batch_size, use_learning_optimizer, weight_init, clamping,
                                      supervised_learning, normalize_msg, debug, activation, log_tensorboard,
                                      wandb_logger, device)

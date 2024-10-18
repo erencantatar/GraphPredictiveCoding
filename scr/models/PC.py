@@ -53,14 +53,29 @@ class PCGraphConv(torch.nn.Module):
         }
 
         self.energy_vals = {
+            # training
             "internal_energy": [],
             "sensory_energy": [],
             "supervised_energy": [], 
+
+            'energy_drop': [],
+            'weight_update_gain': [],
+
+            # testing 
             "internal_energy_testing": [],
             "sensory_energy_testing": [],
             "supervised_energy_testing": []
         }
 
+
+        # Metrics for energy drop and weight update gain
+        self.energy_metrics = {
+            'internal_energy_t0': None,
+            'internal_energy_tT': None,
+            'internal_energy_tT_plus_1': None,
+            'energy_drop': None,
+            'weight_update_gain': None,
+        }
 
         self.gradients_minus_1 = 1 # or -1 
         # self.gradients_minus_1 = -1 # or -1 #NEVER 
@@ -89,6 +104,13 @@ class PCGraphConv(torch.nn.Module):
         
         self.use_optimizers = use_learning_optimizer
 
+        self.use_grokfast = False  
+        print(f"----- using grokfast: {self.use_grokfast}")
+
+        self.use_bias = False 
+        print(f"----- using use_bias: {self.use_bias}")
+
+
         self.grad_accum_method = "mean" 
         assert self.grad_accum_method in ["sum", "mean"]
         
@@ -103,8 +125,6 @@ class PCGraphConv(torch.nn.Module):
         # USING BATCH SIZE, we want the same edge weights at each subgraph of the batch
         self.weights = torch.nn.Parameter(torch.zeros(self.edge_index_single_graph.size(1), device=self.device))
         # init.uniform_(self.weights.data, -k, k)
-        
-        self.use_bias = False 
         
         if self.use_bias:
             self.biases = torch.nn.Parameter(torch.zeros(self.batchsize * self.num_vertices, device=self.device), requires_grad=False) # requires_grad=False)                
@@ -283,6 +303,17 @@ class PCGraphConv(torch.nn.Module):
         self.gpu_cntr = 0 
         self.print_GPU = False 
 
+     # Method to calculate energy drop and weight update gain
+    def calculate_energy_metrics(self):
+        """
+        Calculate energy drop (from t=0 to t=T) and weight update gain (from t=T to t=T+1).
+        """
+        self.energy_vals['energy_drop'].append(self.energy_metrics['internal_energy_t0'] - self.energy_metrics['internal_energy_tT'])
+        self.energy_vals['weight_update_gain'].append(self.energy_metrics['internal_energy_tT'] - self.energy_metrics['internal_energy_tT_plus_1'])
+        
+        print(f"Energy drop (t=0 to t=T): {self.energy_metrics['energy_drop']}")
+        print(f"Weight update gain (t=T to t=T+1): {self.energy_metrics['weight_update_gain']}")
+
     
     def helper_GPU(self,on=False):
         if on:
@@ -357,7 +388,6 @@ class PCGraphConv(torch.nn.Module):
         """
 
         # self.use_grokfast = False 
-        self.use_grokfast = True  
 
         # MAYBE SHOULD NOT DO GROKFAST FOR BOTH VALUE NODE UPDATES AND WEIGHTS UPDATE (ONLY this one) 
         self.grokfast_type = "ema"
@@ -386,10 +416,12 @@ class PCGraphConv(torch.nn.Module):
             optimizer.zero_grad()
             if parameter.grad is None:
                 parameter.grad = torch.zeros_like(parameter)
+            else:
+                parameter.grad.zero_()  # Reset the gradients to zero
 
             # set the gradients
             if nodes_2_update == "all":
-                parameter.grad = delta  # Apply full delta to the parameter
+                parameter.grad = -delta  # Apply full delta to the parameter
             else:
                 parameter.grad[nodes_2_update] = delta[nodes_2_update]  # Update only specific nodes
 
@@ -398,10 +430,10 @@ class PCGraphConv(torch.nn.Module):
         
                 if grad_type == "weights" and self.use_grokfast:
                     param_type = "weights"
-                    if self.grokfast_type == 'ema':
-                        self.grads[grad_type] = gradfilter_ema(self, grads=self.grads[grad_type], alpha=0.8, lamb=0.1, param_type=param_type)
-                    elif self.grokfast_type == 'ma':
-                        self.grads[grad_type] = gradfilter_ma(self, grads=self.grads[grad_type], window_size=100, lamb=5.0, filter_type='mean', param_type=param_type)
+                if self.grokfast_type == 'ema':
+                    self.grads[grad_type] = gradfilter_ema(self, grads=self.grads[grad_type], alpha=0.8, lamb=0.1)
+                elif self.grokfast_type == 'ma':
+                    self.grads[grad_type] = gradfilter_ma(self, grads=self.grads[grad_type], window_size=100, lamb=5.0, filter_type='mean')
 
             # perform optimizer weight update step
             optimizer.step()
@@ -741,16 +773,16 @@ class PCGraphConv(torch.nn.Module):
         self.data = data
         # self.values, _pred_ , self.errors, = data.x[:, 0], data.x[:, 1], data.x[:, 2]
 
-        self.helper_GPU(self.print_GPU)
-
+        # self.helper_GPU(self.print_GPU)
 
         self.get_graph()
 
-        self.helper_GPU(self.print_GPU)
+        # self.helper_GPU(self.print_GPU)
 
-
-
+        # Energy at t=0
         energy = self.energy(self.data)
+        self.energy_metrics['internal_energy_t0'] = energy['internal_energy']
+        print(f"Initial internal energy (t=0): {self.energy_metrics['internal_energy_t0']}")
 
         from tqdm import tqdm
 
@@ -770,6 +802,11 @@ class PCGraphConv(torch.nn.Module):
             energy = self.energy(self.data)
             t_bar.set_description(f"Total energy at time {t+1} / {self.T} {energy},")
             
+        
+        # Energy at t=T
+        self.energy_metrics['internal_energy_tT'] = energy['internal_energy']
+        print(f"Final internal energy (t=T): {self.energy_metrics['internal_energy_tT']}")
+
         if self.mode == "train":
             self.restart_activity()
 
@@ -883,9 +920,15 @@ class PCGraphConv(torch.nn.Module):
         self.weight_update(self.data)
         self.set_phase('weight_update done')
 
+        # Energy at t=T+1 after weight update
         energy = self.energy(self.data)
+        self.energy_metrics['internal_energy_tT_plus_1'] = energy['internal_energy']
+        print(f"Internal energy after weight update (t=T+1): {self.energy_metrics['internal_energy_tT_plus_1']}")
+
+        # Calculate energy drop and weight update gain
+        self.calculate_energy_metrics()
         
-        self.helper_GPU(self.print_GPU)
+        # self.helper_GPU(self.print_GPU)
 
     def weight_update(self, data):
         
@@ -996,15 +1039,16 @@ class PCGraphConv(torch.nn.Module):
 
     
 
+import torch.nn as nn  # Import the parent class if not already done
 
-class PCGNN(torch.nn.Module):
+class PCGNN(nn.Module):
     def __init__(self, num_vertices, sensory_indices, internal_indices, 
                  lr_params, T, graph_structure, 
                  batch_size, 
                  use_learning_optimizer=False, weight_init="xavier", clamping=None, supervised_learning=False, 
                  normalize_msg=False, 
                  debug=False, activation=None, log_tensorboard=True, wandb_logger=None, device='cpu'):
-        super(PCGNN, self).__init__()
+        super(PCGNN, self).__init__()  # Ensure the correct super call
         
         """ TODO: in_channels, hidden_channels, out_channels, """
         # INSIDE LAYERS CAN HAVE PREDCODING - intra-layer 
