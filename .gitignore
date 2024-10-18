@@ -6,6 +6,7 @@ jobs/outputs/PC/*
 jobs/outputs/IPC/*
 jobs/outputs/PC/slurm_output_7878391_simple.out
 
+jobs/example.job
 
 
 

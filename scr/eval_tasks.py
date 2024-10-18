@@ -697,6 +697,7 @@ def classification(test_loader, model,
 
         if sum(labels) == 0:
             print("-----------NO prediction on labels-----------")
+            break 
         else: 
             label_pred = torch.argmax(softmax_labels)
             label_pred = torch.arange(10)[label_pred]
