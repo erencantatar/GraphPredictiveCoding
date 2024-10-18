@@ -421,7 +421,7 @@ class PCGraphConv(torch.nn.Module):
 
             # set the gradients
             if nodes_2_update == "all":
-                parameter.grad = -delta  # Apply full delta to the parameter
+                parameter.grad = delta  # Apply full delta to the parameter
             else:
                 parameter.grad[nodes_2_update] = delta[nodes_2_update]  # Update only specific nodes
 

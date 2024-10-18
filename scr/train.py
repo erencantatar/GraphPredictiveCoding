@@ -420,24 +420,25 @@ date_hour = datetime.now().strftime("%Y-%m-%d_%H_%M_%S")
 path = ""
 # Initialize base path depending on mode (training or experimenting)
 if args.mode == "experimenting":
-    path = f"trained_models_experimenting/{args.model_type.lower()}"
+    path += f"trained_models_experimenting/"
 elif args.mode == "training":
-    path = f"trained_models/{args.model_type.lower()}/{graph_params['graph_type']['name']}/"
-    
-    # Modify the path based on the graph configuration (removing sens2sens or sens2sup)
-    if graph_params["graph_type"]["params"]["remove_sens_2_sens"] and graph_params["graph_type"]["params"]["remove_sens_2_sup"]:
-        graph_type_ = "_no_sens2sens_no_sens2sup"
-    elif graph_params["graph_type"]["params"]["remove_sens_2_sens"]:
-        graph_type_ = "_no_sens2sens"
-    elif graph_params["graph_type"]["params"]["remove_sens_2_sup"]:
-        graph_type_ = "_no_sens2sup"
-    else:
-        graph_type_ = "_normal"  # If neither are removed, label the folder as 'normal'
-
-    path += graph_type_
+    path += f"trained_models/"
 else:
     raise ValueError("Invalid mode")
- 
+
+path += f"{args.model_type.lower()}/{graph_params['graph_type']['name']}/"
+  
+# Modify the path based on the graph configuration (removing sens2sens or sens2sup)
+if graph_params["graph_type"]["params"]["remove_sens_2_sens"] and graph_params["graph_type"]["params"]["remove_sens_2_sup"]:
+    graph_type_ = "_no_sens2sens_no_sens2sup"
+elif graph_params["graph_type"]["params"]["remove_sens_2_sens"]:
+    graph_type_ = "_no_sens2sens"
+elif graph_params["graph_type"]["params"]["remove_sens_2_sup"]:
+    graph_type_ = "_no_sens2sup"
+else:
+    graph_type_ = "_normal"  # If neither are removed, label the folder as 'normal'
+
+path += graph_type_
 # Append graph type, model parameters, and timestamp to the path
 path += f"/{model_params_name}_{date_hour}/"
 model_dir = path
@@ -835,7 +836,7 @@ test_params = {
     "model_dir": model_dir,
     "T": 300,
     "supervised_learning":True, 
-    "num_samples": 12,
+    "num_samples": 15,
 }
 
 # model.pc_conv1.lr_values = 0.1
