@@ -590,6 +590,12 @@ history = {
     "sensory_energy_per_epoch": [],
 }
 
+wandb.watch(model.pc_conv1, log="all", log_freq=10)
+# wandb.watch(self.pc_conv1, log="all", log_freq=10)
+
+
+model.train()
+
 # Define the early stopping threshold and OOM warning
 threshold_earlystop = 0.05
 max_energy_threshold = 1e6
