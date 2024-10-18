@@ -2,7 +2,7 @@
 
 #SBATCH --partition=gpu
 #SBATCH --gpus=1
-#SBATCH --job-name=PC_Ns2s
+#SBATCH --job-name=RM_s2sF
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=18
 #SBATCH --time=25:00:00
@@ -21,63 +21,75 @@ source activate PredCod
 # experiment 1: own params 
 echo "Running simple training"
 
-echo "----PC----"
+echo "----PC and----"
 
 # experiment 1: own params 
 echo "Running simple training"
 
 # Parameter arrays
-# graph_types=("fully_connected" "fully_connected_w_self" "fully_connected_no_sens2sup" "stochastic_block")
+# graph_types=("fully_connected" "fully_connected_w_self" "stochastic_block")
 # graph_types=("stochastic_block")
-graph_types=("fully_connected_no_sens2sup")
-batch_sizes=(1 8)
-weight_inits=("0.01" "0.001" "uniform")
-Ts=(10 100)
-lr_vals=(1 0.01 )
-lr_weights=(0.001 0.00001)
+
+model_types=("PC")
+graph_types=("fully_connected")
+remove_sens_2_sens=("True" "False")
+remove_sens_2_sup=("True" "False")
+
+batch_sizes=(1)
+weight_inits=("0.001" "0.0001" "0.01")
+Ts=(10)
+lr_vals=(0.1)
+lr_weights=(0.00001)
 optimizer_vals=("False")
 
 # Calculate total number of trials
-total_trials=$(( ${#graph_types[@]} * ${#batch_sizes[@]} * ${#Ts[@]} * ${#weight_inits[@]} * ${#lr_vals[@]} * ${#lr_weights[@]} ))
+total_trials=$(( ${#graph_types[@]} * ${#remove_sens_2_sens[@]} *  ${#remove_sens_2_sup[@]} *  ${#batch_sizes[@]} * ${#Ts[@]} * ${#weight_inits[@]} * ${#lr_vals[@]} * ${#lr_weights[@]} ))
 echo "Total number of trials: $total_trials"
 
 # Initialize trial counter
 trial_count=1 
 
-
 # Nested loop structure
-for graph_type in "${graph_types[@]}"; do
-    for batch_size in "${batch_sizes[@]}"; do
-        for T in "${Ts[@]}"; do
-            for weight_init in "${weight_inits[@]}"; do
-                for lr_val in "${lr_vals[@]}"; do
-                    for lr_weight in "${lr_weights[@]}"; do
-                        for optimizer_val in "${optimizer_vals[@]}"; do
-                            echo "Trial $trial_count/$total_trials: Running with graph_type=${graph_type}, batch_size=${batch_size}, T=${T}, weight_init=${weight_init}, lr_val=${lr_val}, lr_weight=${lr_weight}, optimizer=${optimizer_val}"
+for model in "${model_types[@]}"; do
+    for graph_type in "${graph_types[@]}"; do
+        for s2s in "${remove_sens_2_sens[@]}"; do
+            for s2l in "${remove_sens_2_sup[@]}"; do
+                for batch_size in "${batch_sizes[@]}"; do
+                    for T in "${Ts[@]}"; do
+                        for weight_init in "${weight_inits[@]}"; do
+                            for lr_val in "${lr_vals[@]}"; do
+                                for lr_weight in "${lr_weights[@]}"; do
+                                    for optimizer_val in "${optimizer_vals[@]}"; do
+                                        echo "Trial $trial_count/$total_trials: Running with graph_type=${graph_type}, batch_size=${batch_size}, T=${T}, weight_init=${weight_init}, lr_val=${lr_val}, lr_weight=${lr_weight}, optimizer=${optimizer_val}"
 
-                            srun python -u train.py \
-                                --mode training \
-                                --use_wandb online \
-                                --model_type PC \
-                                --normalize_msg False \
-                                --dataset_transform none \
-                                --numbers_list 0,1,3,4,5,6,7,8 \
-                                --N 30 \
-                                --supervision_label_val 10 \
-                                --num_internal_nodes 1500 \
-                                --graph_type "${graph_type}" \
-                                --weight_init "${weight_init}" \
-                                --T "${T}" \
-                                --lr_values "${lr_val}" \
-                                --lr_weights "${lr_weight}" \
-                                --activation_func swish \
-                                --epochs 20 \
-                                --batch_size "${batch_size}" \
-                                --seed 42 \
-                                --optimizer "${optimizer_val}"
+                                        srun python -u train.py \
+                                            --mode training \
+                                            --use_wandb online \
+                                            --model_type "${model}" \
+                                            --normalize_msg False \
+                                            --dataset_transform none \
+                                            --numbers_list 0,1,3,4,5,6,7,8 \
+                                            --N 30 \
+                                            --supervision_label_val 10 \
+                                            --num_internal_nodes 2000 \
+                                            --graph_type "${graph_type}" \
+                                            --remove_sens_2_sens "${s2s}" \
+                                            --remove_sens_2_sup "${s2l}" \
+                                            --weight_init "${weight_init}" \
+                                            --T "${T}" \
+                                            --lr_values "${lr_val}" \
+                                            --lr_weights "${lr_weight}" \
+                                            --activation_func swish \
+                                            --epochs 20 \
+                                            --batch_size "${batch_size}" \
+                                            --seed 42 \
+                                            --optimizer "${optimizer_val}"
 
-                            # Increment trial counter
-                            trial_count=$((trial_count + 1))
+                                        # Increment trial counter
+                                        trial_count=$((trial_count + 1))
+                                    done
+                                done
+                            done
                         done
                     done
                 done

@@ -224,7 +224,8 @@ train_loader = DataLoader(custom_dataset_train,
                           batch_size=dataset_params["batch_size"], 
                           shuffle=True, 
                           generator=generator_seed,
-                          num_workers=1
+                          num_workers=1,
+                          pin_memory=True,
                           )
 
 
@@ -800,7 +801,7 @@ test_params = {
     "model_dir": model_dir,
     "T":300,
     "supervised_learning":False, 
-    "num_samples": 30,
+    "num_samples": 45,
 }
 
 # model.pc_conv1.lr_values = 0.1

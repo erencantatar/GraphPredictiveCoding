@@ -14,9 +14,8 @@ module load Anaconda3/2022.05
 
 cd /home/etatar/GraphPredCod2/scr
 
-# Activate your environment
-
 source activate PredCod
+# Activated your environment
 
 # experiment 1: own params 
 echo "Running simple training"
@@ -26,26 +25,29 @@ echo "----IPC----"
 # experiment 1: own params 
 echo "Running simple training"
 
+
+wandb online 
+
 srun python -u train.py \
-    --mode training \
+    --mode experimenting \
     --use_wandb disabled \
-    --model_type PC \
+    --model_type IPC \
     --normalize_msg False \
     --dataset_transform none \
-    --numbers_list 0,1,4,3,9 \
-    --N 10 \
+    --numbers_list 0,1,2,3,4,7,9 \
+    --N 20 \
     --supervision_label_val 10 \
     --num_internal_nodes 1500 \
-    --graph_type stochastic_block \
+    --graph_type fully_connected \
     --remove_sens_2_sens False \
     --remove_sens_2_sup False \
     --weight_init 0.001 \
-    --T 50 \
+    --T 5 \
     --lr_values 0.1 \
-    --lr_weights 0.00001 \
+    --lr_weights 0.0001 \
     --activation_func swish \
     --epochs 10 \
-    --batch_size 1 \
+    --batch_size 3 \
     --seed 42 \
     --optimizer False
 # srun python -u train.py --use_wandb online --model_type IPC --normalize_msg False --dataset_transform none --numbers_list 0,1,3,4,5,6,7 --N 20 --supervision_label_val 10 --num_internal_nodes 1500 --graph_type stochastic_block --weight_init 0.001 --T 50 --lr_values 0.1 --lr_weights 0.0001 --activation_func swish --epochs 20 --batch_size 4 --seed 42 --optimizer False

@@ -18,6 +18,7 @@ cd /home/etatar/GraphPredCod2/scr
 
 source activate PredCod
 
+wandb online 
 # experiment 1: own params 
 echo "Running simple training"
 
@@ -29,12 +30,12 @@ echo "Running simple training"
 # Parameter arrays
 # graph_types=("fully_connected" "fully_connected_w_self" "fully_connected_no_sens2sup" "stochastic_block")
 # graph_types=("fully_connected_no_sens2sup" "stochastic_block" "fully_connected_w_self")
-graph_types=("stochastic_block")
-batch_sizes=(1 8)
-weight_inits=("0.01" "0.001" "uniform" "0.0001")
-Ts=(10 40 200)
-lr_vals=(1 0.1 0.01 0.001 0.0001)
-lr_weights=(0.01 0.001 0.0001 0.00001 0.000001)
+graph_types=("fully_connected")
+batch_sizes=(1)
+weight_inits=("0.01" "0.001")
+Ts=(20)
+lr_vals=(0.01 0.001)
+lr_weights=(0.0001 0.00001)
 
 # Calculate total number of trials
 total_trials=$(( ${#graph_types[@]} * ${#batch_sizes[@]} * ${#Ts[@]} * ${#weight_inits[@]} * ${#lr_vals[@]} * ${#lr_weights[@]} ))
@@ -60,7 +61,7 @@ for graph_type in "${graph_types[@]}"; do
                             --dataset_transform none \
                             --numbers_list 0,1,3,4,5,6,7 \
                             --N 20 \
-                            --supervision_label_val 10 \
+                            --supervision_label_val 1 \
                             --num_internal_nodes 1500 \
                             --graph_type "${graph_type}" \
                             --weight_init "${weight_init}" \
@@ -68,6 +69,8 @@ for graph_type in "${graph_types[@]}"; do
                             --lr_values "${lr_val}" \
                             --lr_weights "${lr_weight}" \
                             --activation_func swish \
+      			    --remove_sens_2_sens False \
+                            --remove_sens_2_sup False \
                             --epochs 20 \
                             --batch_size "${batch_size}" \
                             --seed 42 \
