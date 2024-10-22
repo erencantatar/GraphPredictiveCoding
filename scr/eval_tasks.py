@@ -724,15 +724,21 @@ def classification(test_loader, model,
 
             softmax_labels_np = softmax_labels.cpu().detach().numpy()
 
-            # Define the color for each bar, defaulting to blue, with the max value bar colored red
-            colors = ['blue' if i != torch.argmax(softmax_labels).item() else 'red' for i in range(len(softmax_labels_np))]
+            y_t, y_p = int(noisy_batch.y.item()), int(label_pred.item())
+            y_true.append(y_t)
+            y_pred.append(y_p)
+
+            if y_p == y_t:
+                # Define the color for each bar, defaulting to blue, with the max value bar colored red
+                colors = ['blue' if i != torch.argmax(softmax_labels).item()s else 'green' for i in range(len(softmax_labels_np))]
+            else:
+                colors = ['blue' if i != torch.argmax(softmax_labels).item() else 'red' for i in range(len(softmax_labels_np))]
 
             # Plot the bars with the specified colors
             ax["G"].bar([str(x) for x in range(10)], softmax_labels_np, color=colors)
             ax["G"].set_title("Softmax Probability Distribution")
 
-            y_true.append(int(noisy_batch.y.item()))
-            y_pred.append(int(label_pred.item()))
+          
 
 
         if test_params["model_dir"]:
