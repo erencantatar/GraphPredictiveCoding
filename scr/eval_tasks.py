@@ -30,6 +30,7 @@ import random
 from torch_geometric.nn import MessagePassing
 import torch.nn.functional as F
 import os
+import wandb
     
 import gc 
 from helper.error import calculate_mse
@@ -145,6 +146,11 @@ def occlusion(test_loader, model, test_params):
         print(labels)
 
         MSE_values.append(MSE)
+
+        if test_params["num_wandb_img_log"] < idx:
+            # log fig to wandb
+            wandb.log({"occlusion_IMG": wandb.Image(fig)})
+            plt.close(fig)
 
         if idx >= test_params["num_samples"]:
             break 
@@ -269,6 +275,11 @@ def denoise(test_loader, model, test_params, sigma=0.1):
         difference_image = clean_image - denoised_output_scaled
 
         MSE_values.append(MSE)
+
+        if test_params["num_wandb_img_log"] < idx:
+            # log fig to wandb
+            wandb.log({"denoise_IMG": wandb.Image(fig)})
+            plt.close(fig)
 
         if idx >= test_params["num_samples"]:
             break 
@@ -479,8 +490,14 @@ def generation(test_loader, model, test_params, clean_images, num_samples=8, ver
         # Adjust subplot spacing if needed
         plt.subplots_adjust(wspace=0.05, hspace=0.05)  # Adjust spacing between subplots
 
+
         if test_params["model_dir"]:
             fig.savefig(f'{test_params["model_dir"]}eval/generation/generation_condition_label_T_{idx}_{model.pc_conv1.T}_{noisy_batch.y.item()}.png')
+
+        if test_params["num_wandb_img_log"] < idx:
+            # log fig to wandb
+            wandb.log({"generation_IMG": wandb.Image(fig)})
+            plt.close(fig)
 
         # save 
         print(f"generation_task_{noisy_batch.y.item()}.png")
@@ -555,6 +572,7 @@ def classification(test_loader, model,
 
     assert test_params["supervised_learning"] == False
 
+    
     model.pc_conv1.debug = False
     model.pc_conv1.T = test_params["T"]   
     # model.pc_conv1.T = 50 
@@ -720,6 +738,11 @@ def classification(test_loader, model,
         if test_params["model_dir"]:
             fig_path = f'{test_params["model_dir"]}eval/classification/classification_{idx}_condition_label_T_{model.pc_conv1.T}_{noisy_batch.y.item()}.png'
             fig.savefig(fig_path)
+
+        if test_params["num_wandb_img_log"] < idx:
+            # log fig to wandb
+            wandb.log({"classification_IMG": wandb.Image(fig)})
+            plt.close(fig)
 
         # fig.savefig(f'{model_dir}/classification/classification_{idx}_condition_label_T_{model.pc_conv1.T}_{noisy_batch.y.item()}.png')
 

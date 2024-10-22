@@ -8,6 +8,7 @@ from models.MessagePassing import PredictionMessagePassing, ValueMessagePassing
 from helper.activation_func import set_activation
 from helper.grokfast import gradfilter_ema, gradfilter_ma
 import os 
+import wandb
 
 class PCGraphConv(torch.nn.Module): 
     def __init__(self, num_vertices, sensory_indices, internal_indices, 
@@ -213,12 +214,13 @@ class PCGraphConv(torch.nn.Module):
         self.effective_learning["v_max"] = []
         self.effective_learning["v_min"] = []
 
+
         if self.wandb_logger:
 
-            self.wandb_logger.watch(self, log="all", log_freq=40)
+            self.wandb_logger.watch(self, log="all", log_freq=100)  # Log all gradients and parameters
 
             # watch the parameters weights and 
-            self.wandb_logger.watch(self.weights, log="all", log_freq=40)
+            # self.wandb_logger.watch(self.weights, log="all", log_freq=40)
             
         # 2. during training set batch.e
 
@@ -312,6 +314,35 @@ class PCGraphConv(torch.nn.Module):
 
         self.gpu_cntr = 0 
         self.print_GPU = False 
+
+    def log_gradients(self):
+        print("Logging gradients")
+        """Log the gradients of each layer after backward pass."""
+        for name, param in self.named_parameters():
+            if param.grad is not None:
+                grad_magnitude = param.grad.norm().item()
+                grad_hist = param.grad.cpu().numpy()
+
+                if self.wandb_logger:
+                    # Log gradient magnitude
+                    self.wandb_logger.log({f"{name}_grad_magnitude": grad_magnitude})
+                    # Log gradient distribution
+                    self.wandb_logger.log({f"{name}_grad_distribution": wandb.Histogram(grad_hist)})
+        
+
+    def log_weights(self):
+        print("Logging weights")
+        """Log the weight matrix norms and distributions."""
+        for name, param in self.named_parameters():
+            if 'weight' in name:
+                weight_norm = param.norm().item()
+                weight_hist = param.cpu().detach().numpy()
+
+                if self.wandb_logger:
+                    # Log weight matrix norm
+                    self.wandb_logger.log({f"{name}_weight_norm": weight_norm})
+                    # Log weight matrix distribution
+                    self.wandb_logger.log({f"{name}_weight_distribution": wandb.Histogram(weight_hist)})
 
      # Method to calculate energy drop and weight update gain
     def calculate_energy_metrics(self):
@@ -891,6 +922,8 @@ class PCGraphConv(torch.nn.Module):
         
     def learning(self, data):
 
+        self.log_weights()
+
         self.helper_GPU(self.print_GPU)
 
 
@@ -986,6 +1019,9 @@ class PCGraphConv(torch.nn.Module):
             delta_w = delta_w.mean(0).detach()
         
         # print("self.delta_w shape", delta_w.shape)
+
+        self.log_gradients()
+
 
         self.gradient_descent_update(
             grad_type="weights",

@@ -353,7 +353,7 @@ model_params_short = f"num_iternode_{args.num_internal_nodes}_T_{args.T}_lr_w_{a
 print(len(model_params_short), model_params_short)
 model_params_name = (
     f"{args.model_type}_"
-    f"nodes_{args.num_internal_nodes}_"
+    f"nodes_{graph_params['internal_nodes']}_" 
     f"T_{args.T}_"
     f"lr_vals_{args.lr_values}_"
     f"lr_wts_{args.lr_weights}_"
@@ -372,7 +372,7 @@ model_params_name = (
 
 model_params_name_full = (
     f"model_{args.model_type}_"
-    f"num_internal_nodes_{args.num_internal_nodes}_"
+    f"num_internal_nodes_{graph_params['internal_nodes']}_"
     f"T_{args.T}_"
     f"lr_values_{args.lr_values}_"
     f"lr_weights_{args.lr_weights}_"
@@ -487,7 +487,6 @@ run = wandb.init(
     id=f"{model_params_short}_{date_hour}",
     # tags= 
     dir=model_dir,
-
     # tags=["param_search", str(model_params["weight_init"]), model_params["activation"],  *learning_params['dataset_transform']], 
     # Track hyperparameters and run metadata
     config=config_dict,  # Pass the updated config dictionary to wandb.init
@@ -740,8 +739,9 @@ wandb.log({"model_dir": model_dir})
  
 # device = torch.device('cpu')
 from eval_tasks import classification, denoise, occlusion, generation #, reconstruction
-model.pc_conv1.batchsize = 1
 
+num_wandb_img_log = 3 # Number of images to log to wandb
+model.pc_conv1.batchsize = 1
 
 ### Make dataloader for testing where we take all the digits of the number_list we trained on ###
 dataset_params_testing = dataset_params.copy()
@@ -791,6 +791,7 @@ test_params = {
     "supervised_learning":True, 
     "num_samples": 5,
     "add_sens_noise": False,
+    "num_wandb_img_log": num_wandb_img_log,
 }
 
 # model.pc_conv1.lr_values = 0.1 
@@ -809,6 +810,7 @@ test_params = {
     "T":300,
     "supervised_learning":False, 
     "num_samples": 45,
+    "num_wandb_img_log": num_wandb_img_log,
 }
 
 # model.pc_conv1.lr_values = 0.1
@@ -822,6 +824,7 @@ test_params = {
     "T": 300,
     "supervised_learning":True, 
     "num_samples": 6,
+    "num_wandb_img_log": num_wandb_img_log,
 }
 
 # model.pc_conv1.lr_values = 0.1
@@ -843,6 +846,7 @@ test_params = {
     "T": 300,
     "supervised_learning":True, 
     "num_samples": 15,
+    "num_wandb_img_log": num_wandb_img_log,
 }
 
 # model.pc_conv1.lr_values = 0.1
