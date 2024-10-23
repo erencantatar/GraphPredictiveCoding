@@ -219,10 +219,11 @@ class PCGraphConv(torch.nn.Module):
         self.effective_learning["v_max"] = []
         self.effective_learning["v_min"] = []
 
+        self.global_step = 0 # Initialize global step counter for logging
 
-        if self.wandb_logger:
-
-            self.wandb_logger.watch(self, log="all", log_freq=100)  # Log all gradients and parameters
+        # if self.wandb_logger:
+            
+            # self.wandb_logger.watch(self, log="all", log_freq=100)  # Log all gradients and parameters
 
             # watch the parameters weights and 
             # self.wandb_logger.watch(self.weights, log="all", log_freq=40)
@@ -276,6 +277,16 @@ class PCGraphConv(torch.nn.Module):
 
         self.t = ""
 
+        # Find edges between sensory nodes (sensory-to-sensory)
+        # self.s2s_mask = (self.edge_index_single_graph[0].isin(self.sensory_indices)) & (self.edge_index_single_graph[1].isin(self.sensory_indices))
+
+        sensory_indices_set = set(self.sensory_indices_single_graph)
+        s2s_mask = [(src in sensory_indices_set and tgt in sensory_indices_set) 
+                    for src, tgt in zip(self.edge_index_single_graph[0], self.edge_index_single_graph[1])]
+
+        # Convert mask to tensor (if needed)
+        self.s2s_mask = torch.tensor(s2s_mask, dtype=torch.bool, device=self.device)
+
         # if activation == "tanh":
         #     print("Since using tanh, using xavier_normal_")
         #     init.xavier_normal_(self.weights)   # or xavier_normal_ / xavier_uniform_
@@ -320,20 +331,30 @@ class PCGraphConv(torch.nn.Module):
         self.gpu_cntr = 0 
         self.print_GPU = False 
 
-    def log_gradients(self):
+    def log_gradients(self, log_histograms=False, log_every_n_steps=100):
+        """
+        Log the gradients of each layer after backward pass.
+        Args:
+            log_histograms (bool): If True, log gradient histograms (which is more time-consuming).
+            log_every_n_steps (int): Log histograms every N steps to reduce overhead.
+        """
         print("Logging gradients")
-        """Log the gradients of each layer after backward pass."""
-        for name, param in self.named_parameters():
-            if param.grad is not None:
-                grad_magnitude = param.grad.norm().item()
-                grad_hist = param.grad.cpu().numpy()
+        if self.global_step != 0 and (self.global_step % log_every_n_steps == 0):
+            for name, param in self.named_parameters():
+                if param.grad is not None:
+                    grad_magnitude = param.grad.norm().item()
 
-                if self.wandb_logger:
                     # Log gradient magnitude
-                    self.wandb_logger.log({f"{name}_grad_magnitude": grad_magnitude})
-                    # Log gradient distribution
-                    self.wandb_logger.log({f"{name}_grad_distribution": wandb.Histogram(grad_hist)})
-        
+                    if self.wandb_logger:
+                        self.wandb_logger.log({f"{name}_grad_magnitude": grad_magnitude})
+
+                        # Log gradient histograms less frequently
+                        if log_histograms:
+                            grad_hist = param.grad.cpu().numpy()
+                            self.wandb_logger.log({f"{name}_grad_distribution": wandb.Histogram(grad_hist)})
+
+        # Increment step counter
+        self.global_step += 1
 
     def log_weights(self):
         print("Logging weights")
@@ -743,6 +764,7 @@ class PCGraphConv(torch.nn.Module):
         energy['internal_energy'] = 0.5 * (self.errors[self.internal_indices] ** 2).sum().item()
         energy['sensory_energy']  = 0.5 * (self.errors[self.sensory_indices] ** 2).sum().item()
         energy['supervised_energy']  = 0.5 * (self.errors[self.supervised_labels] ** 2).sum().item()
+        energy['energy_total']  = 0.5 * (self.errors** 2).sum().item()
         
         self.energy_vals['mean_internal_energy_sign'].append(self.errors[self.internal_indices].mean().item())
         self.energy_vals['mean_sensory_energy_sign'].append(self.errors[self.sensory_indices].mean().item())
@@ -755,9 +777,13 @@ class PCGraphConv(torch.nn.Module):
             self.energy_vals["supervised_energy"].append(energy["supervised_energy"])
 
             if self.wandb_logger:
+                self.wandb_logger.log({"energy_total": energy["energy_total"]})
                 self.wandb_logger.log({"energy_internal": energy["internal_energy"]})
                 self.wandb_logger.log({"energy_sensory": energy["sensory_energy"]})
 
+                self.wandb_logger.log({"mean_internal_energy_sign": self.errors[self.internal_indices].mean().item()})
+                self.wandb_logger.log({"mean_sensory_energy_sign": self.errors[self.sensory_indices].mean().item()})
+                self.wandb_logger.log({"mean_supervised_energy_sign": self.errors[self.supervised_labels].mean().item()})
 
         else:
 
@@ -998,8 +1024,43 @@ class PCGraphConv(torch.nn.Module):
         # self.helper_GPU(self.print_GPU)
 
     def log_delta_w(self, delta_w):
+         
+        # self.w_log.append(delta_w.detach().cpu())
 
-        self.w_log.append(delta_w.detach().cpu())
+        # Extract the first batch from delta_w and edge_index
+        first_batch_delta_w = delta_w[:self.edge_index_single_graph.size(1)]  # Assuming edge_index_single_graph represents a single graph's edges
+
+        # Find sensory-to-sensory connections in the first batch
+        sensory_indices_set = set(self.sensory_indices_single_graph)
+        s2s_mask = [(src in sensory_indices_set and tgt in sensory_indices_set) 
+                    for src, tgt in zip(self.edge_index_single_graph[0], self.edge_index_single_graph[1])]
+
+        # Convert mask to tensor (if needed)
+        s2s_mask = torch.tensor(s2s_mask, dtype=torch.bool, device=self.device)
+
+        # Find the rest (edges that are not sensory-to-sensory) in the first batch
+        rest_mask = ~s2s_mask
+
+        # Apply the mask to delta_w for sensory-to-sensory and rest
+        delta_w_s2s = first_batch_delta_w[s2s_mask]
+        delta_w_rest = first_batch_delta_w[rest_mask]
+
+        # Check if delta_w_s2s is non-empty before calculating max and mean
+        delta_w_s2s_mean = delta_w_s2s.mean().item() if delta_w_s2s.numel() > 0 else 0
+        delta_w_s2s_max = delta_w_s2s.max().item() if delta_w_s2s.numel() > 0 else 0
+
+        # Check if delta_w_rest is non-empty before calculating max and mean
+        delta_w_rest_mean = delta_w_rest.mean().item() if delta_w_rest.numel() > 0 else 0
+        delta_w_rest_max = delta_w_rest.max().item() if delta_w_rest.numel() > 0 else 0
+
+        # Log the delta_w values for the first batch
+        self.wandb_logger.log({
+            "delta_w_s2s_mean_first_batch": delta_w_s2s_mean,
+            "delta_w_s2s_max_first_batch": delta_w_s2s_max,
+            "delta_w_rest_mean_first_batch": delta_w_rest_mean,
+            "delta_w_rest_max_first_batch": delta_w_rest_max
+        })
+
 
     def weight_update(self, data):
         
@@ -1048,7 +1109,7 @@ class PCGraphConv(torch.nn.Module):
         
         # print("self.delta_w shape", delta_w.shape)
 
-        self.log_gradients()
+        # self.log_gradients(log_histograms=True, log_every_n_steps=20 * self.T)
 
         self.gradient_descent_update(
             grad_type="weights",
