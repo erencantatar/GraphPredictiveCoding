@@ -16,6 +16,8 @@ jobs/outputs/*
 jobs/outputs/PC/*
 jobs/outputs/IPC/*
 
+GraphPredCod2/notebooks/training.ipynb
+notebooks/training.ipynb
 notebooks/trained_models/*/
 notebooks/trained_models/**/*
 
@@ -42,3 +44,4 @@ cache/
 __pycache__/
 scr/wandb/debug-cli.etatar.log
 jobs/example.job
+notebooks/training.ipynb
