@@ -62,6 +62,10 @@ class PCGraphConv(torch.nn.Module):
             "sensory_energy": [],
             "supervised_energy": [], 
 
+            "mean_internal_energy_sign": [],
+            "mean_sensory_energy_sign": [],
+            "mean_supervised_energy_sign":[],
+     
             'energy_drop': [],
             'weight_update_gain': [],
 
@@ -71,6 +75,7 @@ class PCGraphConv(torch.nn.Module):
             "supervised_energy_testing": []
         }
 
+        self.w_log = []
 
         # Metrics for energy drop and weight update gain
         self.energy_metrics = {
@@ -586,8 +591,15 @@ class PCGraphConv(torch.nn.Module):
         # self.data.x[self.nodes_2_update, 0] = self.values_dummy.data[:, self.nodes_2_update].detach()  # Detach to avoid retaining the computation graph
         ## GOOD ONE #### 
         
+        # if self.trace_activity_values:
+        #     self.trace["values"].append(self.data.x[:,0].cpu().detach())
+
+        
+        if self.trace_activity_preds:
+            self.trace["preds"].append(self.predictions.detach())
         if self.trace_activity_values:
-            self.trace["values"].append(self.data.x[:,0].cpu().detach())
+            self.trace["values"].append(self.data.x[:, 0].detach())
+
 
         # https://chatgpt.com/share/54c649d0-e7de-48be-9c00-442bef5a24b8
         # This confirms that the optimizer internally performs the subtraction of the gradient (grad), which is why you should assign theta.grad = grad rather than theta.grad = -grad. If you set theta.grad = -grad, it would result in adding the gradient to the weights, which would maximize the loss instead of minimizing it.
@@ -682,8 +694,11 @@ class PCGraphConv(torch.nn.Module):
                 # print(self.biases.shape)
                 self.predictions += self.biases.unsqueeze(-1)
 
-            if self.trace_activity_preds:
-                self.trace["preds"].append(self.predictions.detach())
+            # if self.trace_activity_preds:
+            #     self.trace["preds"].append(self.predictions.detach())
+
+        # self.data.x[:, 2] = self.predictions
+
         return self.predictions
 
 
@@ -709,9 +724,6 @@ class PCGraphConv(torch.nn.Module):
 
 
         self.predictions = self.get_predictions(self.data)
-
-     
-        
         self.data.x[:, 2] = self.predictions.detach()
         
         # print("predictions shape", self.predictions.shape)
@@ -732,6 +744,10 @@ class PCGraphConv(torch.nn.Module):
         energy['sensory_energy']  = 0.5 * (self.errors[self.sensory_indices] ** 2).sum().item()
         energy['supervised_energy']  = 0.5 * (self.errors[self.supervised_labels] ** 2).sum().item()
         
+        self.energy_vals['mean_internal_energy_sign'].append(self.errors[self.internal_indices].mean().item())
+        self.energy_vals['mean_sensory_energy_sign'].append(self.errors[self.sensory_indices].mean().item())
+        self.energy_vals['mean_supervised_energy_sign'].append(self.errors[self.supervised_labels].mean().item())
+
         if self.mode == "training":
 
             self.energy_vals["internal_energy"].append(energy["internal_energy"])
@@ -780,6 +796,8 @@ class PCGraphConv(torch.nn.Module):
             # Use in-place operation for values_dummy to reduce memory overhead
             self.values_dummy.data.zero_()  # Zero out values_dummy without creating a new tensor
 
+            self.trace["values"] = []
+            self.trace["preds"]  = []
         # Reset optimizer gradients if needed
         if self.use_optimizers:
             self.optimizer_values.zero_grad()
@@ -803,6 +821,8 @@ class PCGraphConv(torch.nn.Module):
 
         assert self.mode in ['training', 'testing', 'classification'], "Mode not set, (training or testing / classification )"
         
+        self.data = data
+
         # restart trace 
         self.trace = {
             "values": [], 
@@ -810,8 +830,12 @@ class PCGraphConv(torch.nn.Module):
             "preds" : [],
          }
 
+        if self.trace_activity_preds:
+            self.trace["preds"].append(self.data.x[:, 2].detach())
+        if self.trace_activity_values:
+            self.trace["values"].append(self.data.x[:, 0].detach())
+
         # self.edge_weights = self.extract_edge_weights(edge_index=self.edge_index, weights=self.weights, mask=self.mask)
-        self.data = data
         # self.values, _pred_ , self.errors, = data.x[:, 0], data.x[:, 1], data.x[:, 2]
 
         # self.helper_GPU(self.print_GPU)
@@ -927,7 +951,7 @@ class PCGraphConv(torch.nn.Module):
         self.helper_GPU(self.print_GPU)
 
 
-        self.data = data
+        self.data = data    
 
         # random inint value of internal nodes
         data.x[:, 0][self.internal_indices] = torch.rand(data.x[:, 0][self.internal_indices].shape).to(self.device)
@@ -972,6 +996,10 @@ class PCGraphConv(torch.nn.Module):
         self.calculate_energy_metrics()
         
         # self.helper_GPU(self.print_GPU)
+
+    def log_delta_w(self, delta_w):
+
+        self.w_log.append(delta_w.detach().cpu())
 
     def weight_update(self, data):
         
@@ -1022,7 +1050,6 @@ class PCGraphConv(torch.nn.Module):
 
         self.log_gradients()
 
-
         self.gradient_descent_update(
             grad_type="weights",
             parameter=self.weights,
@@ -1032,6 +1059,9 @@ class PCGraphConv(torch.nn.Module):
             optimizer=self.optimizer_weights if self.use_optimizers else None,
             use_optimizer=self.use_optimizers, 
         )
+
+        # log delta_w 
+        self.log_delta_w(delta_w)
             
         if self.use_bias:
             # print((self.lr_weights * self.errors[self.internal_indices].detach()).shape)
@@ -1310,6 +1340,10 @@ class PCGNN(nn.Module):
    
     
     def inference(self, data):
+
+        # print("------------------ experimental ===================")
+        # data.x[:, 0][self.pc_conv1.internal_indices] = torch.rand(data.x[:, 0][self.pc_conv1.internal_indices].shape).to(self.pc_conv1.device)
+
         self.pc_conv1.inference(data)
         print("Inference completed.")
         return True

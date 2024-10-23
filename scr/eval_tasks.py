@@ -307,8 +307,6 @@ def generation(test_loader, model, test_params, clean_images, num_samples=8, ver
     model.pc_conv1.trace['values'] = []
     model.pc_conv1.trace['preds'] = []
 
-
-
     model.pc_conv1.T = test_params["T"]
 
     model.pc_conv1.mode = "testing"
@@ -340,6 +338,12 @@ def generation(test_loader, model, test_params, clean_images, num_samples=8, ver
         noisy_batch = noisy_batch.to(model.pc_conv1.device)
 
         noisy_batch.x[:, 0][model.pc_conv1.internal_indices] = torch.rand(noisy_batch.x[:, 0][model.pc_conv1.internal_indices].shape).to(model.pc_conv1.device)
+        # noisy_batch.x[:, 1][model.pc_conv1.internal_indices]  = 0
+        # noisy_batch.x[:, 2][model.pc_conv1.internal_indices]  = 0
+
+        plt.imshow(noisy_batch.x[:, 1][0:784].view(28,28).cpu())
+        plt.show()
+
 
         # TEST: set x of noisy_batch to equal all zeros
         # noisy_batch.x = torch.rand(noisy_batch.x.shape).to(device)
@@ -433,11 +437,19 @@ def generation(test_loader, model, test_params, clean_images, num_samples=8, ver
         # Plotting both images side by side
     
         # Creating a subplot mosaic
+        # Creating a subplot mosaic with the row for values and a row for predictions
+        # Creating a subplot mosaic with titles for values and predictions
         fig, ax = plt.subplot_mosaic([
-            ["A", "B", "C", "D", "E"],
-            ["1", "2", "3", "4", "5" ],
-            ["F", "F", "F", "G", "G"],
-        ], figsize=(15, 8))
+            ["A", "B", "C", "D", "E"],   # First row for clean image, noisy image, and denoised output
+            ["1", "2", "3", "4", "5"],   # Second row for values with label
+            ["H", "I", "J", "K", "L"],   # Third row for predictions with label
+            ["F", "F", "F", "G", "G"],   # Fourth row for energy plots and additional info
+        ], figsize=(15, 10))
+
+        # Adding text labels to the left of the rows for values and predictions
+        fig.text(0.02, 0.67, "Values", ha='center', va='center', fontsize=12, rotation='vertical', fontweight='bold')
+        fig.text(0.02, 0.47, "Predictions", ha='center', va='center', fontsize=12, rotation='vertical', fontweight='bold')
+
 
         # Plotting the images
         ax["A"].imshow(clean_image, vmin=0, vmax=1, cmap=cmap)
@@ -458,31 +470,28 @@ def generation(test_loader, model, test_params, clean_images, num_samples=8, ver
         ax["E"].set_title("Diff clean - denoised_scaled")
         print("Denoised val", max(values[0:784].view(28, 28).cpu().detach().numpy().flatten()), min(values[0:784].view(28, 28).cpu().detach().numpy().flatten()))
 
+        # Plotting the values
         tr = model.pc_conv1.trace["values"]
-        # tr = model.pc_conv1.trace["preds"]
-        print("!!!!", len(tr), int(model.pc_conv1.T))
-        # assert len(tr) == int(model.pc_conv1.T)  
-        tmp = int(model.pc_conv1.T // 5) 
+        tmp = int(model.pc_conv1.T // 5)
 
         ax["1"].imshow(tr[0][0:784].view(28,28).cpu().detach().numpy(), cmap=cmap)
-        
         ax["2"].imshow(tr[tmp][0:784].view(28,28).cpu().detach().numpy(), cmap=cmap)
-        ax["3"].imshow(tr[2*tmp][0:784].view(28,28).cpu().detach().numpy(),  cmap=cmap)
+        ax["3"].imshow(tr[2*tmp][0:784].view(28,28).cpu().detach().numpy(), cmap=cmap)
         ax["4"].imshow(tr[-2*tmp][0:784].view(28,28).cpu().detach().numpy(), cmap=cmap)
-
         ax["5"].imshow(tr[-1][0:784].view(28,28).cpu().detach().numpy(), cmap=cmap)
 
-        for a in ["A", "B", "C", "D", "E", "G", "1", "2", "3", "4", "5"]:
+        # Plotting the predictions
+        tr_preds = model.pc_conv1.trace["preds"]
+        ax["H"].imshow(tr_preds[0][0:784].view(28,28).cpu().detach().numpy(), cmap=cmap)
+        ax["I"].imshow(tr_preds[tmp][0:784].view(28,28).cpu().detach().numpy(), cmap=cmap)
+        ax["J"].imshow(tr_preds[2*tmp][0:784].view(28,28).cpu().detach().numpy(), cmap=cmap)
+        ax["K"].imshow(tr_preds[-2*tmp][0:784].view(28,28).cpu().detach().numpy(), cmap=cmap)
+        ax["L"].imshow(tr_preds[-1][0:784].view(28,28).cpu().detach().numpy(), cmap=cmap)
+
+
+        # Hide axis for all image subplots
+        for a in ["A", "B", "C", "D", "E", "1", "2", "3", "4", "5", "H", "I", "J", "K", "L", "G"]:
             ax[a].axis('off')
-
-        # Plotting the line graphs
-        ax["F"].plot(model.pc_conv1.energy_vals["internal_energy"][-model.pc_conv1.T:], label="Internal energy")
-        ax["F"].plot(model.pc_conv1.energy_vals["sensory_energy"][-model.pc_conv1.T:], label="Sensory energy")  # Replace with actual values
-        ax["F"].legend()
-
-
-        ax["G"].imshow(values[0:784].view(28,28).cpu().detach().numpy(), vmin=0, vmax=1, cmap=cmap)
-        ax["G"].set_title("values")
 
         # Apply tight layout
         plt.tight_layout()
@@ -490,14 +499,27 @@ def generation(test_loader, model, test_params, clean_images, num_samples=8, ver
         # Adjust subplot spacing if needed
         plt.subplots_adjust(wspace=0.05, hspace=0.05)  # Adjust spacing between subplots
 
+        # Plotting the line graphs
+        ax["F"].plot(model.pc_conv1.energy_vals["internal_energy"][-model.pc_conv1.T:], label="Internal energy")
+        ax["F"].plot(model.pc_conv1.energy_vals["sensory_energy"][-model.pc_conv1.T:], label="Sensory energy")  # Replace with actual values
+        ax["F"].legend()
+
+
+        ax["G"].imshow(values[0:784].view(28,28).cpu().detach().numpy(), 
+                    #    vmin=0, vmax=1, 
+                       cmap=cmap)
+        ax["G"].set_title("values no vmix/max")
+
+        # Apply tight layout
+        plt.tight_layout()
+
+        # Adjust subplot spacing if needed
+        plt.subplots_adjust(wspace=0.05, hspace=0.05)  # Adjust spacing between subplots
 
         if test_params["model_dir"]:
             fig.savefig(f'{test_params["model_dir"]}eval/generation/generation_condition_label_T_{idx}_{model.pc_conv1.T}_{noisy_batch.y.item()}.png')
 
-        if test_params["num_wandb_img_log"] < idx:
-            # log fig to wandb
-            wandb.log({"generation_IMG": wandb.Image(fig)})
-            plt.close(fig)
+   
 
         # save 
         print(f"generation_task_{noisy_batch.y.item()}.png")
@@ -538,6 +560,11 @@ def generation(test_loader, model, test_params, clean_images, num_samples=8, ver
         if idx >= test_params["num_samples"]:
             
             return np.mean(avg_SSIM_mean), np.max(avg_SSIM_max), np.mean(avg_MSE_mean), np.max(avg_MSE_max)  
+
+        if test_params["num_wandb_img_log"] < idx:
+            # log fig to wandb
+            wandb.log({"generation_IMG": wandb.Image(fig)})
+            plt.close(fig)
 
         # model_dir=None,
 
@@ -730,7 +757,7 @@ def classification(test_loader, model,
 
             if y_p == y_t:
                 # Define the color for each bar, defaulting to blue, with the max value bar colored red
-                colors = ['blue' if i != torch.argmax(softmax_labels).item()s else 'green' for i in range(len(softmax_labels_np))]
+                colors = ['blue' if i != torch.argmax(softmax_labels).item() else 'green' for i in range(len(softmax_labels_np))]
             else:
                 colors = ['blue' if i != torch.argmax(softmax_labels).item() else 'red' for i in range(len(softmax_labels_np))]
 
