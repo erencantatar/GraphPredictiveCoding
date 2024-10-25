@@ -66,6 +66,7 @@ class CustomGraphDataset(Dataset):
             print("graph_params", graph_params)
             loader = GraphBuilder(**graph_params)
             
+            self.edge_type = loader.edge_type
             self.edge_index = loader.edge_index
             self.edge_index_tensor = self.edge_index
 

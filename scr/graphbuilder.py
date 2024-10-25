@@ -231,6 +231,9 @@ class GraphBuilder:
         # Save edge_index as a torch file in the new folder
         torch.save(self.edge_index, os.path.join(new_folder_path, "edge_index.pt"))
 
+        # Save edge_type as a torch file in the new folder
+        torch.save(self.edge_type, os.path.join(new_folder_path, "edge_type.pt"))
+
         # Save graph_type["params"] as a JSON file in the new folder
         with open(os.path.join(new_folder_path, "graph_type.json"), "w") as f:
             json.dump(self.graph_type, f)
