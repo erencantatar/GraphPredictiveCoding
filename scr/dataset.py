@@ -135,10 +135,16 @@ class CustomGraphDataset(Dataset):
         #     digit_indices = digit_indices[0:self.N]
         #     selected_idx = np.random.choice(digit_indices)
 
+        # OLD 
         flat_indices = [(digit, idx_in_digit) for digit, digit_indices in self.indices.items() for idx_in_digit in digit_indices]
 
         # Get the correct digit and its associated sample index
         digit, selected_idx = flat_indices[idx]
+
+        # NEW, instead of using idx use uniform sampling from the list of indices
+        digit = np.random.choice(self.numbers_list)
+        digit_indices = self.indices[digit]
+        selected_idx = np.random.choice(digit_indices)
 
         if idx == 0:  # Only print for the first batch to avoid repetitive output
 

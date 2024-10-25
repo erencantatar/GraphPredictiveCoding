@@ -86,6 +86,9 @@ parser.add_argument('--optimizer', type=true_with_float, default=False,
 # logging 
 import wandb
 parser.add_argument('--use_wandb', type=str, default="disabled", help='Wandb mode.', choices=['shared', 'online', 'run', 'dryrun', 'offline', 'disabled'])
+parser.add_argument('--tags', type=str, default="", help="Comma-separated tags to add to wandb logging (e.g., 'experiment,PC,test')")
+
+
 
 args = parser.parse_args()
 
@@ -104,6 +107,7 @@ if torch.cuda.is_available():
 
 # Make True of False bool
 args.normalize_msg = args.normalize_msg == 'True'
+tags_list = args.tags.split(",") if args.tags else []
 
 import torchvision.transforms as transforms
 import numpy as np
@@ -485,7 +489,8 @@ run = wandb.init(
     project=f"PredCod",
     name=f"T_{args.T}_lr_value_{args.lr_values}_lr_weights_{args.lr_weights}_",
     id=f"{model_params_short}_{date_hour}",
-    # tags= 
+    tags=tags_list,  # Add tags list here
+
     dir=model_dir,
     # tags=["param_search", str(model_params["weight_init"]), model_params["activation"],  *learning_params['dataset_transform']], 
     # Track hyperparameters and run metadata
@@ -721,6 +726,8 @@ if earlystop:
     print("Removed folder ", model_dir)
     
     exit()
+else:
+        wandb.log({"crashed": False})
 
 # If training completed successfully, log to the finished runs file
 with open('trained_models/finished_training.txt', 'a') as file:

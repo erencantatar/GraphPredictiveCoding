@@ -1,0 +1,52 @@
+#!/bin/bash
+
+#SBATCH --partition=gpu
+#SBATCH --gpus=1
+#SBATCH --job-name=B_8
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=18
+#SBATCH --time=06:00:00
+#SBATCH --output=outputs/IPC/slurm_output_%A_simple.out
+
+module purge
+module load 2022
+module load Anaconda3/2022.05
+
+cd /home/etatar/GraphPredCod2/scr
+
+source activate PredCod
+# Activated your environment
+
+# experiment 1: own params 
+echo "Running simple training"
+
+echo "----IPC----"
+
+# experiment 1: own params 
+echo "Running simple training"
+
+
+wandb online 
+
+
+#!/bin/bash
+
+# Define the learning rates for values and weights
+lr_values=(0.001 0.001)
+lr_weights=(1e-5 1e-6)
+batch_sizes=(2 4 12)
+
+# Iterate over the values and weights learning rates and batch sizes
+for lr_val in "${lr_values[@]}"; do
+  for lr_weight in "${lr_weights[@]}"; do
+    for batch_size in "${batch_sizes[@]}"; do
+      echo "Running model with lr_values=${lr_val}, lr_weights=${lr_weight}, and batch_size=${batch_size}"
+      srun python -u train.py --mode experimenting --use_wandb online --model_type IPC --normalize_msg False \
+      --dataset_transform none --numbers_list 0,1,2,3,4,5,6 --N 20 --supervision_label_val 1 \
+      --num_internal_nodes 1500 --graph_type fully_connected --weight_init 0.0001 --T 5 \
+      --lr_values ${lr_val} --lr_weights ${lr_weight} --activation_func swish --epochs 20 \
+      --batch_size ${batch_size} --seed 42 --optimizer 0.01 --remove_sens_2_sens False --remove_sens_2_sup False \
+      --tags optimizer_test
+    done
+  done
+done

@@ -192,8 +192,8 @@ class PCGraphConv(torch.nn.Module):
             weight_decay = self.use_optimizers[0]
 
             print("------------Using optimizers for values/weights updating ------------")
-            # self.optimizer_weights = torch.optim.Adam([self.weights], lr=self.lr_weights, weight_decay=weight_decay) #weight_decay=1e-2)        
-            self.optimizer_weights = torch.optim.SGD([self.weights], lr=self.lr_weights)
+            self.optimizer_weights = torch.optim.Adam([self.weights], lr=self.lr_weights, weight_decay=1e-2) #weight_decay=1e-2)        
+            # self.optimizer_weights = torch.optim.SGD([self.weights], lr=self.lr_weights)
 
             # self.optimizer_weights = torch.optim.SGD([self.weights], lr=self.gamma) #weight_decay=1e-2)
 
@@ -280,12 +280,12 @@ class PCGraphConv(torch.nn.Module):
         # Find edges between sensory nodes (sensory-to-sensory)
         # self.s2s_mask = (self.edge_index_single_graph[0].isin(self.sensory_indices)) & (self.edge_index_single_graph[1].isin(self.sensory_indices))
 
-        sensory_indices_set = set(self.sensory_indices_single_graph)
-        s2s_mask = [(src in sensory_indices_set and tgt in sensory_indices_set) 
-                    for src, tgt in zip(self.edge_index_single_graph[0], self.edge_index_single_graph[1])]
+        # sensory_indices_set = set(self.sensory_indices_single_graph)
+        # s2s_mask = [(src in sensory_indices_set and tgt in sensory_indices_set) 
+        #             for src, tgt in zip(self.edge_index_single_graph[0], self.edge_index_single_graph[1])]
 
-        # Convert mask to tensor (if needed)
-        self.s2s_mask = torch.tensor(s2s_mask, dtype=torch.bool, device=self.device)
+        # # Convert mask to tensor (if needed)
+        # self.s2s_mask = torch.tensor(s2s_mask, dtype=torch.bool, device=self.device)
 
         # if activation == "tanh":
         #     print("Since using tanh, using xavier_normal_")
@@ -718,8 +718,6 @@ class PCGraphConv(torch.nn.Module):
             # if self.trace_activity_preds:
             #     self.trace["preds"].append(self.predictions.detach())
 
-        # self.data.x[:, 2] = self.predictions
-
         return self.predictions
 
 
@@ -972,15 +970,14 @@ class PCGraphConv(torch.nn.Module):
         
     def learning(self, data):
 
-        self.log_weights()
+        # self.log_weights()
 
         self.helper_GPU(self.print_GPU)
-
 
         self.data = data    
 
         # random inint value of internal nodes
-        data.x[:, 0][self.internal_indices] = torch.rand(data.x[:, 0][self.internal_indices].shape).to(self.device)
+        # data.x[:, 0][self.internal_indices] = torch.rand(data.x[:, 0][self.internal_indices].shape).to(self.device)
 
         self.copy_node_values_to_dummy(self.data.x[:, 0])
 
@@ -1023,43 +1020,43 @@ class PCGraphConv(torch.nn.Module):
         
         # self.helper_GPU(self.print_GPU)
 
-    def log_delta_w(self, delta_w):
+    # def log_delta_w(self, delta_w):
          
-        # self.w_log.append(delta_w.detach().cpu())
+    #     # self.w_log.append(delta_w.detach().cpu())
 
-        # Extract the first batch from delta_w and edge_index
-        first_batch_delta_w = delta_w[:self.edge_index_single_graph.size(1)]  # Assuming edge_index_single_graph represents a single graph's edges
+    #     # Extract the first batch from delta_w and edge_index
+    #     first_batch_delta_w = delta_w[:self.edge_index_single_graph.size(1)]  # Assuming edge_index_single_graph represents a single graph's edges
 
-        # Find sensory-to-sensory connections in the first batch
-        sensory_indices_set = set(self.sensory_indices_single_graph)
-        s2s_mask = [(src in sensory_indices_set and tgt in sensory_indices_set) 
-                    for src, tgt in zip(self.edge_index_single_graph[0], self.edge_index_single_graph[1])]
+    #     # Find sensory-to-sensory connections in the first batch
+    #     sensory_indices_set = set(self.sensory_indices_single_graph)
+    #     s2s_mask = [(src in sensory_indices_set and tgt in sensory_indices_set) 
+    #                 for src, tgt in zip(self.edge_index_single_graph[0], self.edge_index_single_graph[1])]
 
-        # Convert mask to tensor (if needed)
-        s2s_mask = torch.tensor(s2s_mask, dtype=torch.bool, device=self.device)
+    #     # Convert mask to tensor (if needed)
+    #     s2s_mask = torch.tensor(s2s_mask, dtype=torch.bool, device=self.device)
 
-        # Find the rest (edges that are not sensory-to-sensory) in the first batch
-        rest_mask = ~s2s_mask
+    #     # Find the rest (edges that are not sensory-to-sensory) in the first batch
+    #     rest_mask = ~s2s_mask
 
-        # Apply the mask to delta_w for sensory-to-sensory and rest
-        delta_w_s2s = first_batch_delta_w[s2s_mask]
-        delta_w_rest = first_batch_delta_w[rest_mask]
+    #     # Apply the mask to delta_w for sensory-to-sensory and rest
+    #     delta_w_s2s = first_batch_delta_w[s2s_mask]
+    #     delta_w_rest = first_batch_delta_w[rest_mask]
 
-        # Check if delta_w_s2s is non-empty before calculating max and mean
-        delta_w_s2s_mean = delta_w_s2s.mean().item() if delta_w_s2s.numel() > 0 else 0
-        delta_w_s2s_max = delta_w_s2s.max().item() if delta_w_s2s.numel() > 0 else 0
+    #     # Check if delta_w_s2s is non-empty before calculating max and mean
+    #     delta_w_s2s_mean = delta_w_s2s.mean().item() if delta_w_s2s.numel() > 0 else 0
+    #     delta_w_s2s_max = delta_w_s2s.max().item() if delta_w_s2s.numel() > 0 else 0
 
-        # Check if delta_w_rest is non-empty before calculating max and mean
-        delta_w_rest_mean = delta_w_rest.mean().item() if delta_w_rest.numel() > 0 else 0
-        delta_w_rest_max = delta_w_rest.max().item() if delta_w_rest.numel() > 0 else 0
+    #     # Check if delta_w_rest is non-empty before calculating max and mean
+    #     delta_w_rest_mean = delta_w_rest.mean().item() if delta_w_rest.numel() > 0 else 0
+    #     delta_w_rest_max = delta_w_rest.max().item() if delta_w_rest.numel() > 0 else 0
 
-        # Log the delta_w values for the first batch
-        self.wandb_logger.log({
-            "delta_w_s2s_mean_first_batch": delta_w_s2s_mean,
-            "delta_w_s2s_max_first_batch": delta_w_s2s_max,
-            "delta_w_rest_mean_first_batch": delta_w_rest_mean,
-            "delta_w_rest_max_first_batch": delta_w_rest_max
-        })
+    #     # Log the delta_w values for the first batch
+    #     self.wandb_logger.log({
+    #         "delta_w_s2s_mean_first_batch": delta_w_s2s_mean,
+    #         "delta_w_s2s_max_first_batch": delta_w_s2s_max,
+    #         "delta_w_rest_mean_first_batch": delta_w_rest_mean,
+    #         "delta_w_rest_max_first_batch": delta_w_rest_max
+    #     })
 
 
     def weight_update(self, data):
@@ -1122,7 +1119,7 @@ class PCGraphConv(torch.nn.Module):
         )
 
         # log delta_w 
-        self.log_delta_w(delta_w)
+        # self.log_delta_w(delta_w)
             
         if self.use_bias:
             # print((self.lr_weights * self.errors[self.internal_indices].detach()).shape)

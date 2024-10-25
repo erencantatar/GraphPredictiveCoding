@@ -139,7 +139,7 @@ def occlusion(test_loader, model, test_params):
         ax["G"].imshow(values[0:784].view(28,28).cpu().detach().numpy(), vmin=0, vmax=1, cmap=cmap)
         ax["G"].set_title("value")
 
-        if test_params["model_dir"]:
+        if test_params["model_dir"] and test_params["num_wandb_img_log"] < idx:
             fig.savefig(f'{test_params["model_dir"]}eval/occlusion/occ_{idx}_T_{model.pc_conv1.T}_{noisy_batch.y.item()}.png')
 
         labels = values[model.pc_conv1.supervised_labels]
@@ -266,7 +266,7 @@ def denoise(test_loader, model, test_params, sigma=0.1):
         ax["G"].imshow(values[0:784].view(28,28).cpu().detach().numpy(), cmap=cmap)
         ax["G"].set_title("value")
 
-        if test_params["model_dir"]:
+        if test_params["model_dir"] and test_params["num_wandb_img_log"] < idx:
             fig.savefig(f'{test_params["model_dir"]}eval/denoise/denoise_{idx}_T_{model.pc_conv1.T}_{noisy_batch.y.item()}.png')
 
         labels = values[model.pc_conv1.supervised_labels]
@@ -516,7 +516,7 @@ def generation(test_loader, model, test_params, clean_images, num_samples=8, ver
         # Adjust subplot spacing if needed
         plt.subplots_adjust(wspace=0.05, hspace=0.05)  # Adjust spacing between subplots
 
-        if test_params["model_dir"]:
+        if test_params["model_dir"] and test_params["num_wandb_img_log"] < idx:
             fig.savefig(f'{test_params["model_dir"]}eval/generation/generation_condition_label_T_{idx}_{model.pc_conv1.T}_{noisy_batch.y.item()}.png')
 
    
@@ -768,7 +768,7 @@ def classification(test_loader, model,
           
 
 
-        if test_params["model_dir"]:
+        if test_params["model_dir"] and test_params["num_wandb_img_log"] < idx:
             fig_path = f'{test_params["model_dir"]}eval/classification/classification_{idx}_condition_label_T_{model.pc_conv1.T}_{noisy_batch.y.item()}.png'
             fig.savefig(fig_path)
 
