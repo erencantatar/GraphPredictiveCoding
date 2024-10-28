@@ -9,6 +9,7 @@ from helper.activation_func import set_activation
 from helper.grokfast import gradfilter_ema, gradfilter_ma
 import os 
 import wandb
+import math 
 
 class PCGraphConv(torch.nn.Module): 
     def __init__(self, num_vertices, sensory_indices, internal_indices, 
@@ -46,15 +47,12 @@ class PCGraphConv(torch.nn.Module):
         self.clamping = clamping
         self.wandb_logger = wandb_logger
 
-       
-
-
         self.trace_activity_values, self.trace_activity_errors, self.trace_activity_preds = False, False, False  
-        self.trace = {
-            "values": [], 
-            "errors": [],
-            "preds" : [],
-        }
+        # self.trace = {
+        #     "values": [], 
+        #     "errors": [],
+        #     "preds" : [],
+        # }
 
         self.energy_vals = {
             # training
@@ -119,7 +117,6 @@ class PCGraphConv(torch.nn.Module):
         self.use_bias = False 
         print(f"----- using use_bias: {self.use_bias}")
 
-
         self.grad_accum_method = "mean" 
         assert self.grad_accum_method in ["sum", "mean"]
         
@@ -128,8 +125,6 @@ class PCGraphConv(torch.nn.Module):
         # ------------- init weights -------------------------- 
 
         # https://pytorch.org/docs/stable/generated/torch.nn.Linear.html
-        import math 
-        k = 1 / math.sqrt(num_vertices)
 
         # USING BATCH SIZE, we want the same edge weights at each subgraph of the batch
         self.weights = torch.nn.Parameter(torch.zeros(self.edge_index_single_graph.size(1), device=self.device))
@@ -142,24 +137,35 @@ class PCGraphConv(torch.nn.Module):
             # self.biases..data.fill_(0.01) 
             # self.biases.data = torch.full_like(self.biases.data, 0.01)
 
-        if type(self.weight_init) == float:
-            # VAL = 0.001
-            VAL = weight_init
-            print("VAL VS K", VAL, k)
-            self.weights.data = torch.full_like(self.weights.data, VAL)
-
-            if self.use_bias:
-                self.biases.data = torch.full_like(self.biases.data, VAL)
-
-        if self.weight_init == "uniform":
+        # Weight initialization
+        init_type, *params = weight_init.split()
+        if init_type == "normal":
+            mean = float(params[0]) if params else 0.0
+            std = max(0.01, abs(mean) * 0.1)  # Set std to 10% of mean or 0.01 minimum
+            nn.init.normal_(self.weights, mean=mean, std=std)
+        elif init_type == "uniform":
+            k = 1 / math.sqrt(num_vertices)
             nn.init.uniform_(self.weights, -k, k)
+        elif init_type == "fixed":
+            value = float(params[0]) if params else 0.1
+            self.weights.data.fill_(value)
 
-            if self.use_bias:
-    
-                nn.init.uniform_(self.biases, -k, k)
+        # Bias initialization (if use_bias is enabled)
+        if self.use_bias:
+            raise NotImplementedError 
+            # bias_type, *bias_params = bias_init.split()
+            # if bias_type == "normal":
+            #     mean = float(bias_params[0]) if bias_params else 0.0
+            #     std = max(0.01, abs(mean) * 0.1)
+            #     nn.init.normal_(self.biases, mean=mean, std=std)
+            # elif bias_type == "uniform":
+            #     k = 1 / math.sqrt(num_vertices)
+            #     nn.init.uniform_(self.biases, -k, k)
+            # elif bias_type == "fixed":
+            #     value = float(bias_params[0]) if bias_params else 0.0
+            #     self.biases.data.fill_(value)
 
         self.w_t_min_1 = self.weights.clone().detach()
-
 
         # https://chatgpt.com/c/0f9c0802-c81b-40df-8870-3cea4d2fc9b7
 
@@ -820,8 +826,8 @@ class PCGraphConv(torch.nn.Module):
             # Use in-place operation for values_dummy to reduce memory overhead
             self.values_dummy.data.zero_()  # Zero out values_dummy without creating a new tensor
 
-            self.trace["values"] = []
-            self.trace["preds"]  = []
+            # self.trace["values"] = []
+            # self.trace["preds"]  = []
         # Reset optimizer gradients if needed
         if self.use_optimizers:
             self.optimizer_values.zero_grad()
@@ -848,11 +854,11 @@ class PCGraphConv(torch.nn.Module):
         self.data = data
 
         # restart trace 
-        self.trace = {
-            "values": [], 
-            "errors": [],
-            "preds" : [],
-         }
+        # self.trace = {
+        #     "values": [], 
+        #     "errors": [],
+        #     "preds" : [],
+        #  }
 
         if self.trace_activity_preds:
             self.trace["preds"].append(self.data.x[:, 2].detach())
@@ -1212,10 +1218,10 @@ class PCGNN(nn.Module):
     
     def trace(self, values=False, errors=False):
         
-        self.pc_conv1.trace = {
-            "values": [], 
-            "errors": [],
-         }
+        # self.pc_conv1.trace = {
+        #     "values": [], 
+        #     "errors": [],
+        #  }
     
         if values:
             self.pc_conv1.trace_activity_values = True 

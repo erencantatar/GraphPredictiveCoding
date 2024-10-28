@@ -341,8 +341,7 @@ def generation(test_loader, model, test_params, clean_images, num_samples=8, ver
         # noisy_batch.x[:, 1][model.pc_conv1.internal_indices]  = 0
         # noisy_batch.x[:, 2][model.pc_conv1.internal_indices]  = 0
 
-        plt.imshow(noisy_batch.x[:, 1][0:784].view(28,28).cpu())
-        plt.show()
+
 
 
         # TEST: set x of noisy_batch to equal all zeros
@@ -368,6 +367,14 @@ def generation(test_loader, model, test_params, clean_images, num_samples=8, ver
         noisy_batch.x[:, 0][model.pc_conv1.sensory_indices] = torch.rand(noisy_batch.x[:, 0][model.pc_conv1.sensory_indices].shape).to(model.pc_conv1.device)
         # noisy_batch.x[:, 0][0:-10] = random
         
+        if model.pc_conv1.trace_activity_preds:
+            model.pc_conv1.trace["preds"].append(noisy_batch.x[:, 2][0:784].detach())
+        if model.pc_conv1.trace_activity_values:
+            model.pc_conv1.trace["values"].append(noisy_batch.x[:, 0][0:784].detach())
+
+        plt.imshow(model.pc_conv1.trace["values"][0][0:784].view(28,28).cpu())
+        plt.show()
+
 
         # self.values, self.errors, self.predictions, = self.data.x[:, 0], self.data.x[:, 1], self.data.x[:, 2]
 
@@ -419,6 +426,7 @@ def generation(test_loader, model, test_params, clean_images, num_samples=8, ver
         # Extract the denoised output from the sensory nodes
 
         print("CHECK", noisy_batch.x[:,0][-10:])
+
         values, predictions, labels = model.query(method="pass", data=noisy_batch)  # query_by_conditioning
         # values, predictions = values[batch_idx, :, 0], predictions[batch_idx, :, 0]
         print("CHECK", noisy_batch.x[:,0][-10:])
@@ -447,8 +455,9 @@ def generation(test_loader, model, test_params, clean_images, num_samples=8, ver
         ], figsize=(15, 10))
 
         # Adding text labels to the left of the rows for values and predictions
-        fig.text(0.02, 0.67, "Values", ha='center', va='center', fontsize=12, rotation='vertical', fontweight='bold')
-        fig.text(0.02, 0.47, "Predictions", ha='center', va='center', fontsize=12, rotation='vertical', fontweight='bold')
+        fig.text(0.02, 0.67, "Values [0-T]", ha='center', va='center', fontsize=12, rotation='vertical', fontweight='bold')
+        fig.text(0.02, 0.47, "Preds [0-T]", ha='center', va='center', fontsize=12, rotation='vertical', fontweight='bold')
+        fig.text(0.02, 0.87, "at t=0", ha='center', va='center', fontsize=12, rotation='vertical', fontweight='bold')
 
 
         # Plotting the images
@@ -487,6 +496,7 @@ def generation(test_loader, model, test_params, clean_images, num_samples=8, ver
         ax["J"].imshow(tr_preds[2*tmp][0:784].view(28,28).cpu().detach().numpy(), cmap=cmap)
         ax["K"].imshow(tr_preds[-2*tmp][0:784].view(28,28).cpu().detach().numpy(), cmap=cmap)
         ax["L"].imshow(tr_preds[-1][0:784].view(28,28).cpu().detach().numpy(), cmap=cmap)
+
 
 
         # Hide axis for all image subplots

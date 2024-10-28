@@ -67,9 +67,11 @@ parser.add_argument('--remove_sens_2_sup', type=str2bool, required=True, help='W
 # -MessagePassing-
 parser.add_argument('--normalize_msg', choices=['True', 'False'], required=True,  help='Normalize message passing, expected True or False')
 
-# -----model----- 
+# -----model-----  
 parser.add_argument('--model_type', type=str, default="PC", help='Predictive Model type: [PC,IPC] ', choices=["PC", "IPC"])
-parser.add_argument('--weight_init', default=0.001, type=valid_str_or_float, help='A float (e.g 0.01) or a string from the list: uniform, xavier')
+parser.add_argument("--weight_init", type=str, default="fixed 0.001", help="Initialization method and params for weights")
+parser.add_argument("--bias_init", type=str, default="fixed 0.0", help="Initialization method and params for biases")
+# parser.add_argument('--weight_init', default=0.001, type=valid_str_or_float, help='A float (e.g 0.01) or a string from the list: uniform, xavier')
 parser.add_argument('--T', type=int, default=40, help='Number of iterations for gradient descent.')
 parser.add_argument('--lr_values', type=float, default=0.001, help='Learning rate values (alpha).')
 parser.add_argument('--lr_weights', type=float, default=0.01, help='Learning rate weights (gamma).')
