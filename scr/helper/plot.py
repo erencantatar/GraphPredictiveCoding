@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from torch_geometric.utils import to_dense_adj
+import wandb
 
 def plot_adj_matrix(edge_index, model_dir, node_types=None):
     """
@@ -201,7 +202,7 @@ import os
 import matplotlib.pyplot as plt
 import scipy.sparse as sp
 
-def plot_model_weights(model, GRAPH_TYPE=None, model_dir=None):
+def plot_model_weights(model, GRAPH_TYPE=None, model_dir=None, save_wandb=False):
     # Ensure the output directory exists
     # os.makedirs(model_dir, exist_ok=True)
 
@@ -253,6 +254,9 @@ def plot_model_weights(model, GRAPH_TYPE=None, model_dir=None):
 
     # Adjust layout and save the figure
     plt.tight_layout(rect=[0, 0, 1, 0.97])  # Adjust layout to fit the title
+
+    if save_wandb:
+        wandb.log({"weights": [wandb.Image(fig)]})
 
     if model_dir:
         plt.savefig(model_dir)
