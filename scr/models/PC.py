@@ -14,12 +14,12 @@ import math
 class PCGraphConv(torch.nn.Module): 
     def __init__(self, num_vertices, sensory_indices, internal_indices, 
                  learning_rate, T, graph_structure,
-                 batch_size, use_learning_optimizer, weight_init, clamping,
+                 batch_size, edge_type, use_learning_optimizer, weight_init, clamping,  
                  supervised_learning=False, normalize_msg=False, debug=False, activation=None, 
                  log_tensorboard=True, wandb_logger=None, device="cpu"):
         super(PCGraphConv, self).__init__()  # 'add' aggregation
         self.num_vertices = num_vertices
-        
+        self.edge_type = edge_type
         
         # these are fixed and inmutable, such that we can copy 
         self.sensory_indices_single_graph = sensory_indices
@@ -48,11 +48,11 @@ class PCGraphConv(torch.nn.Module):
         self.wandb_logger = wandb_logger
 
         self.trace_activity_values, self.trace_activity_errors, self.trace_activity_preds = False, False, False  
-        # self.trace = {
-        #     "values": [], 
-        #     "errors": [],
-        #     "preds" : [],
-        # }
+        self.trace = {
+            "values": [], 
+            "errors": [],
+            "preds" : [],
+        }
 
         self.energy_vals = {
             # training
@@ -1065,6 +1065,43 @@ class PCGraphConv(torch.nn.Module):
     #     })
 
 
+    def log_delta_w(self, delta_w, edge_type):
+        """
+        Log delta_w values separately for each edge connection category type defined by edge_type_map.
+
+        Parameters:
+        - delta_w: Tensor of weight changes (delta weights) for each edge in the graph.
+        - edge_type: Tensor of edge types corresponding to each edge in delta_w.
+        - wandb_logger: Wandb logging object to log the histograms.
+        """
+        edge_type_map = {
+            0: "Sens2Sens", 1: "Sens2Inter", 2: "Sens2Sup", 
+            3: "Inter2Sens", 4: "Inter2Inter", 5: "Inter2Sup", 
+            6: "Sup2Sens", 7: "Sup2Inter", 8: "Sup2Sup"
+        }
+
+        # Iterate through each connection category type in the edge_type_map
+        for etype, etype_name in edge_type_map.items():
+            # Mask to select delta_w values corresponding to the current edge type
+            mask = (edge_type == etype)
+            
+            # Select delta_w values for this edge type
+            delta_w_etype = delta_w[mask]
+            
+            # Log the histogram of delta_w for the current edge type
+            if delta_w_etype.numel() > 0:  # Check if there are any elements to log
+                self.wandb_logger.log({
+                    f"delta_w_{etype_name}_mean": delta_w_etype.mean().item(),
+                    f"delta_w_{etype_name}_max": delta_w_etype.max().item(),
+                    f"delta_w_{etype_name}_distribution": wandb.Histogram(delta_w_etype.cpu().numpy())
+                })
+            else:
+                # Log zero if no edges of this type are present
+                self.wandb_logger.log({f"delta_w_{etype_name}_mean": 0.0, f"delta_w_{etype_name}_max": 0.0})
+
+        print("delta_w distributions for each edge type logged.")
+
+
     def weight_update(self, data):
         
         # self.optimizer_weights.zero_grad()  # Reset weight gradients
@@ -1126,6 +1163,7 @@ class PCGraphConv(torch.nn.Module):
 
         # log delta_w 
         # self.log_delta_w(delta_w)
+        self.log_delta_w(delta_w, self.edge_type)
             
         if self.use_bias:
             # print((self.lr_weights * self.errors[self.internal_indices].detach()).shape)
@@ -1184,7 +1222,7 @@ import torch.nn as nn  # Import the parent class if not already done
 class PCGNN(nn.Module):
     def __init__(self, num_vertices, sensory_indices, internal_indices, 
                  lr_params, T, graph_structure, 
-                 batch_size, 
+                 batch_size, edge_type,
                  use_learning_optimizer=False, weight_init="xavier", clamping=None, supervised_learning=False, 
                  normalize_msg=False, 
                  debug=False, activation=None, log_tensorboard=True, wandb_logger=None, device='cpu'):
@@ -1194,7 +1232,7 @@ class PCGNN(nn.Module):
         # INSIDE LAYERS CAN HAVE PREDCODING - intra-layer 
         self.pc_conv1 = PCGraphConv(num_vertices, sensory_indices, internal_indices, 
                                     lr_params, T, graph_structure, 
-                                    batch_size, use_learning_optimizer, weight_init, clamping, supervised_learning, 
+                                    batch_size, edge_type, use_learning_optimizer, weight_init, clamping, supervised_learning, 
                                     normalize_msg, 
                                     debug, activation, log_tensorboard, wandb_logger, device)
 

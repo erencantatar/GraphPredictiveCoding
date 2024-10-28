@@ -328,6 +328,7 @@ model_params = {
     'internal_indices': (internal_indices), 
     "supervised_learning": (supervision_indices),
 
+
     "normalize_msg": args.normalize_msg,
 
     "lr_params": (args.lr_values, args.lr_weights),
@@ -335,6 +336,8 @@ model_params = {
     "T": args.T,
     "graph_structure": custom_dataset_train.edge_index_tensor, 
     "batch_size": train_loader.batch_size, 
+    "edge_type":  custom_dataset_train.edge_type,
+
     "use_learning_optimizer": args.optimizer if not args.optimizer  else [args.optimizer],    # False or [0], [(weight_decay=)]
     
     # "weight_init": "uniform",   # xavier, 'uniform', 'based_on_f', 'zero', 'kaiming'
@@ -600,6 +603,10 @@ wandb.watch(model.pc_conv1, log="all", log_freq=10)
 # wandb.watch(self.pc_conv1, log="all", log_freq=10)
 
 
+
+reduce_lr_weights = True
+print("Using reduce_lr_weights: ", reduce_lr_weights)
+
 model.train()
 
 # Define the early stopping threshold and OOM warning
@@ -675,6 +682,12 @@ for epoch in range(args.epochs):
                                             history, 
                                             model_dir=model_dir,
                                             epoch=epoch)
+                
+
+                # if reduce_lr_weights:
+                #     print("Reducing learning rate for weights")
+                #     model.pc_conv1.lr_weights = model.pc_conv1.lr_weights / 2
+                #     print("using lr_weights: ", model.pc_conv1.lr_weights)
 
                   # Plot energy per epoch with two y-axes
 
@@ -704,7 +717,7 @@ print(f"Training completed in {end_time - start_time:.2f} seconds for {args.epoc
 
 
 save_path = os.path.join(model_dir, 'parameter_info/weight_matrix_visualization_epoch_End.png')
-plot_model_weights(model, GRAPH_TYPE, model_dir=save_path)
+plot_model_weights(model, GRAPH_TYPE, model_dir=save_path, save_wandb=True)
 
 
 
@@ -826,6 +839,8 @@ test_params = {
 # model.pc_conv1.lr_values = model_params["lr_params"][0]
 
 y_true, y_pred, accuracy_mean = classification(test_loader, model, test_params)
+# Log all the evaluation metrics to wandb
+wandb.log({"accuracy_mean": accuracy_mean})
 ######################################################################################################### 
 
 test_params = {
@@ -917,7 +932,7 @@ wandb.log({
     "Mean_MSE_values_denoise": np.mean(MSE_values_denoise),
     "Mean_MSE_values_occ_noise": np.mean(MSE_values_occ_noise),
     "Mean_MSE_values_occ": np.mean(MSE_values_occ),
-    "accuracy_mean": accuracy_mean,
+    # "accuracy_mean": accuracy_mean,
     "y_true": y_true,
     "y_pred": y_pred,
     "avg_SSIM_mean": avg_SSIM_mean,
