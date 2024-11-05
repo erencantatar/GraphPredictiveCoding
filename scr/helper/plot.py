@@ -232,9 +232,12 @@ def plot_model_weights(model, GRAPH_TYPE=None, model_dir=None, save_wandb=False)
     else:
         fig.suptitle(f'Visualization of Weight Matrix', fontsize=20)
 
-    # Subplot 1: Sparsity pattern
-    axes[0, 0].spy(W_sparse, markersize=1)
-    axes[0, 0].set_title('Sparsity Pattern of the Weight Matrix')
+    # Subplot 1: Full weight matrix
+    zero_weights = (W == 0).astype(int)  # Create a binary mask of zero weights
+    im1 = axes[0, 0].imshow(zero_weights, cmap='viridis', aspect='auto')
+    fig.colorbar(im1, ax=axes[0, 0], label='Weight value')
+    axes[0, 0].set_title('Zero weights')
+
 
     # Subplot 2: Full weight matrix
     im1 = axes[0, 1].imshow(W, cmap='viridis', aspect='auto')

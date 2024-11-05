@@ -117,7 +117,7 @@ class PCGraphConv(torch.nn.Module):
         
         self.use_optimizers = use_learning_optimizer
 
-        self.use_grokfast = False
+        self.use_grokfast = True
         print(f"----- using grokfast: {self.use_grokfast}")
 
         self.use_bias = False 
@@ -581,14 +581,18 @@ class PCGraphConv(torch.nn.Module):
         # self.data.x[self.nodes_2_update, 0] = self.values_dummy.data[self.nodes_2_update].unsqueeze(-1).detach()  # Detach to avoid retaining the computation graph
 
 
-        self.get_graph()
+        _, _, pred = self.get_graph()
         # if self.trace_activity_preds:
         #     self.trace["preds"].append((self.data.x[:, 2].detach()))
         # if self.trace_activity_values:
         #     self.trace["values"].append((self.data.x[:, 0].detach()))
 
+
+
         if self.trace_activity_preds:
-            self.trace["preds"].append(self.data.x[:, 2].cpu().detach())
+            # tracing errors 
+            self.trace["preds"].append(self.data.x[:, 1].cpu().detach())
+            # self.trace["preds"].append(pred.cpu().detach())
         if self.trace_activity_values:
             self.trace["values"].append(self.data.x[:, 0].cpu().detach())
             # self.trace["values"].append(torch.zeros_like(self.values))
@@ -1008,6 +1012,8 @@ class PCGraphConv(torch.nn.Module):
         - edge_type: Tensor of edge types corresponding to each edge in delta_w.
         - wandb_logger: Wandb logging object to log the histograms.
         """
+
+
         edge_type_map = {
             0: "Sens2Sens", 1: "Sens2Inter", 2: "Sens2Sup", 
             3: "Inter2Sens", 4: "Inter2Inter", 5: "Inter2Sup", 
@@ -1107,7 +1113,8 @@ class PCGraphConv(torch.nn.Module):
 
         # log delta_w 
         # self.log_delta_w(delta_w)
-        self.log_delta_w(adjusted_delta_w if self.adjust_delta_w else delta_w, self.edge_type, log=False)
+        if self.edge_type.numel() > 0:
+            self.log_delta_w(adjusted_delta_w if self.adjust_delta_w else delta_w, self.edge_type, log=False)
             
         if self.use_bias:
             # print((self.lr_weights * self.errors[self.internal_indices].detach()).shape)
@@ -1273,21 +1280,23 @@ class PCGNN(nn.Module):
         return connection_strengths
 
 
-    def load_weights(self, W, graph, b=None):
+    def load_weights(self, path):
 
         print("Settng weights of self.pc_conv1")
-        self.pc_conv1.weights = W 
-        self.pc_conv1.edge_index = graph 
+        self.pc_conv1.weights = torch.load(f"{path}/weights.pt")
+        print("loaded weights matrix W")
+
+        self.pc_conv1.edge_index = torch.load(f"{path}/graph.pt")
+        print("loaded edge index for the graphs")
 
         if self.pc_conv1.use_bias:
-            self.pc_conv1.bias = b  
+            self.pc_conv1.bias = torch.load(f"{path}/bias.pt")
 
         self.pc_conv1.values = torch.zeros(self.num_vertices,self.batch_size,device=self.device) # requires_grad=False)                
-
+        print("Done")
     
     def save_weights(self, path):
         
-
         # make dir if not exist
         if not os.path.exists(path):
             os.makedirs(path)
