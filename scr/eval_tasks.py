@@ -141,7 +141,10 @@ def occlusion(test_loader, model, test_params):
 
         if test_params["model_dir"] and test_params["num_wandb_img_log"] < idx:
             fig.savefig(f'{test_params["model_dir"]}eval/occlusion/occ_{idx}_T_{model.pc_conv1.T}_{noisy_batch.y.item()}.png')
-
+        
+        if not test_params["model_dir"]:
+            plt.show()
+            
         labels = values[model.pc_conv1.supervised_labels]
         print(labels)
 
@@ -365,6 +368,7 @@ def generation(test_loader, model, test_params, clean_images, num_samples=8, ver
         random = torch.rand(noisy_batch.x[:, 0][0:-10].shape)
 
         noisy_batch.x[:, 0][model.pc_conv1.sensory_indices] = torch.rand(noisy_batch.x[:, 0][model.pc_conv1.sensory_indices].shape).to(model.pc_conv1.device)
+        # noisy_batch.x[:, 2][model.pc_conv1.sensory_indices] = torch.rand(noisy_batch.x[:, 2][model.pc_conv1.sensory_indices].shape).to(model.pc_conv1.device)
         # noisy_batch.x[:, 0][0:-10] = random
         
         if model.pc_conv1.trace_activity_preds:
@@ -372,8 +376,8 @@ def generation(test_loader, model, test_params, clean_images, num_samples=8, ver
         if model.pc_conv1.trace_activity_values:
             model.pc_conv1.trace["values"].append(noisy_batch.x[:, 0][0:784].detach())
 
-        plt.imshow(model.pc_conv1.trace["values"][0][0:784].view(28,28).cpu())
-        plt.show()
+        # plt.imshow(model.pc_conv1.trace["values"][0][0:784].view(28,28).cpu())
+        # plt.show()
 
 
         # self.values, self.errors, self.predictions, = self.data.x[:, 0], self.data.x[:, 1], self.data.x[:, 2]
@@ -427,6 +431,9 @@ def generation(test_loader, model, test_params, clean_images, num_samples=8, ver
 
         print("CHECK", noisy_batch.x[:,0][-10:])
 
+        plt.imshow(noisy_batch.x[:, 0][0:784].view(28,28).cpu())
+        plt.show()
+
         values, predictions, labels = model.query(method="pass", data=noisy_batch)  # query_by_conditioning
         # values, predictions = values[batch_idx, :, 0], predictions[batch_idx, :, 0]
         print("CHECK", noisy_batch.x[:,0][-10:])
@@ -458,7 +465,6 @@ def generation(test_loader, model, test_params, clean_images, num_samples=8, ver
         fig.text(0.02, 0.67, "Values [0-T]", ha='center', va='center', fontsize=12, rotation='vertical', fontweight='bold')
         fig.text(0.02, 0.47, "Preds [0-T]", ha='center', va='center', fontsize=12, rotation='vertical', fontweight='bold')
         fig.text(0.02, 0.87, "at t=0", ha='center', va='center', fontsize=12, rotation='vertical', fontweight='bold')
-
 
         # Plotting the images
         ax["A"].imshow(clean_image, vmin=0, vmax=1, cmap=cmap)
@@ -510,8 +516,8 @@ def generation(test_loader, model, test_params, clean_images, num_samples=8, ver
         plt.subplots_adjust(wspace=0.05, hspace=0.05)  # Adjust spacing between subplots
 
         # Plotting the line graphs
-        ax["F"].plot(model.pc_conv1.energy_vals["internal_energy"][-model.pc_conv1.T:], label="Internal energy")
-        ax["F"].plot(model.pc_conv1.energy_vals["sensory_energy"][-model.pc_conv1.T:], label="Sensory energy")  # Replace with actual values
+        ax["F"].plot(model.pc_conv1.energy_vals["internal_energy_testing"][-model.pc_conv1.T:], label="Internal energy")
+        ax["F"].plot(model.pc_conv1.energy_vals["sensory_energy_testing"][-model.pc_conv1.T:], label="Sensory energy")  # Replace with actual values
         ax["F"].legend()
 
 
@@ -603,7 +609,7 @@ def classification(test_loader, model,
     print("model.pc_conv1.values.shape", model.pc_conv1.values.shape)
     # model.pc_conv1.restart_activity()
 
-    print("AAAAAAAAAAAA")
+    print("AAAAAAAdAAAAA")
 
     batch_idx = 0.
 
@@ -720,9 +726,9 @@ def classification(test_loader, model,
             ax[a].axis('off')
 
         # Plotting the line graphs
-        ax["F"].plot(model.pc_conv1.energy_vals["internal_energy"][-model.pc_conv1.T:], label="Internal energy")
-        ax["F"].plot(model.pc_conv1.energy_vals["sensory_energy"][-model.pc_conv1.T:], label="Sensory energy")  # Replace with actual values
-        ax["F"].plot(model.pc_conv1.energy_vals["supervised_energy"][-model.pc_conv1.T:], label="supervised_energy energy")  # Replace with actual values 
+        ax["F"].plot(model.pc_conv1.energy_vals["internal_energy_testing"][-model.pc_conv1.T:], label="Internal energy")
+        ax["F"].plot(model.pc_conv1.energy_vals["sensory_energy_testing"][-model.pc_conv1.T:], label="Sensory energy")  # Replace with actual values
+        ax["F"].plot(model.pc_conv1.energy_vals["supervised_energy_testing"][-model.pc_conv1.T:], label="supervised_energy energy")  # Replace with actual values 
         ax["F"].legend()
 
 

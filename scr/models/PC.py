@@ -11,6 +11,8 @@ import os
 import wandb
 import math 
 
+import torch.nn as nn  # Import the parent class if not already done
+
 class PCGraphConv(torch.nn.Module): 
     def __init__(self, num_vertices, sensory_indices, internal_indices, 
                  learning_rate, T, graph_structure,
@@ -70,7 +72,10 @@ class PCGraphConv(torch.nn.Module):
             # testing 
             "internal_energy_testing": [],
             "sensory_energy_testing": [],
-            "supervised_energy_testing": []
+            "supervised_energy_testing": [],
+    
+            "internal_energy_batch": [],
+            "sensory_energy_batch": [],
         }
 
         self.w_log = []
@@ -91,6 +96,7 @@ class PCGraphConv(torch.nn.Module):
         print(f"gradients_minus_1: x and w.grad += {self.gradients_minus_1} * grad")
         print("------------------------------------")
 
+        self.data = None 
         self.values_at_t = []
         
         self.TODO = """ 
@@ -111,7 +117,7 @@ class PCGraphConv(torch.nn.Module):
         
         self.use_optimizers = use_learning_optimizer
 
-        self.use_grokfast = False  
+        self.use_grokfast = False
         print(f"----- using grokfast: {self.use_grokfast}")
 
         self.use_bias = False 
@@ -141,7 +147,8 @@ class PCGraphConv(torch.nn.Module):
         init_type, *params = weight_init.split()
         if init_type == "normal":
             mean = float(params[0]) if params else 0.0
-            std = max(0.01, abs(mean) * 0.1)  # Set std to 10% of mean or 0.01 minimum
+            std_val = 0.02 # 2% 
+            std = max(0.01, abs(mean) * std_val)  # Set std to std_val% of mean or 0.01 minimum
             nn.init.normal_(self.weights, mean=mean, std=std)
         elif init_type == "uniform":
             k = 1 / math.sqrt(num_vertices)
@@ -193,6 +200,12 @@ class PCGraphConv(torch.nn.Module):
 
         self.optimizer_values, self.optimizer_weights = None, None 
         
+        # for grokfast optionally 
+        self.grads = {
+            "values" : None,
+            "weights": None, 
+        }
+
         if self.use_optimizers:
             
             weight_decay = self.use_optimizers[0]
@@ -207,14 +220,7 @@ class PCGraphConv(torch.nn.Module):
             
             self.weights.grad = torch.zeros_like(self.weights)
             self.values_dummy.grad = torch.zeros_like(self.values_dummy)
-
-            # for grokfast 
-            self.grads = {
-                "values" : None,
-                "weights": None, 
-            }
-            
-        
+   
         self.effective_learning = {}
         self.effective_learning["w_mean"] = []
         self.effective_learning["w_max"] = []
@@ -226,6 +232,24 @@ class PCGraphConv(torch.nn.Module):
         self.effective_learning["v_min"] = []
 
         self.global_step = 0 # Initialize global step counter for logging
+
+
+        # Create a vector for edge-type-specific learning rates
+        self.adjust_delta_w = False 
+        print("Using self.adjust_delta_w, ", self.adjust_delta_w)
+        if self.adjust_delta_w:
+            scaling_factors = torch.zeros_like(self.weights)
+            scaling_factors[self.edge_type == 0] = 0.1 / 0.656775   # Sens2Sens
+            scaling_factors[self.edge_type == 1] = 0.1 / 0.009169   # Sens2Inter
+            scaling_factors[self.edge_type == 2] = 0.1 / 9.061984   # Sens2Sup
+            scaling_factors[self.edge_type == 3] = 0.1 / 0.0006583   # Inter2Sens
+            scaling_factors[self.edge_type == 4] = 0.1 / 0.00007534  # Inter2Inter
+            scaling_factors[self.edge_type == 5] = 0.1 / 0.0074454   # Inter2Sup
+            scaling_factors[self.edge_type == 6] = 0.1 / 7.248817   # Sup2Sens
+            scaling_factors[self.edge_type == 7] = 0.1 / 0.100325   # Sup2Inter
+            scaling_factors[self.edge_type == 8] = 0.1 / 0.095290   # Sup2Sup
+            self.lr_by_edtype = scaling_factors
+
 
         # if self.wandb_logger:
             
@@ -387,7 +411,12 @@ class PCGraphConv(torch.nn.Module):
         print(f"Energy drop (t=0 to t=T): {self.energy_metrics['energy_drop']}")
         print(f"Weight update gain (t=T to t=T+1): {self.energy_metrics['weight_update_gain']}")
 
-    
+        print("test1")
+        self.energy_vals["internal_energy_batch"] = np.mean(self.energy_vals["internal_energy"])
+        self.energy_vals["sensory_energy_batch"] = np.mean(self.energy_vals["sensory_energy"])
+        print("test1")
+        
+
     def helper_GPU(self,on=False):
         if on:
             current_memory_allocated = torch.cuda.memory_allocated()
@@ -469,20 +498,16 @@ class PCGraphConv(torch.nn.Module):
             Grokfast-MA (with window size = 100, lamb = 5.0) achieved slower generalization improvement compared to EMA, but was still faster than the baseline. 
         """
 
-        ### -------------------- optional --------------------
-        
-            # # Apply Grokfast filters before optimizer step
-            # if self.grokfast_type == 'ema':
-            #     self.tmp = gradfilter_ema(self, grads=self.grads['values'], alpha=0.8, lamb=0.1, param_type=param_type)
-            # elif self.grokfast_type == 'ma':
-            #     self.tmp = gradfilter_ma(self, grads=self.grads, window_size=100, lamb=5.0, filter_type='mean', param_type=param_type)
-
-            # if type == "values":
-            #     self.grads['values'] = self.tmp
-            # else:
-            #     self.grads['weights'] = self.tmp
-        ### -------------------- optional --------------------
-
+        # Optionally adjust gradients based on grokfast 
+        # In Grokfast, the goal is to amplify the slow gradient component stored in self.grads[grad_type].
+        # After calculating the current gradient delta (based on the error or loss function), Grokfast adds a weighted version of this slow gradient component to delta:
+        if self.use_grokfast:
+            if grad_type == "weights" and self.use_grokfast:
+                param_type = "weights"
+            if self.grokfast_type == 'ema':
+                self.grads[grad_type] = gradfilter_ema(self, grads=self.grads[grad_type], alpha=0.8, lamb=0.1)
+            elif self.grokfast_type == 'ma':
+                self.grads[grad_type] = gradfilter_ma(self, grads=self.grads[grad_type], window_size=100, lamb=5.0, filter_type='mean')
 
         if use_optimizer and optimizer:
             # Clear 
@@ -497,17 +522,7 @@ class PCGraphConv(torch.nn.Module):
                 parameter.grad = delta  # Apply full delta to the parameter
             else:
                 parameter.grad[nodes_2_update] = delta[nodes_2_update]  # Update only specific nodes
-
-            # Optionally adjust gradients based on grokfast 
-            if self.use_grokfast:
-        
-                if grad_type == "weights" and self.use_grokfast:
-                    param_type = "weights"
-                if self.grokfast_type == 'ema':
-                    self.grads[grad_type] = gradfilter_ema(self, grads=self.grads[grad_type], alpha=0.8, lamb=0.1)
-                elif self.grokfast_type == 'ma':
-                    self.grads[grad_type] = gradfilter_ma(self, grads=self.grads[grad_type], window_size=100, lamb=5.0, filter_type='mean')
-
+          
             # perform optimizer weight update step
             optimizer.step()
         else:
@@ -521,7 +536,7 @@ class PCGraphConv(torch.nn.Module):
 
 
     # def update(self, aggr_out, x):
-    def update_values(self, data):
+    def update_values(self):
 
         # Only iterate over internal indices for updating values
         # for i in self.internal_indices:
@@ -566,6 +581,23 @@ class PCGraphConv(torch.nn.Module):
         # self.data.x[self.nodes_2_update, 0] = self.values_dummy.data[self.nodes_2_update].unsqueeze(-1).detach()  # Detach to avoid retaining the computation graph
 
 
+        self.get_graph()
+        # if self.trace_activity_preds:
+        #     self.trace["preds"].append((self.data.x[:, 2].detach()))
+        # if self.trace_activity_values:
+        #     self.trace["values"].append((self.data.x[:, 0].detach()))
+
+        if self.trace_activity_preds:
+            self.trace["preds"].append(self.predictions)
+        if self.trace_activity_values:
+            self.trace["values"].append(self.data.x[:, 0])
+            # self.trace["values"].append(torch.zeros_like(self.values))
+
+
+        # if self.trace_activity_preds:
+        #     self.trace["preds"].append(torch.randn_like(self.data.x[:, 2].detach()))
+        # if self.trace_activity_values:
+        #     self.trace["values"].append(torch.randn_like(self.data.x[:, 0].detach()))
 
         # delta_x = self.values_mp(self.data.x.to(self.device), self.data.edge_index.to(self.device), self.weights)
 
@@ -621,12 +653,7 @@ class PCGraphConv(torch.nn.Module):
         # if self.trace_activity_values:
         #     self.trace["values"].append(self.data.x[:,0].cpu().detach())
 
-        
-        if self.trace_activity_preds:
-            self.trace["preds"].append(self.predictions.detach())
-        if self.trace_activity_values:
-            self.trace["values"].append(self.data.x[:, 0].detach())
-
+    
 
         # https://chatgpt.com/share/54c649d0-e7de-48be-9c00-442bef5a24b8
         # This confirms that the optimizer internally performs the subtraction of the gradient (grad), which is why you should assign theta.grad = grad rather than theta.grad = -grad. If you set theta.grad = -grad, it would result in adding the gradient to the weights, which would maximize the loss instead of minimizing it.
@@ -735,7 +762,7 @@ class PCGraphConv(torch.nn.Module):
 
         return self.values, self.errors, self.predictions
 
-    def energy(self, data):
+    def energy(self):
         """
         Compute the total energy of the network, defined as:
         E_t = 1/2 * ∑_i (ε_i,t)**2,
@@ -789,12 +816,15 @@ class PCGraphConv(torch.nn.Module):
                 self.wandb_logger.log({"mean_sensory_energy_sign": self.errors[self.sensory_indices].mean().item()})
                 self.wandb_logger.log({"mean_supervised_energy_sign": self.errors[self.supervised_labels].mean().item()})
 
-        else:
+        if self.mode == "testing":
 
             if self.wandb_logger:
                 self.wandb_logger.log({"energy_internal_testing": energy["internal_energy"]})
                 self.wandb_logger.log({"energy_sensory_testing": energy["sensory_energy"]})
-
+    
+            self.energy_vals["internal_energy_testing"].append(energy["internal_energy"])
+            self.energy_vals["sensory_energy_testing"].append(energy["sensory_energy"])
+            self.energy_vals["supervised_energy_testing"].append(energy["supervised_energy"])    
 
         return energy
 
@@ -826,14 +856,14 @@ class PCGraphConv(torch.nn.Module):
             # Use in-place operation for values_dummy to reduce memory overhead
             self.values_dummy.data.zero_()  # Zero out values_dummy without creating a new tensor
 
-            # self.trace["values"] = []
-            # self.trace["preds"]  = []
+            self.trace["values"] = []
+            self.trace["preds"]  = []
         # Reset optimizer gradients if needed
         if self.use_optimizers:
             self.optimizer_values.zero_grad()
             self.optimizer_weights.zero_grad()
 
-    def inference(self, data, restart_activity=True):
+    def inference(self, restart_activity=False):
 
         """      During the inference phase, the weights are fixed, and the value nodes are continuously updated via gradient descent for T iterations, where T is
         a hyperparameter of the model. The update rule is the following (inference) (Eq. 3)
@@ -851,19 +881,17 @@ class PCGraphConv(torch.nn.Module):
 
         assert self.mode in ['training', 'testing', 'classification'], "Mode not set, (training or testing / classification )"
         
-        self.data = data
 
         # restart trace 
-        # self.trace = {
-        #     "values": [], 
-        #     "errors": [],
-        #     "preds" : [],
-        #  }
+        self.trace = {
+            "values": [], 
+            "errors": [],
+            "preds" : [],
+         }
 
-        if self.trace_activity_preds:
-            self.trace["preds"].append(self.data.x[:, 2].detach())
-        if self.trace_activity_values:
-            self.trace["values"].append(self.data.x[:, 0].detach())
+        # add random noise
+        # self.data.x[:, 0][self.sensory_indices] = torch.rand(self.data.x[:, 0][self.sensory_indices].shape).to(self.device)
+        # self.data.x[:, 0][self.internal_indices] = torch.rand(self.data.x[:, 0][self.internal_indices].shape).to(self.device)
 
         # self.edge_weights = self.extract_edge_weights(edge_index=self.edge_index, weights=self.weights, mask=self.mask)
         # self.values, _pred_ , self.errors, = data.x[:, 0], data.x[:, 1], data.x[:, 2]
@@ -875,7 +903,7 @@ class PCGraphConv(torch.nn.Module):
         # self.helper_GPU(self.print_GPU)
 
         # Energy at t=0
-        energy = self.energy(self.data)
+        energy = self.energy()
         self.energy_metrics['internal_energy_t0'] = energy['internal_energy']
         print(f"Initial internal energy (t=0): {self.energy_metrics['internal_energy_t0']}")
 
@@ -892,18 +920,21 @@ class PCGraphConv(torch.nn.Module):
             # aggr_out = self.forward(data)
             self.t = t 
 
-            self.update_values(self.data)
+            self.update_values()
             
-            energy = self.energy(self.data)
+            energy = self.energy()
             t_bar.set_description(f"Total energy at time {t+1} / {self.T} {energy},")
             
-        
+        print("trace len", len(self.trace["values"]))
+            
         # Energy at t=T
         self.energy_metrics['internal_energy_tT'] = energy['internal_energy']
         print(f"Final internal energy (t=T): {self.energy_metrics['internal_energy_tT']}")
 
+        print(self.mode)
         if self.mode == "train":
             self.restart_activity()
+
 
         return True
 
@@ -976,6 +1007,9 @@ class PCGraphConv(torch.nn.Module):
         
     def learning(self, data):
 
+        self.energy_vals["internal_energy_batch"] = []
+        self.energy_vals["sensory_energy_batch"] = []
+
         # self.log_weights()
 
         self.helper_GPU(self.print_GPU)
@@ -991,16 +1025,8 @@ class PCGraphConv(torch.nn.Module):
         # data.x[:, 1][self.internal_indices] = torch.rand(data.x[:, 1][self.internal_indices].shape).to(self.device)
 
 
-
+        # need for the wieght update
         x, self.edge_index = self.data.x, self.data.edge_index
-
-
-        
-        # edge_index: has shape [2, E * batch] where E is the number of edges, but in each batch the edges are the same
-
-        # 1. fix value nodes of sensory vertices to be 
-        # self.restart_activity()
-        # self.set_sensory_nodes()
         
         self.helper_GPU(self.print_GPU)
 
@@ -1008,16 +1034,16 @@ class PCGraphConv(torch.nn.Module):
         ## 2. Then, the total energy of Eq. (2) is minimized in two phases: inference and weight update. 
         ## INFERENCE: This process of iteratively updating the value nodes distributes the output error throughout the PC graph. 
         self.set_phase('inference')
-        self.inference(self.data)
+        self.inference()
         self.set_phase('inference done')
 
         ## WEIGHT UPDATE 
         self.set_phase('weight_update')
-        self.weight_update(self.data)
+        self.weight_update()
         self.set_phase('weight_update done')
 
         # Energy at t=T+1 after weight update
-        energy = self.energy(self.data)
+        energy = self.energy()
         self.energy_metrics['internal_energy_tT_plus_1'] = energy['internal_energy']
         print(f"Internal energy after weight update (t=T+1): {self.energy_metrics['internal_energy_tT_plus_1']}")
 
@@ -1065,7 +1091,7 @@ class PCGraphConv(torch.nn.Module):
     #     })
 
 
-    def log_delta_w(self, delta_w, edge_type):
+    def log_delta_w(self, delta_w, edge_type, log):
         """
         Log delta_w values separately for each edge connection category type defined by edge_type_map.
 
@@ -1090,19 +1116,25 @@ class PCGraphConv(torch.nn.Module):
             
             # Log the histogram of delta_w for the current edge type
             if delta_w_etype.numel() > 0:  # Check if there are any elements to log
-                self.wandb_logger.log({
-                    f"delta_w_{etype_name}_mean": delta_w_etype.mean().item(),
-                    f"delta_w_{etype_name}_max": delta_w_etype.max().item(),
-                    f"delta_w_{etype_name}_distribution": wandb.Histogram(delta_w_etype.cpu().numpy())
-                })
+                
+                if self.wandb_logger:
+                    self.wandb_logger.log({
+                        f"delta_w_{etype_name}_mean": delta_w_etype.mean().item(),
+                        f"delta_w_{etype_name}_max": delta_w_etype.max().item(),
+                        f"delta_w_{etype_name}_distribution": wandb.Histogram(delta_w_etype.cpu().numpy())
+                    })
+
+                if log:
+                    print(f"delta_w_{etype_name} mean: {delta_w_etype.mean().item()}, max: {delta_w_etype.max().item()}")
             else:
-                # Log zero if no edges of this type are present
-                self.wandb_logger.log({f"delta_w_{etype_name}_mean": 0.0, f"delta_w_{etype_name}_max": 0.0})
+                if self.wandb_logger:
+                    # Log zero if no edges of this type are present
+                    self.wandb_logger.log({f"delta_w_{etype_name}_mean": np.nan, f"delta_w_{etype_name}_max": np.nan})
 
         print("delta_w distributions for each edge type logged.")
 
 
-    def weight_update(self, data):
+    def weight_update(self):
         
         # self.optimizer_weights.zero_grad()  # Reset weight gradients
 
@@ -1151,10 +1183,14 @@ class PCGraphConv(torch.nn.Module):
 
         # self.log_gradients(log_histograms=True, log_every_n_steps=20 * self.T)
 
+        # Adjust delta_w by element-wise multiplication with lr_by_edtype
+        if self.adjust_delta_w:
+            adjusted_delta_w = delta_w * self.lr_by_edtype
+
         self.gradient_descent_update(
             grad_type="weights",
             parameter=self.weights,
-            delta=delta_w,
+            delta=adjusted_delta_w if self.adjust_delta_w else delta_w,
             learning_rate=self.lr_weights,
             nodes_2_update="all",               # Update certain nodes values/weights 
             optimizer=self.optimizer_weights if self.use_optimizers else None,
@@ -1163,7 +1199,7 @@ class PCGraphConv(torch.nn.Module):
 
         # log delta_w 
         # self.log_delta_w(delta_w)
-        self.log_delta_w(delta_w, self.edge_type)
+        self.log_delta_w(adjusted_delta_w if self.adjust_delta_w else delta_w, self.edge_type, log=False)
             
         if self.use_bias:
             # print((self.lr_weights * self.errors[self.internal_indices].detach()).shape)
@@ -1217,7 +1253,6 @@ class PCGraphConv(torch.nn.Module):
 
     
 
-import torch.nn as nn  # Import the parent class if not already done
 
 class PCGNN(nn.Module):
     def __init__(self, num_vertices, sensory_indices, internal_indices, 
@@ -1244,13 +1279,17 @@ class PCGNN(nn.Module):
     
     def learning(self, batch):       
         
+
         self.pc_conv1.mode = "training"
         self.pc_conv1.learning(batch)
         
         history = {
-            "internal_energy_mean": np.mean(self.pc_conv1.energy_vals["internal_energy"]),
-            "sensory_energy_mean": np.mean(self.pc_conv1.energy_vals["sensory_energy"]),
-            }
+            "internal_energy_mean": self.pc_conv1.energy_vals["internal_energy_batch"],
+            "sensory_energy_mean": self.pc_conv1.energy_vals["sensory_energy_batch"],
+        
+            "internal_energy_last": self.pc_conv1.energy_vals["internal_energy"][-1],
+            "sensory_energy_last": self.pc_conv1.energy_vals["sensory_energy"][-1],
+        }
         
         return history
     
@@ -1367,6 +1406,7 @@ class PCGNN(nn.Module):
 
         self.pc_conv1.energy_vals["internal_energy_testing"] = []
         self.pc_conv1.energy_vals["sensory_energy_testing"] = []
+        self.pc_conv1.energy_vals["supervised_energy_testing"] = []
 
         assert self.pc_conv1.mode == "testing"
         assert data is not None, "We must get the labels (conditioning) or the image data (initialization)"
@@ -1432,7 +1472,6 @@ class PCGNN(nn.Module):
         else:
             raise Exception(f"unkown method: {method}")
 
-        
         self.inference(data)
         
         print("QUery by condition or query by init")
@@ -1441,12 +1480,20 @@ class PCGNN(nn.Module):
         
    
     
-    def inference(self, data):
+    def inference(self, data, random_internal=False):
 
         # print("------------------ experimental ===================")
-        # data.x[:, 0][self.pc_conv1.internal_indices] = torch.rand(data.x[:, 0][self.pc_conv1.internal_indices].shape).to(self.pc_conv1.device)
+        if random_internal:
+            data.x[:, 0][self.pc_conv1.internal_indices] = torch.rand(data.x[:, 0][self.pc_conv1.internal_indices].shape).to(self.pc_conv1.device)
 
-        self.pc_conv1.inference(data)
+        self.pc_conv1.data = data
+
+        if self.pc_conv1.trace_activity_preds:
+            self.pc_conv1.trace["preds"].append(data.x[:, 2].detach())
+        if self.pc_conv1.trace_activity_values:
+            self.pc_conv1.trace["values"].append(data.x[:, 0].detach())
+
+        self.pc_conv1.inference()
         print("Inference completed.")
         return True
  

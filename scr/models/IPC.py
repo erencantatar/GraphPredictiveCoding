@@ -10,6 +10,7 @@ from helper.activation_func import set_activation
 import os
 
 # import base PC-graph arch.
+from models.PC import PCGNN
 from models.PC import PCGraphConv 
 
 class IPCGraphConv(PCGraphConv): 
@@ -23,29 +24,36 @@ class IPCGraphConv(PCGraphConv):
     # Overwrite the learning function
     def learning(self, data):
 
-            self.data = data
-            x, self.edge_index = self.data.x, self.data.edge_index
-            
-            # edge_index: has shape [2, E * batch] where E is the number of edges, but in each batch the edges are the same
+        self.data = data
+        self.copy_node_values_to_dummy(self.data.x[:, 0])
 
-            # 1. fix value nodes of sensory vertices to be 
-            # self.restart_activity()
-            # self.set_sensory_nodes()
+        x, self.edge_index = self.data.x, self.data.edge_index
+        
+        # edge_index: has shape [2, E * batch] where E is the number of edges, but in each batch the edges are the same
 
-            ## 2. Then, the total energy of Eq. (2) is minimized in two phases: inference and weight update. 
-            ## INFERENCE: This process of iteratively updating the value nodes distributes the output error throughout the PC graph. 
-            self.set_phase('inference')
-            self.inference(self.data)
-            self.set_phase('inference done')
+        # 1. fix value nodes of sensory vertices to be 
+        # self.restart_activity()
+        # self.set_sensory_nodes()
 
-            ## WEIGHT UPDATE inside of inference
+        ## 2. Then, the total energy of Eq. (2) is minimized in two phases: inference and weight update. 
+        ## INFERENCE: This process of iteratively updating the value nodes distributes the output error throughout the PC graph. 
+        self.set_phase('inference')
+        self.inference()
+        self.set_phase('inference done')
 
-            energy = self.energy(self.data)
-            
-            
+        ## WEIGHT UPDATE inside of inference
+
+        energy = self.energy()
+        self.energy_metrics['internal_energy_tT_plus_1'] = energy['internal_energy']
+        print(f"Internal energy after weight update (t=T+1): {self.energy_metrics['internal_energy_tT_plus_1']}")
+
+        # Calculate energy drop and weight update gain
+        self.calculate_energy_metrics()
+        
+        
 
     # Overwrite the inference function
-    def inference(self, data, restart_activity=True):
+    def inference(self, restart_activity=False):
 
         """      During the inference phase, the weights are fixed, and the value nodes are continuously updated via gradient descent for T iterations, where T is
         a hyperparameter of the model. The update rule is the following (inference) (Eq. 3)
@@ -65,13 +73,21 @@ class IPCGraphConv(PCGraphConv):
 
 
         # self.edge_weights = self.extract_edge_weights(edge_index=self.edge_index, weights=self.weights, mask=self.mask)
-        self.data = data
         # self.values, _pred_ , self.errors, = data.x[:, 0], data.x[:, 1], data.x[:, 2]
 
+        # restart trace 
+        self.trace = {
+            "values": [], 
+            "errors": [],
+            "preds" : [],
+         }
+        
         print("Aaaa", self.data.x.shape)
         self.get_graph()
 
-        energy = self.energy(self.data)
+        energy = self.energy()
+        self.energy_metrics['internal_energy_t0'] = energy['internal_energy']
+        print(f"Initial internal energy (t=0): {self.energy_metrics['internal_energy_t0']}")
 
         from tqdm import tqdm
 
@@ -88,13 +104,13 @@ class IPCGraphConv(PCGraphConv):
                 # aggr_out = self.forward(data)
                 self.t = t 
 
-                self.update_values(self.data)
+                self.update_values()
                 
                 self.set_phase('weight_update')
-                self.weight_update(self.data)
+                self.weight_update()
                 self.set_phase('weight_update done')
 
-                energy = self.energy(self.data)
+                energy = self.energy()
                 t_bar.set_description(f"Total energy at time {t+1} / {self.T} {energy},")
 
         else:
@@ -103,12 +119,19 @@ class IPCGraphConv(PCGraphConv):
                 # aggr_out = self.forward(data)
                 self.t = t 
 
-                self.update_values(self.data)
+                self.update_values()
                 
-                energy = self.energy(self.data)
+                energy = self.energy()
                 t_bar.set_description(f"Total energy at time {t+1} / {self.T} {energy},")
                 
-                             
+         
+        # Energy at t=T
+        self.energy_metrics['internal_energy_tT'] = energy['internal_energy']
+        print(f"Final internal energy (t=T): {self.energy_metrics['internal_energy_tT']}")
+
+        if self.mode == "train" or restart_activity:
+            self.restart_activity()
+
         return True
 
 
@@ -121,26 +144,47 @@ class IPCGraphConv(PCGraphConv):
 #                  debug=False, activation=None, log_tensorboard=True, wandb_logger=None, device='cpu'):
 #         super(IPCGNN, self).__init__()
         
-from models.PC import PCGNN
 
 
 
+
+    # def __init__(self, num_vertices, sensory_indices, internal_indices, lr_params, T, graph_structure,
+    #              batch_size, edge_type, use_learning_optimizer=False, weight_init="xavier", clamping=None,
+    #              supervised_learning=False, normalize_msg=False, debug=False, activation=None,
+    #              log_tensorboard=True, wandb_logger=None, device='cpu'):
+    #     super(IPCGNN, self).__init__(num_vertices, sensory_indices, internal_indices, lr_params, T,
+    #                                  graph_structure, batch_size, use_learning_optimizer, weight_init, clamping,
+    #                                  supervised_learning, normalize_msg, debug, activation, log_tensorboard,
+    #                                  wandb_logger, device)
+
+    #     # Use IPCGraphConv instead of PCGraphConv
+    #     self.pc_conv1 = IPCGraphConv(num_vertices, sensory_indices, internal_indices, lr_params, T, graph_structure,
+    #                                  batch_size,edge_type, use_learning_optimizer, weight_init, clamping, supervised_learning,
+    #                                  normalize_msg, debug, activation, log_tensorboard, wandb_logger, device)
+    
 
 class IPCGNN(PCGNN):
-    def __init__(self, num_vertices, sensory_indices, internal_indices, lr_params, T, graph_structure,
-                 batch_size, use_learning_optimizer=False, weight_init="xavier", clamping=None,
-                 supervised_learning=False, normalize_msg=False, debug=False, activation=None,
-                 log_tensorboard=True, wandb_logger=None, device='cpu'):
-        super(IPCGNN, self).__init__(num_vertices, sensory_indices, internal_indices, lr_params, T,
-                                     graph_structure, batch_size, use_learning_optimizer, weight_init, clamping,
-                                     supervised_learning, normalize_msg, debug, activation, log_tensorboard,
-                                     wandb_logger, device)
-
-        # Use IPCGraphConv instead of PCGraphConv
-        self.pc_conv1 = IPCGraphConv(num_vertices, sensory_indices, internal_indices, lr_params, T, graph_structure,
-                                     batch_size, use_learning_optimizer, weight_init, clamping, supervised_learning,
-                                     normalize_msg, debug, activation, log_tensorboard, wandb_logger, device)
+    def __init__(self, num_vertices, sensory_indices, internal_indices, 
+                 lr_params, T, graph_structure, 
+                 batch_size, edge_type,
+                 use_learning_optimizer=False, weight_init="xavier", clamping=None, supervised_learning=False, 
+                 normalize_msg=False, 
+                 debug=False, activation=None, log_tensorboard=True, wandb_logger=None, device='cpu'):
+        super().__init__(num_vertices, sensory_indices, internal_indices, 
+                         lr_params, T, graph_structure, 
+                         batch_size, edge_type,
+                         use_learning_optimizer, weight_init, clamping, supervised_learning, 
+                         normalize_msg, debug, activation, log_tensorboard, wandb_logger, device)
         
+        
+        """ TODO: in_channels, hidden_channels, out_channels, """
+        # INSIDE LAYERS CAN HAVE PREDCODING - intra-layer 
+        self.pc_conv1 = IPCGraphConv(num_vertices, sensory_indices, internal_indices, 
+                                    lr_params, T, graph_structure, 
+                                    batch_size, edge_type, use_learning_optimizer, weight_init, clamping, supervised_learning, 
+                                    normalize_msg, 
+                                    debug, activation, log_tensorboard, wandb_logger, device)
+
         self.original_weights = None  # Placeholder for storing the original weights
 
 

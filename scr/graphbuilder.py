@@ -30,6 +30,13 @@ graph_type_options = {
                 # "remove_sens_2_sup": False, 
             }
         }, 
+        
+        "stochastic_block_hierarchy": {
+            "params": {
+                            # "remove_sens_2_sens": True, 
+                            # "remove_sens_2_sup": False, 
+                        }
+        },
 
         
         "stochastic_block": {
@@ -182,6 +189,10 @@ class GraphBuilder:
         elif self.graph_type["name"] == "stochastic_block":
             self.stochastic_block()
 
+        elif self.graph_type["name"] == "stochastic_block_hierarchy":
+            self.stoic_block_hierarchy( 
+                                no_sens2sens=self.graph_params["remove_sens_2_sens"], 
+                                no_sens2supervised=self.graph_params["remove_sens_2_sup"])
         elif self.graph_type["name"] == "stochastic_block_w_supvision_clusters":
             self.stochastic_block_w_supervision_clusters()
         else:
@@ -251,36 +262,108 @@ class GraphBuilder:
         else:
             print("No seed provided. Using default behavior.")
 
+    def stoic_block_hierarchy(self, no_sens2sens=False, no_sens2supervised=False):
+        sensory_grid_size = 28
+        sensory_patch_size = 4  # Each patch is 4x4
+        patches_per_row = sensory_grid_size // sensory_patch_size
+        num_sensory_nodes = sensory_grid_size ** 2
 
-    # def fully_connected_no_sens2sup(self):
+        # Define clusters per layer
+        layer_1_clusters = 49  # First layer with 4x4 clusters
+        layer_2_clusters = layer_1_clusters
+        final_layer_clusters = 10  # Larger clusters before the supervision layer
 
-    #     print("Creating fully connected graph without sensory to internal (and otherwayaround)")
-    #     # Sensory to sensory (both ways)
-    #     for i in self.num_sensor_nodes:
-    #         for j in self.num_sensor_nodes:
-    #             if i != j:
-    #                 self.edge_index.append([i, j])
+        # Track all node indices as lists for flexibility
+        sensory_nodes = list(range(num_sensory_nodes))
+        layer_1_nodes = list(range(num_sensory_nodes, num_sensory_nodes + layer_1_clusters * 16))
+        layer_2_nodes = list(range(layer_1_nodes[-1] + 1, layer_1_nodes[-1] + 1 + layer_2_clusters * 16))
+        final_layer_nodes = list(range(layer_2_nodes[-1] + 1, layer_2_nodes[-1] + 1 + final_layer_clusters))
+        supervision_nodes = list(range(final_layer_nodes[-1] + 1, final_layer_nodes[-1] + 1 + 10))  # Assume 10 supervision nodes
 
-    #     # Sensory to internal (both ways )
-    #     for i in self.num_sensor_nodes:
-    #         for j in self.num_internal_nodes:
-    #             self.edge_index.append([i, j])
-    #             self.edge_index.append([j, i])
+        # Create a list to hold edges and edge types
+        self.edge_index = []
+        self.edge_type = []
 
-    #     # Internal to internal (both directions)
-    #     for i in self.num_internal_nodes:
-    #         for j in self.num_internal_nodes:
-    #             if i != j:
-    #                 self.edge_index.append([i, j])
+        # Step 1: Sensory-to-Sensory Connections (if allowed by no_sens2sens)
+        if not no_sens2sens:
+            for i in sensory_nodes:
+                for j in range(i + 1, num_sensory_nodes):  # Avoid double edges
+                    self.edge_index.append([i, j])
+                    self.edge_type.append("Sens2Sens")
+                    self.edge_index.append([j, i])
+                    self.edge_type.append("Sens2Sens")
 
-    #     if self.supervised_learning:
-    #         # Internal to label (both directions)
-    #         label_nodes = range(self.SENSORY_NODES + self.NUM_INTERNAL_NODES, self.SENSORY_NODES + self.NUM_INTERNAL_NODES + 10)
-    #         for i in self.num_internal_nodes:
-    #             for j in label_nodes:
-    #                 self.edge_index.append([i, j])
-    #                 self.edge_index.append([j, i])
-            
+        # Optional Sensory-to-Supervision Connections
+        if self.supervised_learning and not no_sens2supervised:
+            for sensory_node in sensory_nodes:
+                for sup_node in supervision_nodes:
+                    self.edge_index.append([sensory_node, sup_node])
+                    self.edge_type.append("Sens2Sup")
+                    self.edge_index.append([sup_node, sensory_node])
+                    self.edge_type.append("Sup2Sens")
+
+        # Step 2: Layer 1 Connections (Sensory to Layer 1 Clusters)
+        for patch_row in range(patches_per_row):
+            for patch_col in range(patches_per_row):
+                block_id = patch_row * patches_per_row + patch_col
+                start_row, start_col = patch_row * sensory_patch_size, patch_col * sensory_patch_size
+                start_index = block_id * 16
+                internal_nodes_in_block = layer_1_nodes[start_index:start_index + 16]
+
+                # Connect each sensory node in the 4x4 block to all nodes in its corresponding internal 4x4 cluster
+                for i in range(sensory_patch_size):
+                    for j in range(sensory_patch_size):
+                        sensory_node = (start_row + i) * sensory_grid_size + (start_col + j)
+                        for internal_node in internal_nodes_in_block:
+                            # Sensory to Internal and Internal to Sensory
+                            self.edge_index.append([sensory_node, internal_node])
+                            self.edge_type.append("Sens2Inter")
+                            self.edge_index.append([internal_node, sensory_node])
+                            self.edge_type.append("Inter2Sens")
+
+                # Fully connect nodes within each 4x4 internal block
+                for node_i in internal_nodes_in_block:
+                    for node_j in internal_nodes_in_block:
+                        if node_i != node_j:
+                            self.edge_index.append([node_i, node_j])
+                            self.edge_type.append("Inter2Inter")
+
+        # Step 3: Layer 2 Connections (Layer 1 to Layer 2 Clusters)
+        for i in range(layer_1_clusters):
+            layer_1_block = layer_1_nodes[i * 16:(i + 1) * 16]
+            layer_2_block = layer_2_nodes[i * 16:(i + 1) * 16]
+
+            # Connect nodes between corresponding clusters in Layer 1 and Layer 2
+            for node_1 in layer_1_block:
+                for node_2 in layer_2_block:
+                    self.edge_index.append([node_1, node_2])
+                    self.edge_type.append("Inter2Inter")
+                    self.edge_index.append([node_2, node_1])
+                    self.edge_type.append("Inter2Inter")
+
+            # Fully connect nodes within each 4x4 block in Layer 2
+            for node_i in layer_2_block:
+                for node_j in layer_2_block:
+                    if node_i != node_j:
+                        self.edge_index.append([node_i, node_j])
+                        self.edge_type.append("Inter2Inter")
+
+        # Step 4: Final Layer Connections (Layer 2 to Final Large Clusters)
+        for node_2 in layer_2_nodes:
+            for large_cluster in final_layer_nodes:
+                self.edge_index.append([node_2, large_cluster])
+                self.edge_type.append("Inter2Inter")
+                self.edge_index.append([large_cluster, node_2])
+                self.edge_type.append("Inter2Inter")
+
+        # Step 5: Final Layer to Supervision Connections
+        if self.supervised_learning:
+            for large_cluster in final_layer_nodes:
+                for sup_node in supervision_nodes:
+                    self.edge_index.append([large_cluster, sup_node])
+                    self.edge_type.append("Inter2Sup")
+                    self.edge_index.append([sup_node, large_cluster])
+                    self.edge_type.append("Sup2Inter")
 
     def fully_connected(self, self_connection, no_sens2sens=False, no_sens2supervised=False):
 

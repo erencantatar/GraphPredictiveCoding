@@ -110,7 +110,8 @@ def plot_connection_strength_dist(W):
 
 
 
-def plot_energy_during_training(internal_energy, sensory_energy, history, model_dir=None, epoch="end"):
+def plot_energy_during_training(internal_energy, sensory_energy, history, 
+                                point1=(0, 0), point2=None, point3=None, model_dir=None, epoch="end"):
 
 
 
@@ -134,6 +135,14 @@ def plot_energy_during_training(internal_energy, sensory_energy, history, model_
     # Add legends to both y-axes
     ax["A"].legend(loc='upper left')
     ax2.legend(loc='upper right')
+
+    if point1:
+        ax["A"].plot(point1[0], point1[1], 'ro', label="Point 1 (0, 0)")
+    if point2:
+        ax["A"].plot(point2[0], point2[1], 'ro', label=f"Point 2 ({point2[0]}, {point2[1]})")
+    if point3:
+        ax["A"].plot(point3[0], point3[1], 'go', label=f"Point 3 ({point3[0]}, {point3[1]})")
+
 
     # Plot energy per epoch with two y-axes
     ax["B"].plot(history["internal_energy_per_epoch"], label="Internal Energy", color='blue')
