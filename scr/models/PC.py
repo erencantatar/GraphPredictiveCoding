@@ -588,9 +588,9 @@ class PCGraphConv(torch.nn.Module):
         #     self.trace["values"].append((self.data.x[:, 0].detach()))
 
         if self.trace_activity_preds:
-            self.trace["preds"].append(self.predictions)
+            self.trace["preds"].append(self.data.x[:, 2].cpu().detach())
         if self.trace_activity_values:
-            self.trace["values"].append(self.data.x[:, 0])
+            self.trace["values"].append(self.data.x[:, 0].cpu().detach())
             # self.trace["values"].append(torch.zeros_like(self.values))
 
 
@@ -603,55 +603,6 @@ class PCGraphConv(torch.nn.Module):
 
         # self.values.data[self.nodes_2_update, :] += delta_x[self.nodes_2_update, :]
         # data.x[self.nodes_2_update, 0] += delta_x[self.nodes_2_update, :]
-
-
-        # if self.use_optimzers:
-        #     self.optimizer_values.zero_grad()
-        #     if self.values.grad is None:
-        #         self.values.grad = torch.zeros_like(self.values)
-        #     else:
-        #         self.values.grad.zero_()  # Reset the gradients to zero
-                
-        #     self.values_dummy.grad[self.nodes_2_update] = -delta_x[self.nodes_2_update]
-        #     self.optimizer_values.step()
-        # else:
-        #     self.values_dummy.data[self.nodes_2_update] += self.gamma * delta_x[self.nodes_2_update]
-
-
-        # self.optimizer_values.zero_grad()
-        # if self.values_dummy.grad is None:
-        #     self.values_dummy.grad = torch.zeros_like(self.values_dummy)
-        # else:
-        #     self.values_dummy.grad.zero_()  # Reset the gradients to zero
-
-        # print("a", self.values_dummy.grad.shape)
-        # print("b", delta_x.view(self.batchsize, self.num_vertices).shape)    
-
-        # self.data.x[self.nodes_2_update, 0] = self.values_dummy.data.flatten()  # Detach to avoid retaining the computation graph
-    
-
-
-        #     self.values_dummy.grad[self.nodes_2_update] = delta_x.view(self.batchsize, self.num_vertices)[self.nodes_2_update]
-
-        # print(self.values_dummy.grad[:, self.nodes_2_update].shape)
-        # print(delta_x.view(self.batchsize, self.num_vertices)[:, self.nodes_2_update].shape)
-
-        # self.values_dummy.grad[self.nodes_2_update] = delta_x[self.nodes_2_update]
-
-                                                                                                                                                                                          
-        # torch.Size([2, 1500])
-        # torch.Size([2, 1500])
-        # torch.Size([1500, 1]) 
-
-        # print(self.values_dummy.grad[:, self.nodes_2_update].shape)
-        # print(self.values_dummy.data[:, self.nodes_2_update].shape)
-        # print(self.data.x[self.nodes_2_update, 0].shape)
-
-        # self.data.x[self.nodes_2_update, 0] = self.values_dummy.data[:, self.nodes_2_update].detach()  # Detach to avoid retaining the computation graph
-        ## GOOD ONE #### 
-        
-        # if self.trace_activity_values:
-        #     self.trace["values"].append(self.data.x[:,0].cpu().detach())
 
     
 
@@ -678,49 +629,6 @@ class PCGraphConv(torch.nn.Module):
         #     # self.values_dummy.data[self.nodes_2_update] += self.gamma * delta_x[self.nodes_2_update].detach() 
         #     self.data.x[self.nodes_2_update, 0] += self.gradients_minus_1 * self.lr_values * delta_x[self.nodes_2_update].unsqueeze(-1).detach()  # Detach to avoid retaining the computation graph
         
-
-
-
-
-
-            # self.values[self.nodes_2_update] += delta_x[self.nodes_2_update].detach()
-     
-        # if self.values_dummy.grad is None:
-        #     self.values_dummy.grad = torch.zeros_like(self.values_dummy)
-        # else:
-        #     self.values_dummy.grad.zero_()  # Reset the gradients to zero
-            
-        # print("-----------------------")
-        # print("1", self.values_dummy.grad[self.nodes_2_update].shape)
-        # print("2", delta_x[self.nodes_2_update].shape) # KAN NIET
-        # print("2", delta_x.shape)   
-        
-        # print("-----------------------")
-
-        # self.data.x[self.nodes_2_update, 0] += self.lr_values * delta_x[self.nodes_2_update, :].detach()  # Detach to avoid retaining the computation graph
-     
-        # if self.use_optimzers:
-        #     self.optimizer_values.zero_grad()
-        #     if self.values_dummy.grad is None:
-        #         self.values_dummy.grad = torch.zeros_like(self.values)
-        #     else:
-        #         self.values_dummy.grad.zero_()  # Reset the gradients to zero
-                
-        #     self.values_dummy.grad[self.nodes_2_update] = delta_x[self.nodes_2_update]
-        #     self.optimizer_values.step()
-
-        #     self.data.x[self.nodes_2_update, 0] = self.values_dummy.data  # Detach to avoid retaining the computation graph
-        #     # self.values[self.nodes_2_update] = self.values_dummy.data
-    
-        # else:
-        #     # self.values_dummy.data[self.nodes_2_update] += self.gamma * delta_x[self.nodes_2_update].detach() 
-
-        #     self.data.x[self.nodes_2_update, 0] += self.lr_values * delta_x[self.nodes_2_update, :].detach()  # Detach to avoid retaining the computation graph
-        #     # self.values[self.nodes_2_update] += delta_x[self.nodes_2_update].detach()
-     
-        # old 
-        # self.data.x[self.nodes_2_update, 0] += self.lr_values * delta_x[self.nodes_2_update, :].detach()  # Detach to avoid retaining the computation graph
-    
 
         # Calculate the effective learning rate
         # effective_lr = self.lr_values * delta_x
@@ -1449,12 +1357,7 @@ class PCGNN(nn.Module):
                 self.pc_conv1.set_sensory_nodes(data, generaton=False, mode='conditioning')
 
             else:
-                # conditioning model on the label 
-                one_hot = torch.zeros(10)
-                one_hot[data.y] = 1
-                # one_hot = one_hot.view(-1, 1)
-                one_hot = one_hot.to(self.device)
-                self.pc_conv1.values.data[self.pc_conv1.supervised_labels] = one_hot
+                # conditioning model on the label
                 
                 if self.pc_conv1.task == "generation":
                     # here the single value node encoding the class information is fixed, 
@@ -1488,10 +1391,13 @@ class PCGNN(nn.Module):
 
         self.pc_conv1.data = data
 
+        self.pc_conv1.restart_activity()
+        
         if self.pc_conv1.trace_activity_preds:
-            self.pc_conv1.trace["preds"].append(data.x[:, 2].detach())
+            self.pc_conv1.trace["preds"].append(data.x[:, 2].cpu().detach())
+
         if self.pc_conv1.trace_activity_values:
-            self.pc_conv1.trace["values"].append(data.x[:, 0].detach())
+            self.pc_conv1.trace["values"].append(data.x[:, 0].cpu().detach())
 
         self.pc_conv1.inference()
         print("Inference completed.")
