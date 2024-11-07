@@ -15,6 +15,7 @@ Foobar is a Python library for dealing with word pluralization.
 
 ## TODO
 
+0. Weird bugg: tracing errors (preds are weird)
 0. add energy drop in "ipc"
 0. self.graph = self.use_old_graph(), for SBM --> make graph save folder name the **params
 0. fix bug in wandb.watch(model)

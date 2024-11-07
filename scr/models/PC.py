@@ -117,12 +117,13 @@ class PCGraphConv(torch.nn.Module):
         
         self.use_optimizers = use_learning_optimizer
 
-        self.use_grokfast = True
+        self.use_grokfast = False
         print(f"----- using grokfast: {self.use_grokfast}")
 
         self.use_bias = False 
         print(f"----- using use_bias: {self.use_bias}")
 
+        
         self.grad_accum_method = "mean" 
         assert self.grad_accum_method in ["sum", "mean"]
         
@@ -233,7 +234,15 @@ class PCGraphConv(torch.nn.Module):
 
         self.global_step = 0 # Initialize global step counter for logging
 
+        self.use_convergence_monitor = True 
+        if self.use_convergence_monitor:
+            print(f"----- using use_convergence_monitor: {self.use_convergence_monitor}")
+            from helper.converge_monitor import CombinedConvergence, AdaptiveEnergyConvergence, GradientEnergyConvergence
+            self.convergence_tracker = CombinedConvergence(energy_threshold=0.05, gradient_threshold=1, patience=10)
+            self.gradients_log = torch.zeros_like(self.weights) # or and None
 
+        self.T_MAX = 5 * self.T
+        
         # Create a vector for edge-type-specific learning rates
         self.adjust_delta_w = False 
         print("Using self.adjust_delta_w, ", self.adjust_delta_w)
@@ -588,9 +597,8 @@ class PCGraphConv(torch.nn.Module):
         #     self.trace["values"].append((self.data.x[:, 0].detach()))
 
 
-
         if self.trace_activity_preds:
-            # tracing errors 
+            # tracing errors (preds are weird)
             self.trace["preds"].append(self.data.x[:, 1].cpu().detach())
             # self.trace["preds"].append(pred.cpu().detach())
         if self.trace_activity_values:
@@ -827,16 +835,53 @@ class PCGraphConv(torch.nn.Module):
         t_bar.set_description(f"Total energy at time 0 {energy}")
         # print(f"Total energy at time 0", energy, "Per avg. vertex", energy["internal_energy"] / len(self.internal_indices))
 
-        for t in t_bar:
+        # for t in t_bar:
             
-            # aggr_out = self.forward(data)
+        #     # aggr_out = self.forward(data)
+        #     self.t = t 
+
+        #     self.update_values()
+            
+        #     energy = self.energy()
+        #     t_bar.set_description(f"Total energy at time {t+1} / {self.T} {energy},")
+
+        #     if self.use_convergence_monitor:
+        #         if self.convergence_tracker.update(energy['internal_energy'], self.gradients_log):
+        #             print("Both energy and gradients have converged, stopping at iteration:", t)
+        #             break
+
+        # Initialize progress bar with unknown total length if convergence monitor is used
+        total_iterations = self.T if not self.use_convergence_monitor else 5000
+        t = 0
+        with tqdm(total=total_iterations, leave=False) as t_bar:
+            t_bar.set_description(f"Initial energy: {energy}")
             self.t = t 
 
-            self.update_values()
-            
-            energy = self.energy()
-            t_bar.set_description(f"Total energy at time {t+1} / {self.T} {energy},")
-            
+            while True:
+                # Update values at each iteration
+                self.update_values()
+                
+                # Recalculate energy
+                energy = self.energy()
+                
+                # Update progress bar
+                t_bar.set_description(f"Iteration {t+1}, Energy: {energy}")
+                t_bar.update(1)
+
+                # Break conditions
+                if self.use_convergence_monitor:
+                    # Check for convergence
+                    if self.convergence_tracker.update(energy['internal_energy'], None) or t >= self.T_MAX:
+                    # if self.convergence_tracker.update(energy['internal_energy'], self.gradients_log) or t >= 300:
+                        print(f"Convergence reached at iteration {t}")
+                        break
+                else:
+                    # Stop after T iterations if not monitoring convergence
+                    if t >= self.T - 1:
+                        break
+
+                t += 1
+
         print("trace len", len(self.trace["values"]))
             
         # Energy at t=T
@@ -1100,6 +1145,8 @@ class PCGraphConv(torch.nn.Module):
         # Adjust delta_w by element-wise multiplication with lr_by_edtype
         if self.adjust_delta_w:
             adjusted_delta_w = delta_w * self.lr_by_edtype
+
+        self.gradients_log = delta_w.detach()
 
         self.gradient_descent_update(
             grad_type="weights",

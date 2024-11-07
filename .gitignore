@@ -20,7 +20,8 @@ GraphPredCod2/notebooks/training.ipynb
 notebooks/training.ipynb
 notebooks/trained_models/*/
 notebooks/trained_models/**/*
-
+notebooks/graphs/*/
+notebooks/graphs/**/*
 !/jobs/create_jobs/cmds_2_run.txt
 !/jobs/create_jobs/create_jobs.py
 

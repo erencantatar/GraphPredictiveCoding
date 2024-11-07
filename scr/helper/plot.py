@@ -277,3 +277,5 @@ def plot_model_weights(model, GRAPH_TYPE=None, model_dir=None, save_wandb=False)
         print(f'Figure saved to {model_dir}')
     else:
         plt.show()
+
+    return W

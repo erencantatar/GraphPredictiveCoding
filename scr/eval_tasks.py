@@ -188,7 +188,7 @@ def occlusion(test_loader, model, test_params, verbose=0):
 
     batch_idx = 0
 
-    assert test_params["supervised_learning"] == True 
+    # assert test_params["supervised_learning"] == True 
 
     torch.cuda.empty_cache()
     gc.collect()
@@ -218,7 +218,10 @@ def occlusion(test_loader, model, test_params, verbose=0):
         noisy_batch.x[:, 0][784 // 2: ] = 0 
         # noisy_batch.x[:, 0][model.pc_conv1.sensory_indices] = torch.rand(noisy_batch.x[:, 0][model.pc_conv1.sensory_indices].shape).to(model.pc_conv1.device)
     
-    
+         
+        if test_params["add_sens_noise"]:
+            noisy_batch.x[:, 0][784 // 2: ] = torch.rand( noisy_batch.x[:, 0][784 // 2: ].shape) 
+
     
         # noisy_batch.x[:, 2][model.pc_conv1.sensory_indices] = torch.rand(noisy_batch.x[:, 2][model.pc_conv1.sensory_indices].shape).to(model.pc_conv1.device)
         # noisy_batch.x[:, 0][0:-10] = random
@@ -342,7 +345,7 @@ def occlusion(test_loader, model, test_params, verbose=0):
         tmp = int(model.pc_conv1.T // 5)
 
         ax["1"].imshow(tr[0][0:784].view(28,28).cpu().detach().numpy(), cmap=cmap)
-        ax["2"].imshow(tr[tmp][0:784].view(28,28).cpu().detach().numpy(), cmap=cmap)
+        ax["2"].imshow(tr[1][0:784].view(28,28).cpu().detach().numpy(), cmap=cmap)
         ax["3"].imshow(tr[2*tmp][0:784].view(28,28).cpu().detach().numpy(), cmap=cmap)
         ax["4"].imshow(tr[-2*tmp][0:784].view(28,28).cpu().detach().numpy(), cmap=cmap)
         ax["5"].imshow(tr[-1][0:784].view(28,28).cpu().detach().numpy(), cmap=cmap)
@@ -350,7 +353,7 @@ def occlusion(test_loader, model, test_params, verbose=0):
         # Plotting the predictions
         tr_preds = model.pc_conv1.trace["preds"]
         ax["H"].imshow(tr_preds[0][0:784].view(28,28).cpu().detach().numpy(), cmap=cmap)
-        ax["I"].imshow(tr_preds[tmp][0:784].view(28,28).cpu().detach().numpy(), cmap=cmap)
+        ax["I"].imshow(tr_preds[1][0:784].view(28,28).cpu().detach().numpy(), cmap=cmap)
         ax["J"].imshow(tr_preds[2*tmp][0:784].view(28,28).cpu().detach().numpy(), cmap=cmap)
         ax["K"].imshow(tr_preds[-2*tmp][0:784].view(28,28).cpu().detach().numpy(), cmap=cmap)
         ax["L"].imshow(tr_preds[-1][0:784].view(28,28).cpu().detach().numpy(), cmap=cmap)

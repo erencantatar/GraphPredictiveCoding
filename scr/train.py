@@ -358,7 +358,8 @@ learning_params['dataset_transform'] = args.dataset_transform
 learning_params['graph_structure'] = (learning_params['graph_structure']).cpu().numpy().tolist()
 optimizer_str = str(args.optimizer) if isinstance(args.optimizer, float) else str(args.optimizer)
 
-model_params_short = f"num_iternode_{args.num_internal_nodes}_T_{args.T}_lr_w_{args.lr_weights}_lr_val_{args.lr_values}_Bsize_{train_loader.batch_size}"
+# model_params_short = f"num_iternode_{args.num_internal_nodes}_T_{args.T}_lr_w_{args.lr_weights}_lr_val_{args.lr_values}_Bsize_{train_loader.batch_size}"
+model_params_short = f"{args.model_type}_{args.graph_type}_T_{args.T}_lr_w_{args.lr_weights}_lr_val_{args.lr_values}"
 print(len(model_params_short), model_params_short)
 model_params_name = (
     f"{args.model_type}_"
@@ -492,8 +493,9 @@ run = wandb.init(
     mode=args.use_wandb,
     # entity="Erencan Tatar", 
     project=f"PredCod",
-    name=f"T_{args.T}_lr_value_{args.lr_values}_lr_weights_{args.lr_weights}_",
-    id=f"{model_params_short}_{date_hour}",
+    # name=f"T_{args.T}_lr_value_{args.lr_values}_lr_weights_{args.lr_weights}_",
+    name=f"{model_params_short}_{date_hour}",
+    # id=f"{model_params_short}_{date_hour}",
     tags=tags_list,  # Add tags list here
 
     dir=model_dir,

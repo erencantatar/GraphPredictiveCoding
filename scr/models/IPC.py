@@ -113,6 +113,13 @@ class IPCGraphConv(PCGraphConv):
                 energy = self.energy()
                 t_bar.set_description(f"Total energy at time {t+1} / {self.T} {energy},")
 
+
+                if self.use_convergence_monitor:
+                    if self.convergence_tracker.update(energy['internal_energy'], self.gradients_log):
+                        print("Both energy and gradients have converged, stopping at iteration:", t)
+                        break
+
+
         else:
             for t in t_bar:
         
@@ -123,6 +130,11 @@ class IPCGraphConv(PCGraphConv):
                 
                 energy = self.energy()
                 t_bar.set_description(f"Total energy at time {t+1} / {self.T} {energy},")
+
+                if self.use_convergence_monitor:
+                    if self.convergence_tracker.update(energy['internal_energy'], self.gradients_log):
+                        print("Both energy and gradients have converged, stopping at iteration:", t)
+                        break
                 
          
         # Energy at t=T
