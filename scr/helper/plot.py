@@ -172,6 +172,67 @@ def plot_energy_during_training(internal_energy, sensory_energy, history,
 
 
 
+import matplotlib.pyplot as plt
+import os
+
+def plot_energy_graphs(energy_vals, model_dir, window_size):
+    # Ensure the model directory exists
+    os.makedirs(model_dir, exist_ok=True)
+
+    # Plot and save 'mean_internal_energy_sign'
+    plt.plot(energy_vals["mean_internal_energy_sign"][:])
+    plt.title("Mean Internal Energy Sign")
+    plt.savefig(os.path.join(model_dir, "mean_internal_energy_sign.png"))
+    plt.close()
+
+    # Plot and save 'mean_sensory_energy_sign'
+    plt.plot(energy_vals["mean_sensory_energy_sign"][:])
+    plt.title("Mean Sensory Energy Sign")
+    plt.savefig(os.path.join(model_dir, "mean_sensory_energy_sign.png"))
+    plt.close()
+
+    # Plot, save min, max, avg values for each type in ["sensory_energy", "internal_energy"]
+    for tmp in ["sensory_energy", "internal_energy"]:
+        t = energy_vals[tmp]
+        plt.plot(t, label=f"{tmp}")
+
+        v_min = []
+        v_max = []
+        v_avg = []
+
+        for w in range(0, len(t)):
+            window = t[w:w+window_size]
+            if len(window) == 0:  # Avoid empty window
+                continue
+            w_min = min(window)
+            w_max = max(window)
+            w_avg = sum(window) / len(window)
+
+            v_min.append(w_min)
+            v_max.append(w_max)
+            v_avg.append(w_avg)
+
+        plt.plot(v_min, label=f"{tmp}_min")
+        plt.plot(v_max, label=f"{tmp}_max")
+        plt.plot(v_avg, label=f"{tmp}_avg")
+
+        plt.legend(loc='center left', bbox_to_anchor=(1, 0.5))
+        plt.title(f"{tmp} with min, max, avg")
+        plt.savefig(os.path.join(model_dir, f"{tmp}_min_max_avg.png"))
+        plt.close()
+
+    # Plot and save 'energy_drop'
+    plt.plot(energy_vals['energy_drop'])
+    plt.title("Energy Drop (positive best)")
+    plt.savefig(os.path.join(model_dir, "energy_drop.png"))
+    plt.close()
+
+    # Plot and save 'weight_update_gain'
+    plt.plot(energy_vals['weight_update_gain'])
+    plt.title("Weight Update Gain (positive best)")
+    plt.savefig(os.path.join(model_dir, "weight_update_gain.png"))
+    plt.close()
+
 
 
 

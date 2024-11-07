@@ -1,6 +1,37 @@
 import argparse
 
 
+def validate_weight_init(value):
+    parts = value.split()
+    if len(parts) < 1:
+        raise argparse.ArgumentTypeError("Invalid format for --weight_init. Expected 'normal <mean>', 'uniform', or 'fixed <mean>'")
+
+    init_type = parts[0]
+    if init_type == "normal":
+        if len(parts) != 2:
+            raise argparse.ArgumentTypeError("Invalid format for 'normal'. Expected: 'normal <mean>'")
+        try:
+            float(parts[1])  # Ensure the mean is a float
+        except ValueError:
+            raise argparse.ArgumentTypeError("Invalid mean value for 'normal'. Expected a float.")
+
+    elif init_type == "fixed":
+        if len(parts) != 2:
+            raise argparse.ArgumentTypeError("Invalid format for 'fixed'. Expected: 'fixed <mean>'")
+        try:
+            float(parts[1])  # Ensure the mean is a float
+        except ValueError:
+            raise argparse.ArgumentTypeError("Invalid mean value for 'fixed'. Expected a float.")
+
+    elif init_type == "uniform":
+        if len(parts) != 1:
+            raise argparse.ArgumentTypeError("Invalid format for 'uniform'. Expected: 'uniform' with no additional parameters.")
+
+    else:
+        raise argparse.ArgumentTypeError("Invalid init_type. Expected 'normal', 'uniform', or 'fixed'.")
+
+    return value
+
 def str2bool(v):
     if isinstance(v, bool):
         return v

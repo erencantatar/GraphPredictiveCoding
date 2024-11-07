@@ -40,8 +40,9 @@ import os
 
 import os
 import argparse
-from helper.args import true_with_float, valid_str_or_float, valid_int_or_all, valid_int_list, str2bool
+from helper.args import true_with_float, valid_str_or_float, valid_int_or_all, valid_int_list, str2bool, validate_weight_init
 from helper.activation_func import activation_functions
+from graphbuilder import graph_type_options
 
 # Parsing command-line arguments
 parser = argparse.ArgumentParser(description='Train a model with specified parameters.')
@@ -58,7 +59,6 @@ parser.add_argument('--supervision_label_val', default=10, type=int, required=Tr
 
 
 # -----graph----- 
-from graphbuilder import graph_type_options
 parser.add_argument('--num_internal_nodes', type=int, default=1500, help='Number of internal nodes.')
 parser.add_argument('--graph_type', type=str, default="fully_connected", help='Type of Graph', choices=list(graph_type_options.keys()))
 parser.add_argument('--remove_sens_2_sens', type=str2bool, required=True, help='Whether to remove sensory-to-sensory connections.')
@@ -69,9 +69,10 @@ parser.add_argument('--normalize_msg', choices=['True', 'False'], required=True,
 
 # -----model-----  
 parser.add_argument('--model_type', type=str, default="PC", help='Predictive Model type: [PC,IPC] ', choices=["PC", "IPC"])
-parser.add_argument("--weight_init", type=str, default="fixed 0.001", help="Initialization method and params for weights")
+# parser.add_argument("--weight_init", type=str, default="fixed 0.001", help="Initialization method and params for weights")
+parser.add_argument("--weight_init", type=validate_weight_init, default="fixed 0.001", help="Initialization method and params for weights")
 parser.add_argument("--bias_init", type=str, default="fixed 0.0", help="Initialization method and params for biases")
-# parser.add_argument('--weight_init', default=0.001, type=valid_str_or_float, help='A float (e.g 0.01) or a string from the list: uniform, xavier')
+
 parser.add_argument('--T', type=int, default=40, help='Number of iterations for gradient descent.')
 parser.add_argument('--lr_values', type=float, default=0.001, help='Learning rate values (alpha).')
 parser.add_argument('--lr_weights', type=float, default=0.01, help='Learning rate weights (gamma).')
@@ -206,6 +207,9 @@ if graph_params["graph_type"]["name"] == "stochastic_block":
     
     # override internal nodes if doing clustering
     graph_params["internal_nodes"] = (graph_params["graph_type"]["params"]["num_communities"] * graph_params["graph_type"]["params"]["community_size"])
+
+if graph_params["graph_type"]["name"] == "stochastic_block_hierarchy":
+    raise ValueError("Not implemented yet")
 
 from dataset import CustomGraphDataset
 
@@ -569,7 +573,7 @@ wandb.watch(model,
             log_freq=10)
 
 
-from helper.plot import plot_model_weights
+from helper.plot import plot_model_weights, plot_energy_graphs
 
 
 save_path = os.path.join(model_dir, 'parameter_info/weight_matrix_visualization_epoch0.png')
@@ -721,6 +725,7 @@ print(f"Training completed in {end_time - start_time:.2f} seconds for {args.epoc
 save_path = os.path.join(model_dir, 'parameter_info/weight_matrix_visualization_epoch_End.png')
 plot_model_weights(model, GRAPH_TYPE, model_dir=save_path, save_wandb=True)
 
+plot_energy_graphs(model.pc_conv1.energy_vals, model_dir=model_dir, window_size=model.pc_conv1.T)
 
 
 # Append to the appropriate file based on whether the training crashed or completed successfully
@@ -740,7 +745,8 @@ if earlystop:
     import shutil
     shutil.rmtree(model_dir)
     
-    print("Removed folder ", model_dir)
+    print("----------------------------Removed run folder--------------------------- ")
+    print(model_dir)
     
     exit()
 else:
@@ -784,6 +790,11 @@ dataset_params_testing["mnist_dataset"] = mnist_testset
 dataset_params_testing["N"] = "all"
 dataset_params_testing["supervision_label_val"] = dataset_params["supervision_label_val"]
 
+# --------------------------------------------
+model.trace(values=True, errors=True)
+model.pc_conv1.trace_activity_values = True 
+model.pc_conv1.trace_activity_preds = True 
+model.pc_conv1.batchsize = 1
 
 
 for key in dataset_params_testing:
@@ -801,9 +812,6 @@ test_loader = DataLoader(custom_dataset_test, batch_size=1, shuffle=True, genera
 from helper.eval import get_clean_images_by_label
 
 clean_images = get_clean_images_by_label(mnist_trainset, num_images=10)
-
-
-model.pc_conv1.batchsize = 1
 
 ######################################################################################################### 
 ####                                            Evaluation (tasks)                                  #####

@@ -144,6 +144,7 @@ class PCGraphConv(torch.nn.Module):
             # self.biases..data.fill_(0.01) 
             # self.biases.data = torch.full_like(self.biases.data, 0.01)
 
+
         # Weight initialization
         init_type, *params = weight_init.split()
         if init_type == "normal":
@@ -234,7 +235,7 @@ class PCGraphConv(torch.nn.Module):
 
         self.global_step = 0 # Initialize global step counter for logging
 
-        self.use_convergence_monitor = True 
+        self.use_convergence_monitor = False 
         if self.use_convergence_monitor:
             print(f"----- using use_convergence_monitor: {self.use_convergence_monitor}")
             from helper.converge_monitor import CombinedConvergence, AdaptiveEnergyConvergence, GradientEnergyConvergence
@@ -712,6 +713,8 @@ class PCGraphConv(torch.nn.Module):
                 "sensory_energy":  [],
         }
 
+        print("len internal energ", len(self.internal_indices))
+        print(self.errors[self.internal_indices[0]])
         energy['internal_energy'] = 0.5 * (self.errors[self.internal_indices] ** 2).sum().item()
         energy['sensory_energy']  = 0.5 * (self.errors[self.sensory_indices] ** 2).sum().item()
         energy['supervised_energy']  = 0.5 * (self.errors[self.supervised_labels] ** 2).sum().item()
