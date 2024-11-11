@@ -1355,16 +1355,26 @@ class PCGNN(nn.Module):
         self.pc_conv1.restart_activity()
         print("Done")
     
-    def save_weights(self, path, overwrite):
-        
-        if not os.path.exists(path):
+    def save_weights(self, path, overwrite=False):
+        import time
+
+        # Check if path exists
+        if os.path.exists(path):
+            if not overwrite:
+                # If not overwriting, create a new path by appending timestamp or version
+                timestamp = time.strftime("%Y%m%d-%H%M%S")
+                path = f"{path}_{timestamp}"
+                print(f"Path already exists. Saving to new path: {path}")
+            else:
+                # If overwrite is True, remove existing files in the directory
+                for file in os.listdir(path):
+                    file_path = os.path.join(path, file)
+                    if os.path.isfile(file_path):
+                        os.remove(file_path)
+        else:
+            # Create the directory if it doesn't exist
             os.makedirs(path)
-        elif overwrite:
-            # If overwrite is True, remove existing files in the directory
-            for file in os.listdir(path):
-                file_path = os.path.join(path, file)
-                if os.path.isfile(file_path):
-                    os.remove(file_path)
+
 
         W = self.pc_conv1.weights
         graph = self.pc_conv1.edge_index

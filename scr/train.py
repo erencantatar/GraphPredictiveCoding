@@ -757,7 +757,7 @@ with open('trained_models/finished_training.txt', 'a') as file:
     file.write(f"{model_dir}\n")
 
 save_path = os.path.join(model_dir, 'parameter_info')
-model.save_weights(path=save_path)
+model.save_weights(path=save_path, overwrite=False)
 
 wandb.log({"run_complete": True})
 wandb.log({"model_dir": model_dir})
@@ -817,6 +817,12 @@ clean_images = get_clean_images_by_label(mnist_trainset, num_images=10)
 ####                                            Evaluation (tasks)                                  #####
 ######################################################################################################### 
  
+import os
+import logging
+
+from helper.log import write_eval_log
+
+
 test_params = {
     "model_dir": model_dir,
     "T": 300,
@@ -834,6 +840,14 @@ MSE_values_occ = occlusion(test_loader, model, test_params)
 test_params["add_sens_noise"] = True
 MSE_values_occ_noise = occlusion(test_loader, model, test_params)
 
+# After occlusion
+eval_data_occlusion = {
+    "occlusion": {
+        "MSE_values_occ_noise": MSE_values_occ_noise,
+        "MSE_values_occ": MSE_values_occ
+    }
+}
+write_eval_log(eval_data_occlusion, model_dir)
 ######################################################################################################### 
 
 model.pc_conv1.batchsize = 1
@@ -850,7 +864,17 @@ test_params = {
 
 y_true, y_pred, accuracy_mean = classification(test_loader, model, test_params)
 # Log all the evaluation metrics to wandb
-wandb.log({"accuracy_mean": accuracy_mean})
+# After classification
+eval_data_classification = {
+    "classification": {
+        "accuracy_mean": accuracy_mean,
+        "y_true": y_true,
+        "y_pred": y_pred
+    }
+}
+write_eval_log(eval_data_classification, model_dir)
+
+
 ######################################################################################################### 
 
 test_params = {
@@ -868,7 +892,14 @@ MSE_values_denoise_sup = denoise(test_loader, model, test_params)
 
 test_params["supervised_learning"] = False
 MSE_values_denoise = denoise(test_loader, model, test_params)
-                            
+
+eval_data_denoise = {
+    "denoise": {
+        "MSE_values_denoise_sup": MSE_values_denoise_sup,
+        "MSE_values_denoise": MSE_values_denoise
+    }
+}
+write_eval_log(eval_data_denoise, model_dir)
 # MSE_values = denoise(test_loader, model, supervised_learning=True)
 # print("MSE_values", MSE_values)
 ######################################################################################################### 
@@ -891,6 +922,17 @@ model.pc_conv1.trace_activity_preds = True
 
 avg_SSIM_mean, avg_SSIM_max, avg_MSE_mean, avg_MSE_max = generation(test_loader, model, test_params, clean_images, verbose=0)
 
+# After generation
+eval_data_generation = {
+    "Generation": {
+        "avg_SSIM_mean": avg_SSIM_mean,
+        "avg_SSIM_max": avg_SSIM_max,
+        "avg_MSE_mean": avg_MSE_mean,
+        "avg_MSE_max": avg_MSE_max
+    }
+}
+write_eval_log(eval_data_generation, model_dir)
+
 # MSE_values = denoise(test_loader, model, supervised_learning=True)
 # print("MSE_values", MSE_values)
 
@@ -900,41 +942,6 @@ print("accuracy_mean", accuracy_mean)
 print("model_dir", model_dir)
 
 # write a text file with these 
-
-
-# Open the file in write mode
-with open(model_dir + "eval/eval_scores.txt", 'w') as file:
-    # Write each list to the file
-    
-    ### denoise ###
-    file.write("MSE_values_denoise_sup:\n")
-    file.write(", ".join(map(str, MSE_values_denoise_sup)) + "\n\n")
-
-    file.write("MSE_values_denoise:\n")
-    file.write(", ".join(map(str, MSE_values_denoise)) + "\n\n")
-    
-    ### occlude ###
-    file.write("MSE_values_occ_noise:\n")
-    file.write(", ".join(map(str, MSE_values_occ_noise)) + "\n\n")
-    
-    file.write("MSE_values_occ:\n")
-    file.write(", ".join(map(str, MSE_values_occ)) + "\n\n")
-
-    ### classification
-    file.write("accuracy_mean:\n")
-    file.write("y_true: " + ", ".join(map(str, y_true)) + "\n")
-    file.write("y_pred: " + ", ".join(map(str, y_pred)) + "\n")
-    file.write(str(accuracy_mean) + "\n\n")
-
-    ### Generation ###
-    
-    file.write("Generation:\n")
-    file.write("avg_SSIM_mean: " + str(avg_SSIM_mean) + "\n")
-    file.write("avg_SSIM_max: " + str(avg_SSIM_max) + "\n")
-    file.write("avg_MSE_mean: " + str(avg_MSE_mean) + "\n")
-    file.write("avg_MSE_max: " + str(avg_MSE_max) + "\n")
-
-
 
 # Log all the evaluation metrics to wandb
 wandb.log({

@@ -47,3 +47,4 @@ scr/wandb/debug-cli.etatar.log
 jobs/example.job
 notebooks/training.ipynb
 notebooks/training.ipynb
+jobs/best_model_s2s_s2l_impact.job
