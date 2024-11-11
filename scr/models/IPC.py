@@ -87,6 +87,8 @@ class IPCGraphConv(PCGraphConv):
 
         energy = self.energy()
         self.energy_metrics['internal_energy_t0'] = energy['internal_energy']
+        self.energy_vals["energy_t0"].append(energy["energy_total"])
+
         print(f"Initial internal energy (t=0): {self.energy_metrics['internal_energy_t0']}")
 
         from tqdm import tqdm
@@ -139,6 +141,8 @@ class IPCGraphConv(PCGraphConv):
          
         # Energy at t=T
         self.energy_metrics['internal_energy_tT'] = energy['internal_energy']
+        self.energy_vals["energy_tT"].append(energy["energy_total"])
+
         print(f"Final internal energy (t=T): {self.energy_metrics['internal_energy_tT']}")
 
         if self.mode == "train" or restart_activity:

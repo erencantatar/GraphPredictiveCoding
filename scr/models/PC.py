@@ -76,6 +76,9 @@ class PCGraphConv(torch.nn.Module):
     
             "internal_energy_batch": [],
             "sensory_energy_batch": [],
+
+            "energy_t0": [],
+            "energy_tT": [],
         }
 
         self.w_log = []
@@ -259,7 +262,6 @@ class PCGraphConv(torch.nn.Module):
             scaling_factors[self.edge_type == 7] = 0.1 / 0.100325   # Sup2Inter
             scaling_factors[self.edge_type == 8] = 0.1 / 0.095290   # Sup2Sup
             self.lr_by_edtype = scaling_factors
-
 
         # if self.wandb_logger:
             
@@ -713,8 +715,8 @@ class PCGraphConv(torch.nn.Module):
                 "sensory_energy":  [],
         }
 
-        print("len internal energ", len(self.internal_indices))
-        print(self.errors[self.internal_indices[0]])
+        # print("len internal energ", len(self.internal_indices))
+        # print(self.errors[self.internal_indices[0]])
         energy['internal_energy'] = 0.5 * (self.errors[self.internal_indices] ** 2).sum().item()
         energy['sensory_energy']  = 0.5 * (self.errors[self.sensory_indices] ** 2).sum().item()
         energy['supervised_energy']  = 0.5 * (self.errors[self.supervised_labels] ** 2).sum().item()
@@ -828,6 +830,9 @@ class PCGraphConv(torch.nn.Module):
         # Energy at t=0
         energy = self.energy()
         self.energy_metrics['internal_energy_t0'] = energy['internal_energy']
+
+        self.energy_vals["energy_t0"].append(energy["energy_total"])
+            
         print(f"Initial internal energy (t=0): {self.energy_metrics['internal_energy_t0']}")
 
         from tqdm import tqdm
@@ -891,6 +896,8 @@ class PCGraphConv(torch.nn.Module):
         self.energy_metrics['internal_energy_tT'] = energy['internal_energy']
         print(f"Final internal energy (t=T): {self.energy_metrics['internal_energy_tT']}")
 
+        self.energy_vals["energy_tT"].append(energy["energy_total"])
+        
         print(self.mode)
         if self.mode == "train":
             self.restart_activity()
@@ -1330,7 +1337,7 @@ class PCGNN(nn.Module):
         return connection_strengths
 
 
-    def load_weights(self, path):
+    def load_weights(self, path, data_eg):
 
         print("Settng weights of self.pc_conv1")
         self.pc_conv1.weights = torch.load(f"{path}/weights.pt")
@@ -1342,14 +1349,22 @@ class PCGNN(nn.Module):
         if self.pc_conv1.use_bias:
             self.pc_conv1.bias = torch.load(f"{path}/bias.pt")
 
-        self.pc_conv1.values = torch.zeros(self.num_vertices,self.batch_size,device=self.device) # requires_grad=False)                
+
+        # self.pc_conv1.values = torch.zeros(self..num_vertices,self.batch_size,device=self.device) # requires_grad=False)    
+        self.pc_conv1.data = data_eg
+        self.pc_conv1.restart_activity()
         print("Done")
     
-    def save_weights(self, path):
+    def save_weights(self, path, overwrite):
         
-        # make dir if not exist
         if not os.path.exists(path):
             os.makedirs(path)
+        elif overwrite:
+            # If overwrite is True, remove existing files in the directory
+            for file in os.listdir(path):
+                file_path = os.path.join(path, file)
+                if os.path.isfile(file_path):
+                    os.remove(file_path)
 
         W = self.pc_conv1.weights
         graph = self.pc_conv1.edge_index
@@ -1357,10 +1372,12 @@ class PCGNN(nn.Module):
         # save to '"trained_models/weights.pt"' 
         torch.save(W, f"{path}/weights.pt")
         torch.save(graph, f"{path}/graph.pt")
+        print("Saved weights and egde_index to ", path)
 
         if self.pc_conv1.use_bias:
             b = self.pc_conv1.biases 
             torch.save(b, f"{path}/bias.pt")
+            print("Saved bias weight to ", path)
 
 
     def query(self, method, random_internal=True, data=None):
