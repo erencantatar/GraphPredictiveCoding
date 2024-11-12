@@ -182,13 +182,13 @@ class IPCGraphConv(PCGraphConv):
 class IPCGNN(PCGNN):
     def __init__(self, num_vertices, sensory_indices, internal_indices, 
                  lr_params, T, graph_structure, 
-                 batch_size, edge_type,
+                 batch_size, edge_type, use_bias,
                  use_learning_optimizer=False, weight_init="xavier", clamping=None, supervised_learning=False, 
                  normalize_msg=False, 
                  debug=False, activation=None, log_tensorboard=True, wandb_logger=None, device='cpu'):
         super().__init__(num_vertices, sensory_indices, internal_indices, 
                          lr_params, T, graph_structure, 
-                         batch_size, edge_type,
+                         batch_size, edge_type, use_bias,
                          use_learning_optimizer, weight_init, clamping, supervised_learning, 
                          normalize_msg, debug, activation, log_tensorboard, wandb_logger, device)
         
@@ -197,7 +197,7 @@ class IPCGNN(PCGNN):
         # INSIDE LAYERS CAN HAVE PREDCODING - intra-layer 
         self.pc_conv1 = IPCGraphConv(num_vertices, sensory_indices, internal_indices, 
                                     lr_params, T, graph_structure, 
-                                    batch_size, edge_type, use_learning_optimizer, weight_init, clamping, supervised_learning, 
+                                    batch_size, edge_type, use_bias, use_learning_optimizer, weight_init, clamping, supervised_learning, 
                                     normalize_msg, 
                                     debug, activation, log_tensorboard, wandb_logger, device)
 

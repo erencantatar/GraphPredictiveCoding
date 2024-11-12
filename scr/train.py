@@ -621,6 +621,9 @@ max_energy_threshold = 1e6
 
 start_time = time.time()
 
+training_labels = [] 
+from collections import Counter
+
 for epoch in range(args.epochs):
     total_loss = 0
     last_loss = 1e10
@@ -630,7 +633,8 @@ for epoch in range(args.epochs):
 
     for idx, (batch, clean) in enumerate(train_loader):
         torch.cuda.empty_cache()
-        
+        training_labels.append(int(batch.y))
+
         try:
             print("Label:", batch.y, "Input Shape:", batch.x.shape)
             model.train()
@@ -750,7 +754,12 @@ if earlystop:
     
     exit()
 else:
-        wandb.log({"crashed": False})
+    wandb.log({"crashed": False})
+
+    element_counts = Counter(training_labels)
+
+    # log element_counts to 
+    wandb.log({"element_counts": element_counts})
 
 # If training completed successfully, log to the finished runs file
 with open('trained_models/finished_training.txt', 'a') as file:

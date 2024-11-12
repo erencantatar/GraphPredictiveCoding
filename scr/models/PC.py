@@ -1,5 +1,7 @@
+
 import torch
-import torch.nn as nn
+import torch.nn as nn  # Ensure that `torch.nn` is only imported once
+
 import torch.nn.init as init
 import numpy as np
 import math
@@ -11,12 +13,11 @@ import os
 import wandb
 import math 
 
-import torch.nn as nn  # Import the parent class if not already done
-
 class PCGraphConv(torch.nn.Module): 
     def __init__(self, num_vertices, sensory_indices, internal_indices, 
                  learning_rate, T, graph_structure,
-                 batch_size, edge_type, use_learning_optimizer, weight_init, clamping,  
+                 batch_size, edge_type, use_bias=False, use_learning_optimizer=False, 
+                 weight_init="normal", clamping=None,  
                  supervised_learning=False, normalize_msg=False, debug=False, activation=None, 
                  log_tensorboard=True, wandb_logger=None, device="cpu"):
         super(PCGraphConv, self).__init__()  # 'add' aggregation
@@ -123,7 +124,7 @@ class PCGraphConv(torch.nn.Module):
         self.use_grokfast = False
         print(f"----- using grokfast: {self.use_grokfast}")
 
-        self.use_bias = False 
+        self.use_bias = use_bias 
         print(f"----- using use_bias: {self.use_bias}")
 
         
@@ -164,7 +165,10 @@ class PCGraphConv(torch.nn.Module):
 
         # Bias initialization (if use_bias is enabled)
         if self.use_bias:
-            raise NotImplementedError 
+            dataset_mean = 0.1307  # Replace with actual dataset mean (0.1307 MNIST)
+            self.biases.data.fill_(dataset_mean)
+
+            # raise NotImplementedError 
             # bias_type, *bias_params = bias_init.split()
             # if bias_type == "normal":
             #     mean = float(bias_params[0]) if bias_params else 0.0
@@ -1229,7 +1233,8 @@ class PCGraphConv(torch.nn.Module):
 class PCGNN(nn.Module):
     def __init__(self, num_vertices, sensory_indices, internal_indices, 
                  lr_params, T, graph_structure, 
-                 batch_size, edge_type,
+                 batch_size, edge_type, 
+                 use_bias, 
                  use_learning_optimizer=False, weight_init="xavier", clamping=None, supervised_learning=False, 
                  normalize_msg=False, 
                  debug=False, activation=None, log_tensorboard=True, wandb_logger=None, device='cpu'):
@@ -1239,7 +1244,7 @@ class PCGNN(nn.Module):
         # INSIDE LAYERS CAN HAVE PREDCODING - intra-layer 
         self.pc_conv1 = PCGraphConv(num_vertices, sensory_indices, internal_indices, 
                                     lr_params, T, graph_structure, 
-                                    batch_size, edge_type, use_learning_optimizer, weight_init, clamping, supervised_learning, 
+                                    batch_size, edge_type, use_bias, use_learning_optimizer, weight_init, clamping, supervised_learning, 
                                     normalize_msg, 
                                     debug, activation, log_tensorboard, wandb_logger, device)
 
@@ -1354,40 +1359,38 @@ class PCGNN(nn.Module):
         self.pc_conv1.data = data_eg
         self.pc_conv1.restart_activity()
         print("Done")
-    
+
     def save_weights(self, path, overwrite=False):
-        import time
+        # Ensure the directory exists
+        os.makedirs(path, exist_ok=True)
+        import time 
+        # Define base file paths
+        weights_path = os.path.join(path, "weights.pt")
+        graph_path = os.path.join(path, "graph.pt")
+        bias_path = os.path.join(path, "bias.pt") if self.pc_conv1.use_bias else None
 
-        # Check if path exists
-        if os.path.exists(path):
+        # Check for existing files and adjust names if needed
+        if os.path.exists(weights_path) or os.path.exists(graph_path) or (bias_path and os.path.exists(bias_path)):
             if not overwrite:
-                # If not overwriting, create a new path by appending timestamp or version
+                # Add timestamp to avoid overwriting
                 timestamp = time.strftime("%Y%m%d-%H%M%S")
-                path = f"{path}_{timestamp}"
-                print(f"Path already exists. Saving to new path: {path}")
+                weights_path = os.path.join(path, f"weights_{timestamp}.pt")
+                graph_path = os.path.join(path, f"graph_{timestamp}.pt")
+                if bias_path:
+                    bias_path = os.path.join(path, f"bias_{timestamp}.pt")
+                print(f"Files already exist. Saving to new files: {weights_path}, {graph_path}" +
+                    (f", {bias_path}" if bias_path else ""))
             else:
-                # If overwrite is True, remove existing files in the directory
-                for file in os.listdir(path):
-                    file_path = os.path.join(path, file)
-                    if os.path.isfile(file_path):
-                        os.remove(file_path)
-        else:
-            # Create the directory if it doesn't exist
-            os.makedirs(path)
+                print("----Overwriting existing files----")
 
-
-        W = self.pc_conv1.weights
-        graph = self.pc_conv1.edge_index
-
-        # save to '"trained_models/weights.pt"' 
-        torch.save(W, f"{path}/weights.pt")
-        torch.save(graph, f"{path}/graph.pt")
-        print("Saved weights and egde_index to ", path)
+        # Save weights, graph, and bias (if applicable)
+        torch.save(self.pc_conv1.weights, weights_path)
+        torch.save(self.pc_conv1.edge_index, graph_path)
+        print(f"Saved weights and edge_index to {path}")
 
         if self.pc_conv1.use_bias:
-            b = self.pc_conv1.biases 
-            torch.save(b, f"{path}/bias.pt")
-            print("Saved bias weight to ", path)
+            torch.save(self.pc_conv1.biases, bias_path)
+            print(f"Saved bias weights to {path}")
 
 
     def query(self, method, random_internal=True, data=None):
