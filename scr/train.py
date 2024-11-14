@@ -64,14 +64,16 @@ parser.add_argument('--graph_type', type=str, default="fully_connected", help='T
 parser.add_argument('--remove_sens_2_sens', type=str2bool, required=True, help='Whether to remove sensory-to-sensory connections.')
 parser.add_argument('--remove_sens_2_sup', type=str2bool, required=True, help='Whether to remove sensory-to-supervised connections.')
 
-# -MessagePassing-
+# --MessagePassing--
 parser.add_argument('--normalize_msg', choices=['True', 'False'], required=True,  help='Normalize message passing, expected True or False')
 
 # -----model-----  
 parser.add_argument('--model_type', type=str, default="PC", help='Predictive Model type: [PC,IPC] ', choices=["PC", "IPC"])
 # parser.add_argument("--weight_init", type=str, default="fixed 0.001", help="Initialization method and params for weights")
 parser.add_argument("--weight_init", type=validate_weight_init, default="fixed 0.001", help="Initialization method and params for weights")
-parser.add_argument("--bias_init", type=str, default="fixed 0.0", help="Initialization method and params for biases")
+
+parser.add_argument('--use_bias',  choices=['True', 'False'], required=True, help="....")
+parser.add_argument("--bias_init", type=str, default="", required=False, help="ege. fixed 0.0 Initialization method and params for biases")
 
 parser.add_argument('--T', type=int, default=40, help='Number of iterations for gradient descent.')
 parser.add_argument('--lr_values', type=float, default=0.001, help='Learning rate values (alpha).')
@@ -113,6 +115,9 @@ if torch.cuda.is_available():
 
 # Make True of False bool
 args.normalize_msg = args.normalize_msg == 'True'
+args.use_bias = args.use_bias == 'True'
+args.set_abs_small_w_2_zero = args.set_abs_small_w_2_zero == 'True'
+
 tags_list = args.tags.split(",") if args.tags else []
 
 import torchvision.transforms as transforms
@@ -334,7 +339,7 @@ model_params = {
     'sensory_indices': (sensory_indices), 
     'internal_indices': (internal_indices), 
     "supervised_learning": (supervision_indices),
-
+    "use_bias": args.use_bias,
 
     "normalize_msg": args.normalize_msg,
 
@@ -636,7 +641,10 @@ for epoch in range(args.epochs):
 
     for idx, (batch, clean) in enumerate(train_loader):
         torch.cuda.empty_cache()
-        training_labels.append(int(batch.y))
+        # training_labels.append(int(batch.y.item()))
+
+        for label in batch.y:
+            training_labels.append(int(label.item()))
 
         try:
             print("Label:", batch.y, "Input Shape:", batch.x.shape)
@@ -750,6 +758,9 @@ if args.set_abs_small_w_2_zero:
 
     plot_model_weights(model, GRAPH_TYPE, model_dir=save_path, save_wandb=True)
 
+# if remove_internal_edges:
+#     pass 
+
 
 plot_energy_graphs(model.pc_conv1.energy_vals, model_dir=model_dir, window_size=model.pc_conv1.T)
 
@@ -780,8 +791,13 @@ else:
 
     element_counts = Counter(training_labels)
 
-    # log element_counts to 
-    wandb.log({"element_counts": element_counts})
+    # Log a bar plot to WandB
+    wandb.log({"element_counts_bar": wandb.plot.bar(
+        wandb.Table(data=[[k, v] for k, v in element_counts.items()], columns=["Label", "Count"]),
+        "Label",
+        "Count",
+        title="Element Counts"
+    )})
 
 # If training completed successfully, log to the finished runs file
 with open('trained_models/finished_training.txt', 'a') as file:
@@ -975,19 +991,19 @@ print("model_dir", model_dir)
 # write a text file with these 
 
 # Log all the evaluation metrics to wandb
-wandb.log({
-    "Mean_MSE_values_denoise_sup": np.mean(MSE_values_denoise_sup),
-    "Mean_MSE_values_denoise": np.mean(MSE_values_denoise),
-    "Mean_MSE_values_occ_noise": np.mean(MSE_values_occ_noise),
-    "Mean_MSE_values_occ": np.mean(MSE_values_occ),
-    # "accuracy_mean": accuracy_mean,
-    "y_true": y_true,
-    "y_pred": y_pred,
-    "avg_SSIM_mean": avg_SSIM_mean,
-    "avg_SSIM_max": avg_SSIM_max,
-    "avg_MSE_mean": avg_MSE_mean,
-    "avg_MSE_max": avg_MSE_max
-})
+# wandb.log({
+#     "Mean_MSE_values_denoise_sup": np.mean(MSE_values_denoise_sup),
+#     "Mean_MSE_values_denoise": np.mean(MSE_values_denoise),
+#     "Mean_MSE_values_occ_noise": np.mean(MSE_values_occ_noise),
+#     "Mean_MSE_values_occ": np.mean(MSE_values_occ),
+#     "accuracy_mean": accuracy_mean,
+#     "y_true": y_true,
+#     "y_pred": y_pred,
+#     "avg_SSIM_mean": avg_SSIM_mean,
+#     "avg_SSIM_max": avg_SSIM_max,
+#     "avg_MSE_mean": avg_MSE_mean,
+#     "avg_MSE_max": avg_MSE_max
+# })
 
 
 from datetime import datetime
