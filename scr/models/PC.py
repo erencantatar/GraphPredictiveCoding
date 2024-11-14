@@ -716,9 +716,8 @@ class PCGraphConv(torch.nn.Module):
         # self.errors[self.sensory_indices] += 1
         # self.errors[self.supervised_labels] += 1
 
-        self.errors[self.internal_indices] += 0.1
-
-        print("!!!!!!!!!!!!!!!!!!!!!!!! IMPORTANT")        
+        # self.errors[self.internal_indices] += 0.1
+        # print("!!!!!!!!!!!!!!!!!!!!!!!! IMPORTANT")        
         
         self.data.x[:, 1] = self.errors.unsqueeze(-1).detach()
         # data.x[self.nodes_2_update, 1] = errors[self.nodes_2_update, :]
