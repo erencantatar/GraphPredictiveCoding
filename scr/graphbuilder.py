@@ -63,11 +63,19 @@ graph_type_options = {
                 }
         },
 
+        "custom_two_branch": {
+            "params": {
+                "internal_nodes": 320,  # Adjust as needed
+            }
+        },
+
         "barabasi": {
             "params": {
                 "num_edges_to_attach": 5  # Example parameter for Barabasi graph
             }
         },
+
+
     }
 
 
@@ -115,6 +123,7 @@ class GraphBuilder:
         self.internal_indices = list(self.num_internal_nodes)
 
         self.graph_params = graph_type["params"]
+        print(self.graph_params)
 
         ### TODO 
         self.create_new_graph = True   
@@ -122,7 +131,6 @@ class GraphBuilder:
         self.dir = f"graphs/{self.graph_type['name']}/"
     
 
-        print(self.graph_params)
 
         # Modify the path based on the graph configuration (removing sens2sens or sens2sup)
         if self.graph_params["remove_sens_2_sens"] and self.graph_params["remove_sens_2_sup"]:
@@ -195,6 +203,8 @@ class GraphBuilder:
                                 no_sens2supervised=self.graph_params["remove_sens_2_sup"])
         elif self.graph_type["name"] == "stochastic_block_w_supvision_clusters":
             self.stochastic_block_w_supervision_clusters()
+        elif self.graph_type["name"] == "custom_two_branch":
+            self.build_custom_graph()
         else:
             raise ValueError(f"Invalid graph type: {self.graph_type['name']}")
         
@@ -568,6 +578,59 @@ class GraphBuilder:
         self.edge_index = data.edge_index
 
         print("done creating Stochastic Block Model graph")
+
+
+    def build_custom_graph(self):
+        self.edge_index = []
+        self.edge_type = []
+        
+        # Define internal node clusters
+        self.internal_layers = self.create_internal_layers(num_layers=2, clusters_per_layer=5, cluster_size=16)
+        
+        # Forward Branch: Sensory -> Internal -> Supervision
+        self.build_branch(self.num_sensor_nodes, self.internal_layers, self.supervision_indices, direction="forward")
+
+        # Backward Branch: Supervision -> Internal -> Sensory
+        self.build_branch(self.supervision_indices, self.internal_layers, self.num_sensor_nodes, direction="backward")
+
+    def create_internal_layers(self, num_layers, clusters_per_layer, cluster_size):
+        layers = []
+        start_idx = self.SENSORY_NODES
+        for layer in range(num_layers):
+            layer_clusters = []
+            for _ in range(clusters_per_layer):
+                cluster = list(range(start_idx, start_idx + cluster_size))
+                layer_clusters.append(cluster)
+                start_idx += cluster_size
+            layers.append(layer_clusters)
+        return layers
+
+    def build_branch(self, start_nodes, internal_layers, end_nodes, direction="forward"):
+        # Connect start nodes to the first layer of internal clusters
+        self.connect_clusters(start_nodes, internal_layers[0], dense=False)
+        
+        # Connect within each internal layer and between consecutive layers
+        for i in range(len(internal_layers) - 1):
+            self.connect_clusters(internal_layers[i], internal_layers[i], dense=True)  # within-layer dense
+            self.connect_clusters(internal_layers[i], internal_layers[i + 1], dense=False)  # between-layer sparse
+
+        # Connect the last internal layer to end nodes
+        self.connect_clusters(internal_layers[-1], end_nodes, dense=False)
+
+    def connect_clusters(self, source_nodes, target_clusters, dense=False):
+        for source in source_nodes:
+            for cluster in target_clusters:
+                if dense:
+                    for target in cluster:
+                        if source != target:
+                            self.edge_index.append([source, target])
+                            self.edge_type.append("Inter2Inter" if "Internal" in str(target) else "Sens2Inter")
+                else:
+                    target = np.random.choice(cluster, size=int(0.1 * len(cluster)), replace=False)
+                    for t in target:
+                        self.edge_index.append([source, t])
+                        self.edge_type.append("SparseConnection")
+
 
     def stochastic_block_w_supervision_clusters(self):
 
