@@ -79,12 +79,15 @@ parser.add_argument('--lr_weights', type=float, default=0.01, help='Learning rat
 parser.add_argument('--activation_func', default="swish", type=str, choices=list(activation_functions.keys()), required=True, help='Choose an activation function: tanh, relu, leaky_relu, linear, sigmoid, hard_tanh, swish')
 
 
-# -----learning----- 
+# -----training----- 
 parser.add_argument('--epochs', type=int, default=5, help='Number of epochs to train.')
 parser.add_argument('--batch_size', type=int, default=1, help='Batch size.')
 parser.add_argument('--seed', type=int, default=42, help='Random seed.')
 parser.add_argument('--optimizer', type=true_with_float, default=False,
                     help="Either False or, if set to True, requires a float value.")
+
+# ---after training-----
+parser.add_argument('--set_abs_small_w_2_zero',  choices=['True', 'False'], required=True, help="....")
 
 # logging 
 import wandb
@@ -728,6 +731,25 @@ print(f"Training completed in {end_time - start_time:.2f} seconds for {args.epoc
 
 save_path = os.path.join(model_dir, 'parameter_info/weight_matrix_visualization_epoch_End.png')
 plot_model_weights(model, GRAPH_TYPE, model_dir=save_path, save_wandb=True)
+
+
+if args.set_abs_small_w_2_zero:
+
+    w_copy = model.pc_conv1.weights.clone()
+
+    # Define the threshold
+    threshold = 0.0001
+
+    # Apply the threshold: set weights with absolute values below the threshold to zero
+    new_w = torch.where(torch.abs(w_copy) < threshold, torch.tensor(0.0, device=w_copy.device), w_copy)
+
+    # Assign the thresholded weights back to the model
+    model.pc_conv1.weights.data = new_w
+
+    save_path = os.path.join(model_dir, 'parameter_info/weight_matrix_visualization_epoch_End_remove_small_abs_weights.png')
+
+    plot_model_weights(model, GRAPH_TYPE, model_dir=save_path, save_wandb=True)
+
 
 plot_energy_graphs(model.pc_conv1.energy_vals, model_dir=model_dir, window_size=model.pc_conv1.T)
 

@@ -708,7 +708,18 @@ class PCGraphConv(torch.nn.Module):
         # print("predictions shape", self.predictions.shape)
 
         # self.errors = (self.values.to(self.device) - self.predictions.to(self.device)).squeeze(-1) 
-        self.errors = (self.values.to(self.device) - self.predictions.to(self.device)).squeeze(-1).detach()  # Detach to avoid retaining the computation graph
+        self.errors = (self.values.to(self.device) - self.predictions.to(self.device)).detach()  # Detach to avoid retaining the computation graph
+        
+        self.errors = self.errors.squeeze()
+        # manually add error
+        print(self.errors.shape)
+        # self.errors[self.sensory_indices] += 1
+        # self.errors[self.supervised_labels] += 1
+
+        self.errors[self.internal_indices] += 0.1
+
+        print("!!!!!!!!!!!!!!!!!!!!!!!! IMPORTANT")        
+        
         self.data.x[:, 1] = self.errors.unsqueeze(-1).detach()
         # data.x[self.nodes_2_update, 1] = errors[self.nodes_2_update, :]
 
