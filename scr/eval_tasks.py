@@ -590,7 +590,7 @@ def generation(test_loader, model, test_params, clean_images, num_samples=8, ver
         # Perform inference to denoise
         noisy_batch = noisy_batch.to(model.pc_conv1.device)
 
-        noisy_batch.x[:, 0][model.pc_conv1.internal_indices] = torch.rand(noisy_batch.x[:, 0][model.pc_conv1.internal_indices].shape).to(model.pc_conv1.device)
+        # noisy_batch.x[:, 0][model.pc_conv1.internal_indices] = torch.rand(noisy_batch.x[:, 0][model.pc_conv1.internal_indices].shape).to(model.pc_conv1.device)
         # noisy_batch.x[:, 1][model.pc_conv1.internal_indices]  = 0
         # noisy_batch.x[:, 2][model.pc_conv1.internal_indices]  = 0
 
@@ -619,9 +619,10 @@ def generation(test_loader, model, test_params, clean_images, num_samples=8, ver
         random = torch.rand(noisy_batch.x[:, 0][0:-10].shape)
 
         noisy_batch.x[:, 0][model.pc_conv1.sensory_indices] = torch.rand(noisy_batch.x[:, 0][model.pc_conv1.sensory_indices].shape).to(model.pc_conv1.device)
+        noisy_batch.x[:, 1][model.pc_conv1.sensory_indices] = torch.rand(noisy_batch.x[:, 0][model.pc_conv1.sensory_indices].shape).to(model.pc_conv1.device)
     
     
-    
+        print("ZZZZZZZZZZZZZZZZZZZZZZZ")
         # noisy_batch.x[:, 2][model.pc_conv1.sensory_indices] = torch.rand(noisy_batch.x[:, 2][model.pc_conv1.sensory_indices].shape).to(model.pc_conv1.device)
         # noisy_batch.x[:, 0][0:-10] = random
         
@@ -630,9 +631,12 @@ def generation(test_loader, model, test_params, clean_images, num_samples=8, ver
         if model.pc_conv1.trace_activity_values:
             model.pc_conv1.trace["values"].append(noisy_batch.x[:, 0][0:784].detach())
 
-        # plt.imshow(model.pc_conv1.trace["values"][0][0:784].view(28,28).cpu())
-        # plt.show()
+        plt.imshow(model.pc_conv1.trace["values"][0][0:784].view(28,28).cpu())
+        plt.show()
 
+
+        plt.imshow(model.pc_conv1.trace["preds"][0][0:784].view(28,28).cpu())
+        plt.show()
 
         # self.values, self.errors, self.predictions, = self.data.x[:, 0], self.data.x[:, 1], self.data.x[:, 2]
 

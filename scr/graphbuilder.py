@@ -65,7 +65,8 @@ graph_type_options = {
 
         "custom_two_branch": {
             "params": {
-                "internal_nodes": 320,  # Adjust as needed
+                "branch1_config": (3, 10, 10),  # 2 layers, 5 clusters per layer, 5 nodes per cluster for Branch 1
+                "branch2_config": (3, 10, 10),  # 2 layers, 5 clusters per layer, 5 nodes per cluster for Branch 2
             }
         },
 
@@ -204,7 +205,10 @@ class GraphBuilder:
         elif self.graph_type["name"] == "stochastic_block_w_supvision_clusters":
             self.stochastic_block_w_supervision_clusters()
         elif self.graph_type["name"] == "custom_two_branch":
-            self.build_custom_graph()
+            self.custom_two_branch(self.SENSORY_NODES, 
+                                   self.graph_params["branch1_config"] , 
+                                   self.graph_params["branch2_config"], 
+                                   10)
         else:
             raise ValueError(f"Invalid graph type: {self.graph_type['name']}")
         
@@ -580,57 +584,166 @@ class GraphBuilder:
         print("done creating Stochastic Block Model graph")
 
 
-    def build_custom_graph(self):
+    def custom_two_branch(self, sensory_nodes, branch1_config, branch2_config, supervision_nodes):
+        self.sensory_nodes = sensory_nodes
+        self.branch1_config = branch1_config  # Branch 1 config: (layers, clusters per layer, nodes per cluster)
+        self.branch2_config = branch2_config  # Branch 2 config: (layers, clusters per layer, nodes per cluster)
+        self.supervision_nodes = supervision_nodes
+        
+        # Calculate total nodes based on branch configurations
+        self.branch1_internal_nodes = branch1_config[0] * branch1_config[1] * branch1_config[2]
+        self.branch2_internal_nodes = branch2_config[0] * branch2_config[1] * branch2_config[2]
+        self.total_nodes = sensory_nodes + self.branch1_internal_nodes + self.branch2_internal_nodes + supervision_nodes
         self.edge_index = []
         self.edge_type = []
         
-        # Define internal node clusters
-        self.internal_layers = self.create_internal_layers(num_layers=2, clusters_per_layer=5, cluster_size=16)
+        # Define node lists for easy access
+        self.sensory_indices = list(range(self.sensory_nodes))
         
-        # Forward Branch: Sensory -> Internal -> Supervision
-        self.build_branch(self.num_sensor_nodes, self.internal_layers, self.supervision_indices, direction="forward")
+        # Define internal node indices for each branch
+        self.branch1_internal_indices = list(range(sensory_nodes, sensory_nodes + self.branch1_internal_nodes))
+        self.branch2_internal_indices = list(range(sensory_nodes + self.branch1_internal_nodes, sensory_nodes + self.branch1_internal_nodes + self.branch2_internal_nodes))
+        
+        # Define supervision indices to start immediately after the last internal node in Branch 2
+        self.supervision_indices = list(range(sensory_nodes + self.branch1_internal_nodes + self.branch2_internal_nodes, self.total_nodes))
+        
+        # Connect sensory nodes fully within themselves
+        self.connect_fully(self.sensory_indices, edge_type="Sens2Sens")
 
-        # Backward Branch: Supervision -> Internal -> Sensory
-        self.build_branch(self.supervision_indices, self.internal_layers, self.num_sensor_nodes, direction="backward")
+        # Build both branches based on configurations
+        self.build_branch_2()
+        self.build_branch_1()
 
-    def create_internal_layers(self, num_layers, clusters_per_layer, cluster_size):
+        # Fully connect supervision (one-hot) nodes
+        self.connect_fully(self.supervision_indices, edge_type="Sup2Sup")
+
+        # Convert edge_index to tensor after graph construction
+        # self.edge_index = torch.tensor(self.edge_index, dtype=torch.long).t().contiguous()
+
+    def build_branch_1(self):
+        """Builds Branch 1 based on its configuration."""
+        layers, clusters_per_layer, nodes_per_cluster = self.branch1_config
+        internal_layers = self.create_internal_layers(layers, clusters_per_layer, nodes_per_cluster, start_idx=self.sensory_nodes, branch="branch1")
+        
+        # Step 1: Sensory -> Internal Layer 1 (sparse)
+        self.connect_clusters(self.sensory_indices, internal_layers[0], edge_type="Sens2Inter", dense=False)
+        
+        # Connect internal layers within Branch 1
+        for i in range(len(internal_layers) - 1):
+            self.connect_clusters(internal_layers[i], internal_layers[i + 1], edge_type="Inter2Inter", dense=False)
+        
+        # Step n: Internal Layer n -> Supervision (sparse)
+        self.connect_clusters(internal_layers[-1], self.supervision_indices, edge_type="Inter2Sup", dense=False, verify_direction="Internal -> Supervision")
+
+    def build_branch_2(self):
+        """Builds Branch 2 based on its configuration."""
+        layers, clusters_per_layer, nodes_per_cluster = self.branch2_config
+        start_idx = self.sensory_nodes + self.branch1_internal_nodes  # Offset by the internal nodes used in Branch 1
+        internal_layers = self.create_internal_layers(layers, clusters_per_layer, nodes_per_cluster, start_idx=start_idx, branch="branch2")
+        
+        # Step 1: Supervision -> Internal Layer 1 (sparse)
+        self.connect_clusters(self.supervision_indices, internal_layers[0], edge_type="Sup2Inter", dense=False, verify_direction="Supervision -> Internal")
+        
+        # Connect internal layers within Branch 2
+        for i in range(len(internal_layers) - 1):
+            self.connect_clusters(internal_layers[i], internal_layers[i + 1], edge_type="Inter2Inter", dense=False, verify_direction="Internal -> Internal")
+        
+        # Step n: Internal Layer n -> Sensory (sparse)
+        self.connect_clusters(internal_layers[-1], self.sensory_indices, edge_type="Inter2Sens", dense=False, verify_direction="Internal -> Sensory")
+
+    def create_internal_layers(self, num_layers, clusters_per_layer, cluster_size, start_idx, branch):
+        """Creates layers of internal nodes organized into clusters for each branch."""
         layers = []
-        start_idx = self.SENSORY_NODES
-        for layer in range(num_layers):
+        for _ in range(num_layers):
             layer_clusters = []
             for _ in range(clusters_per_layer):
                 cluster = list(range(start_idx, start_idx + cluster_size))
                 layer_clusters.append(cluster)
+                # Fully connect nodes within each internal cluster
+                self.connect_fully(cluster, edge_type="Inter2Inter")
                 start_idx += cluster_size
             layers.append(layer_clusters)
+
+            # Add the cluster indices to the branch-specific list
+            if branch == "branch1":
+                self.branch1_internal_indices.extend([node for cluster in layer_clusters for node in cluster])
+            elif branch == "branch2":
+                self.branch2_internal_indices.extend([node for cluster in layer_clusters for node in cluster])
+
         return layers
 
-    def build_branch(self, start_nodes, internal_layers, end_nodes, direction="forward"):
-        # Connect start nodes to the first layer of internal clusters
-        self.connect_clusters(start_nodes, internal_layers[0], dense=False)
+    def connect_fully(self, nodes, edge_type):
+        """Connects all nodes in the given list to each other (fully connected)."""
+        for i in range(len(nodes)):
+            for j in range(i + 1, len(nodes)):
+                self.edge_index.append([nodes[i], nodes[j]])
+                self.edge_index.append([nodes[j], nodes[i]])
+                self.edge_type.append(edge_type)
+                self.edge_type.append(edge_type)
+
+    def connect_clusters(self, source_nodes, target_clusters, edge_type, dense=False, verify_direction=None):
+        """
+        Connects clusters in dense or sparse configurations, ensuring directed connections based on the branch’s flow.
+        If `verify_direction` is specified, it will log and check if each edge follows the intended flow.
+        """
+        violations = []
         
-        # Connect within each internal layer and between consecutive layers
-        for i in range(len(internal_layers) - 1):
-            self.connect_clusters(internal_layers[i], internal_layers[i], dense=True)  # within-layer dense
-            self.connect_clusters(internal_layers[i], internal_layers[i + 1], dense=False)  # between-layer sparse
+        # Flatten source_nodes if it contains clusters
+        if isinstance(source_nodes, range) or isinstance(source_nodes[0], int):
+            source_nodes = list(source_nodes)
+        else:
+            source_nodes = [node for cluster in source_nodes for node in cluster]
 
-        # Connect the last internal layer to end nodes
-        self.connect_clusters(internal_layers[-1], end_nodes, dense=False)
-
-    def connect_clusters(self, source_nodes, target_clusters, dense=False):
+        # If target_clusters is a list of individual nodes, wrap it in another list to make it consistent
+        if isinstance(target_clusters, range) or isinstance(target_clusters[0], int):
+            target_clusters = [list(target_clusters)]
+        
         for source in source_nodes:
-            for cluster in target_clusters:
-                if dense:
-                    for target in cluster:
-                        if source != target:
-                            self.edge_index.append([source, target])
-                            self.edge_type.append("Inter2Inter" if "Internal" in str(target) else "Sens2Inter")
-                else:
-                    target = np.random.choice(cluster, size=int(0.1 * len(cluster)), replace=False)
-                    for t in target:
-                        self.edge_index.append([source, t])
-                        self.edge_type.append("SparseConnection")
+            # Flatten target clusters into a list of individual nodes
+            target_list = [node for cluster in target_clusters for node in cluster]
+            
+            if dense:
+                for target in target_list:
+                    if source != target:
+                        self.edge_index.append([source, target])
+                        self.edge_type.append(edge_type)
+                        if verify_direction and not self.verify_edge_direction(source, target, verify_direction):
+                            violations.append((source, target))
+            else:
+                sparse_targets = np.random.choice(target_list, size=int(0.2 * len(target_list)), replace=False)
+                for target in sparse_targets:
+                    self.edge_index.append([source, target])
+                    self.edge_type.append(edge_type)
+                    if verify_direction and not self.verify_edge_direction(source, target, verify_direction):
+                        violations.append((source, target))
 
+        for cluster in target_clusters:
+            for i in range(len(cluster)):
+                for j in range(i + 1, len(cluster)):
+                    self.edge_index.append([cluster[i], cluster[j]])
+                    self.edge_index.append([cluster[j], cluster[i]])
+                    self.edge_type.append("Inter2Inter")
+                    self.edge_type.append("Inter2Inter")
+
+        if verify_direction:
+            if violations:
+                print(f"Violations found in {verify_direction}:")
+                for source, target in violations:
+                    print(f"Violation: {source} -> {target}")
+            else:
+                print(f"All connections in {verify_direction} verified successfully.")
+
+    def verify_edge_direction(self, source, target, direction):
+        if direction == "Internal -> Supervision":
+            return source < target
+        elif direction == "Supervision -> Internal":
+            return source > target
+        elif direction == "Internal -> Internal":
+            return source != target
+        elif direction == "Internal -> Sensory":
+            return source > target
+        else:
+            return True
 
     def stochastic_block_w_supervision_clusters(self):
 

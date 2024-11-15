@@ -1490,7 +1490,7 @@ class PCGNN(nn.Module):
 
         self.pc_conv1.data = data
 
-        self.pc_conv1.restart_activity()
+        # self.pc_conv1.restart_activity()
         
         if self.pc_conv1.trace_activity_preds:
             self.pc_conv1.trace["preds"].append(data.x[:, 2].cpu().detach())
