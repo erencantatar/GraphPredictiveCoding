@@ -65,8 +65,8 @@ graph_type_options = {
 
         "custom_two_branch": {
             "params": {
-                "branch1_config": (3, 10, 10),  # 2 layers, 5 clusters per layer, 5 nodes per cluster for Branch 1
-                "branch2_config": (3, 10, 10),  # 2 layers, 5 clusters per layer, 5 nodes per cluster for Branch 2
+                "branch1_config": (2, 5, 10),  # 2 layers, 5 clusters per layer, 5 nodes per cluster for Branch 1
+                "branch2_config": (2, 5, 10),  # 2 layers, 5 clusters per layer, 5 nodes per cluster for Branch 2
             }
         },
 
@@ -605,7 +605,12 @@ class GraphBuilder:
         self.branch2_internal_indices = list(range(sensory_nodes + self.branch1_internal_nodes, sensory_nodes + self.branch1_internal_nodes + self.branch2_internal_nodes))
         
         # Define supervision indices to start immediately after the last internal node in Branch 2
-        self.supervision_indices = list(range(sensory_nodes + self.branch1_internal_nodes + self.branch2_internal_nodes, self.total_nodes))
+        # self.supervision_indices = list(range(sensory_nodes + self.branch1_internal_nodes + self.branch2_internal_nodes, self.total_nodes))
+        
+        self.supervision_indices = list(range(
+            self.sensory_nodes + self.branch1_internal_nodes + self.branch2_internal_nodes,
+            self.sensory_nodes + self.branch1_internal_nodes + self.branch2_internal_nodes + self.supervision_nodes
+        ))
         
         # Connect sensory nodes fully within themselves
         self.connect_fully(self.sensory_indices, edge_type="Sens2Sens")

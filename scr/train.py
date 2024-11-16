@@ -219,6 +219,23 @@ if graph_params["graph_type"]["name"] == "stochastic_block":
 if graph_params["graph_type"]["name"] == "stochastic_block_hierarchy":
     raise ValueError("Not implemented yet")
 
+
+if graph_params["graph_type"]["name"] == "two_branch_graph":
+    # Configure internal nodes for two_branch_graph
+    # This assumes two branches with specified configurations
+    branch1_layers, branch1_clusters_per_layer, branch1_nodes_per_cluster = graph_params["branch1_config"]
+    branch2_layers, branch2_clusters_per_layer, branch2_nodes_per_cluster = graph_params["branch2_config"]
+    
+    # Calculate total internal nodes for both branches
+    # Branch 1
+    branch1_internal_nodes = branch1_layers * branch1_clusters_per_layer * branch1_nodes_per_cluster
+    # Branch 2 (Reversed order)
+    branch2_internal_nodes = branch2_layers * branch2_clusters_per_layer * branch2_nodes_per_cluster
+    
+    # The total number of internal nodes will be the sum of both branches
+    graph_params["internal_nodes"] = branch1_internal_nodes + branch2_internal_nodes
+
+
 from dataset import CustomGraphDataset
 
 # Initialize the GraphBuilder
