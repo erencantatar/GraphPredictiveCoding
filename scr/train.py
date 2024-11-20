@@ -220,11 +220,11 @@ if graph_params["graph_type"]["name"] == "stochastic_block_hierarchy":
     raise ValueError("Not implemented yet")
 
 
-if graph_params["graph_type"]["name"] == "two_branch_graph":
+if graph_params["graph_type"]["name"] in ["custom_two_branch","two_branch_graph"]:
     # Configure internal nodes for two_branch_graph
     # This assumes two branches with specified configurations
-    branch1_layers, branch1_clusters_per_layer, branch1_nodes_per_cluster = graph_params["branch1_config"]
-    branch2_layers, branch2_clusters_per_layer, branch2_nodes_per_cluster = graph_params["branch2_config"]
+    branch1_layers, branch1_clusters_per_layer, branch1_nodes_per_cluster = graph_params["graph_type"]["params"]["branch1_config"]
+    branch2_layers, branch2_clusters_per_layer, branch2_nodes_per_cluster = graph_params["graph_type"]["params"]["branch2_config"]
     
     # Calculate total internal nodes for both branches
     # Branch 1
@@ -244,6 +244,24 @@ custom_dataset_train = CustomGraphDataset(graph_params, **dataset_params)
 dataset_params["batch_size"] = args.batch_size
 dataset_params["NUM_INTERNAL_NODES"] = graph_params["internal_nodes"]
 # dataset_params["NUM_INTERNAL_NODES"] = (custom_dataset_train.NUM_INTERNAL_NODES)
+
+
+
+print("CHECK -----------------", custom_dataset_train.num_vertices)
+print("NUM_INTERNAL_NODES", dataset_params["NUM_INTERNAL_NODES"])
+
+
+print(branch1_internal_nodes + branch2_internal_nodes)
+
+print("CHECK OVER \n")
+print("CHECK OVER \n")
+print("CHECK OVER \n")
+print("CHECK OVER \n")
+print("CHECK OVER \n")
+
+
+
+
 
 print("Device \t\t\t:", device)
 print("SUPERVISED on/off \t", dataset_params["supervised_learning"])
@@ -308,6 +326,14 @@ for batch, clean_image in train_loader:
     
 
     full_batch = edge_index
+
+    if graph_params["graph_type"]["name"] == "two_branch_graph":
+
+        number_of_internal_nodes = branch1_internal_nodes + branch2_internal_nodes
+
+        number_of_nodes = 784 + number_of_internal_nodes + 10
+
+        assert batch.x[:, 0] == number_of_nodes, f"Number of nodes in the graph must be {number_of_nodes} but is {batch.x[:, 0]}"
 
     break
 
@@ -760,10 +786,13 @@ plot_model_weights(model, GRAPH_TYPE, model_dir=save_path, save_wandb=True)
 
 if args.set_abs_small_w_2_zero:
 
+
     w_copy = model.pc_conv1.weights.clone()
 
     # Define the threshold
     threshold = 0.0001
+
+    print("Thresholding weights with absolute values below", threshold)
 
     # Apply the threshold: set weights with absolute values below the threshold to zero
     new_w = torch.where(torch.abs(w_copy) < threshold, torch.tensor(0.0, device=w_copy.device), w_copy)
@@ -774,7 +803,8 @@ if args.set_abs_small_w_2_zero:
     save_path = os.path.join(model_dir, 'parameter_info/weight_matrix_visualization_epoch_End_remove_small_abs_weights.png')
 
     plot_model_weights(model, GRAPH_TYPE, model_dir=save_path, save_wandb=True)
-
+else:
+    print("Skipping thresholding of small weights")
 # if remove_internal_edges:
 #     pass 
 
@@ -834,7 +864,7 @@ wandb.log({"model_dir": model_dir})
 # device = torch.device('cpu')
 from eval_tasks import classification, denoise, occlusion, generation #, reconstruction
 
-num_wandb_img_log = 3 # Number of images to log to wandb
+num_wandb_img_log = len(custom_dataset_train.numbers_list)   # Number of images to log to wandb
 model.pc_conv1.batchsize = 1
 
 ### Make dataloader for testing where we take all the digits of the number_list we trained on ###
@@ -919,7 +949,7 @@ test_params = {
     "model_dir": model_dir,
     "T":300,
     "supervised_learning":False, 
-    "num_samples": 45,
+    "num_samples": 15,
     "num_wandb_img_log": num_wandb_img_log,
 }
 

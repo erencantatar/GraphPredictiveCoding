@@ -619,7 +619,7 @@ def generation(test_loader, model, test_params, clean_images, num_samples=8, ver
         random = torch.rand(noisy_batch.x[:, 0][0:-10].shape)
 
         noisy_batch.x[:, 0][model.pc_conv1.sensory_indices] = torch.rand(noisy_batch.x[:, 0][model.pc_conv1.sensory_indices].shape).to(model.pc_conv1.device)
-        noisy_batch.x[:, 1][model.pc_conv1.sensory_indices] = torch.rand(noisy_batch.x[:, 0][model.pc_conv1.sensory_indices].shape).to(model.pc_conv1.device)
+        # noisy_batch.x[:, 1][model.pc_conv1.sensory_indices] = torch.rand(noisy_batch.x[:, 0][model.pc_conv1.sensory_indices].shape).to(model.pc_conv1.device)
     
     
         print("ZZZZZZZZZZZZZZZZZZZZZZZ")

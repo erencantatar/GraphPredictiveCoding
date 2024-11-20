@@ -65,8 +65,8 @@ graph_type_options = {
 
         "custom_two_branch": {
             "params": {
-                "branch1_config": (3, 15, 10),  # 2 layers, 5 clusters per layer, 5 nodes per cluster for Branch 1
-                "branch2_config": (3, 15, 10),  # 2 layers, 5 clusters per layer, 5 nodes per cluster for Branch 2
+                "branch1_config": (1, 20, 10),  # 2 layers, 5 clusters per layer, 5 nodes per cluster for Branch 1
+                "branch2_config": (1, 20, 10),  # 2 layers, 5 clusters per layer, 5 nodes per cluster for Branch 2
                 # "branch1_config": (2, 5, 10),  # 2 layers, 5 clusters per layer, 5 nodes per cluster for Branch 1
                 # "branch2_config": (2, 5, 10),  # 2 layers, 5 clusters per layer, 5 nodes per cluster for Branch 2
             }
@@ -211,9 +211,15 @@ class GraphBuilder:
                                    self.graph_params["branch1_config"] , 
                                    self.graph_params["branch2_config"], 
                                    10)
+            
         else:
             raise ValueError(f"Invalid graph type: {self.graph_type['name']}")
         
+        print("Recalculating the number of vertices after graph creation")
+        self.num_vertices = len(self.sensory_indices) + len(self.internal_indices)
+        if self.supervised_learning:
+            self.num_vertices += len(self.supervision_indices)  # Add supervision nodes to the vertex count
+            
         # Convert edge_index to tensor
         self.edge_index = torch.tensor(self.edge_index, dtype=torch.long).t().contiguous()
 
