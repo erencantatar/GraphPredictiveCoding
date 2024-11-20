@@ -2,11 +2,25 @@
 
 ...
 
+
+## Installation
+1. ..
+```bash
+conda env create -f environment.yaml
+conda activate PredCod  #(or source activate)
+```
+2. run `notebooks/training.ipynb` to train step by step   
+
 ## Snellius cheatsheat 
 
 1. Interactive (debug) session: 
 ```bash
 srun --partition=gpu --gpus=1 --ntasks=1 --cpus-per-task=18 --time=02:00:00 --pty bash -i
+module purge
+module load 2022
+module load Anaconda3/2022.05
+cd /home/etatar/GraphPredCod2/scr
+source activate PredCod
 ```
 2. accinfo
 3. myquota
@@ -125,6 +139,8 @@ srun --partition=gpu --gpus=1 --ntasks=1 --cpus-per-task=18 --time=02:00:00 --pt
     --seed 42 \               # Random seed for reproducibility
     --optimizer False \       # Use default optimizer
    ```
+
+## Documentation page
 
 
 ## Contributing
