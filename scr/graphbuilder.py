@@ -65,8 +65,10 @@ graph_type_options = {
 
         "custom_two_branch": {
             "params": {
-                "branch1_config": (2, 5, 10),  # 2 layers, 5 clusters per layer, 5 nodes per cluster for Branch 1
-                "branch2_config": (2, 5, 10),  # 2 layers, 5 clusters per layer, 5 nodes per cluster for Branch 2
+                "branch1_config": (3, 15, 10),  # 2 layers, 5 clusters per layer, 5 nodes per cluster for Branch 1
+                "branch2_config": (3, 15, 10),  # 2 layers, 5 clusters per layer, 5 nodes per cluster for Branch 2
+                # "branch1_config": (2, 5, 10),  # 2 layers, 5 clusters per layer, 5 nodes per cluster for Branch 1
+                # "branch2_config": (2, 5, 10),  # 2 layers, 5 clusters per layer, 5 nodes per cluster for Branch 2
             }
         },
 
