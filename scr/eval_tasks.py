@@ -287,7 +287,7 @@ def occlusion(test_loader, model, test_params, verbose=0):
         print("CHECK", noisy_batch.x[:,0][-10:])
 
         plt.imshow(noisy_batch.x[:, 0][0:784].view(28,28).cpu())
-        plt.show()
+        # plt.show()
 
         values, predictions, labels = model.query(method="pass", data=noisy_batch)  # query_by_conditioning
         # values, predictions = values[batch_idx, :, 0], predictions[batch_idx, :, 0]
@@ -632,11 +632,11 @@ def generation(test_loader, model, test_params, clean_images, num_samples=8, ver
             model.pc_conv1.trace["values"].append(noisy_batch.x[:, 0][0:784].detach())
 
         plt.imshow(model.pc_conv1.trace["values"][0][0:784].view(28,28).cpu())
-        plt.show()
+        # plt.show()
 
 
         plt.imshow(model.pc_conv1.trace["preds"][0][0:784].view(28,28).cpu())
-        plt.show()
+        # plt.show()
 
         # self.values, self.errors, self.predictions, = self.data.x[:, 0], self.data.x[:, 1], self.data.x[:, 2]
 
@@ -690,7 +690,7 @@ def generation(test_loader, model, test_params, clean_images, num_samples=8, ver
         print("CHECK", noisy_batch.x[:,0][-10:])
 
         plt.imshow(noisy_batch.x[:, 0][0:784].view(28,28).cpu())
-        plt.show()
+        # plt.show()
 
         values, predictions, labels = model.query(method="pass", data=noisy_batch)  # query_by_conditioning
         # values, predictions = values[batch_idx, :, 0], predictions[batch_idx, :, 0]

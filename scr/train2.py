@@ -618,6 +618,66 @@ plot_model_weights(model, GRAPH_TYPE, model_dir=save_path)
 
 
 
+
+
+######################################################################################################### 
+####                                            Eval setup (during training )                       #####
+######################################################################################################### 
+
+
+
+# device = torch.device('cpu')
+from eval_tasks import classification, denoise, occlusion, generation #, reconstruction
+
+num_wandb_img_log = len(custom_dataset_train.numbers_list)   # Number of images to log to wandb
+model.pc_conv1.batchsize = 1
+
+### Make dataloader for testing where we take all the digits of the number_list we trained on ###
+dataset_params_testing = dataset_params.copy()
+
+if "batch_size" in dataset_params_testing.keys():
+    # remove keys 
+    del dataset_params_testing["batch_size"]
+
+if "NUM_INTERNAL_NODES" in dataset_params_testing.keys():
+    # remove keys 
+    del dataset_params_testing["NUM_INTERNAL_NODES"]
+
+dataset_params_testing["edge_index"] = custom_dataset_train.edge_index
+
+dataset_params_testing["mnist_dataset"] = mnist_testset
+dataset_params_testing["N"] = "all"
+dataset_params_testing["supervision_label_val"] = dataset_params["supervision_label_val"]
+
+# --------------------------------------------
+model.trace(values=True, errors=True)
+model.pc_conv1.trace_activity_values = True 
+model.pc_conv1.trace_activity_preds = True 
+model.pc_conv1.batchsize = 1
+
+
+for key in dataset_params_testing:
+    print(key, ":\t ", dataset_params_testing[key])
+
+
+# CustomGraphDataset params
+custom_dataset_test = CustomGraphDataset(graph_params, **dataset_params_testing, 
+                                        indices=(num_vertices, sensory_indices, internal_indices, supervision_indices)
+                                        )
+# dataset_params_testing["batch_size"] = 2
+
+test_loader = DataLoader(custom_dataset_test, batch_size=1, shuffle=True, generator=generator_seed)
+
+from helper.eval import get_clean_images_by_label
+
+clean_images = get_clean_images_by_label(mnist_trainset, num_images=10)
+
+import os
+import logging
+
+from helper.log import write_eval_log
+
+
 ######################################################################################################### 
 ####                                              Model  (training)                                 #####
 ######################################################################################################### 
@@ -644,8 +704,6 @@ history = {
 wandb.watch(model.pc_conv1, log="all", log_freq=10)
 # wandb.watch(self.pc_conv1, log="all", log_freq=10)
 
-
-
 reduce_lr_weights = True
 print("Using reduce_lr_weights: ", reduce_lr_weights)
 
@@ -666,6 +724,10 @@ for epoch in range(args.epochs):
 
     if earlystop:
         break
+    
+    model.pc_conv1.batchsize = train_loader.batch_size
+    model.pc_conv1.trace_activity_values = False 
+    model.pc_conv1.trace_activity_preds = False
 
     for idx, (batch, clean) in enumerate(train_loader):
         torch.cuda.empty_cache()
@@ -716,7 +778,7 @@ for epoch in range(args.epochs):
                 earlystop = True
                 break
 
-            if idx >= 20:
+            if idx >= 10:
                 print("Epoch checkpoint reached, saving model...")
 
                 # model_filename = f"model_state_dict_{epoch}.pth"
@@ -760,6 +822,45 @@ for epoch in range(args.epochs):
                 raise e
 
     print(f"Epoch {epoch} / {args.epochs} completed")
+
+    # Evaluation
+    print(f"Starting evaluation for epoch {epoch}...")
+
+    model.pc_conv1.trace_activity_values = True 
+    model.pc_conv1.trace_activity_preds = True 
+    model.pc_conv1.batchsize = 1
+    test_params = {
+        "model_dir": model_dir,
+        "T":100,
+        "supervised_learning":False, 
+        "num_samples": 10,
+        "num_wandb_img_log": num_wandb_img_log,
+    }
+    y_true, y_pred, accuracy_mean = classification(test_loader, model, test_params)
+    # Log accuracy_mean grouped under classification
+    wandb.log({
+        "epoch": epoch,
+        "classification/accuracy_mean": accuracy_mean
+    })
+    
+    test_params = {
+        "model_dir": model_dir,
+        "T": 100,
+        "supervised_learning":True, 
+        "num_samples": 5,
+        "num_wandb_img_log": num_wandb_img_log,
+    }
+    avg_SSIM_mean, avg_SSIM_max, avg_MSE_mean, avg_MSE_max = generation(test_loader, model, test_params, clean_images, verbose=0)
+    
+    # Log SSIM and MSE metrics grouped under generation
+    wandb.log({
+        "epoch": epoch,
+        "generation/SSIM_mean": avg_SSIM_mean,
+        "generation/SSIM_max": avg_SSIM_max,
+        "generation/MSE_mean": avg_MSE_mean,
+        "generation/MSE_max": avg_MSE_max,
+    })
+
 
 end_time = time.time()
 print(f"Training completed in {end_time - start_time:.2f} seconds for {args.epochs} epochs")
@@ -847,171 +948,101 @@ wandb.log({"model_dir": model_dir})
 ####                                            Evaluation (setup)                                  #####
 ######################################################################################################### 
  
-# device = torch.device('cpu')
-from eval_tasks import classification, denoise, occlusion, generation #, reconstruction
+# test_params["add_sens_noise"] = True
+# MSE_values_occ_noise = occlusion(test_loader, model, test_params)
 
-num_wandb_img_log = len(custom_dataset_train.numbers_list)   # Number of images to log to wandb
-model.pc_conv1.batchsize = 1
+# # After occlusion
+# eval_data_occlusion = {
+#     "occlusion": {
+#         "MSE_values_occ_noise": MSE_values_occ_noise,
+#         "MSE_values_occ": MSE_values_occ
+#     }
+# }
+# write_eval_log(eval_data_occlusion, model_dir)
+# ######################################################################################################### 
 
-### Make dataloader for testing where we take all the digits of the number_list we trained on ###
-dataset_params_testing = dataset_params.copy()
+# model.pc_conv1.batchsize = 1
+# test_params = {
+#     "model_dir": model_dir,
+#     "T":300,
+#     "supervised_learning":False, 
+#     "num_samples": 15,
+#     "num_wandb_img_log": num_wandb_img_log,
+# }
 
-if "batch_size" in dataset_params_testing.keys():
-    # remove keys 
-    del dataset_params_testing["batch_size"]
+# # model.pc_conv1.lr_values = 0.1
+# # model.pc_conv1.lr_values = model_params["lr_params"][0]
 
-if "NUM_INTERNAL_NODES" in dataset_params_testing.keys():
-    # remove keys 
-    del dataset_params_testing["NUM_INTERNAL_NODES"]
-
-dataset_params_testing["edge_index"] = custom_dataset_train.edge_index
-
-dataset_params_testing["mnist_dataset"] = mnist_testset
-dataset_params_testing["N"] = "all"
-dataset_params_testing["supervision_label_val"] = dataset_params["supervision_label_val"]
-
-# --------------------------------------------
-model.trace(values=True, errors=True)
-model.pc_conv1.trace_activity_values = True 
-model.pc_conv1.trace_activity_preds = True 
-model.pc_conv1.batchsize = 1
-
-
-for key in dataset_params_testing:
-    print(key, ":\t ", dataset_params_testing[key])
-
-
-# CustomGraphDataset params
-custom_dataset_test = CustomGraphDataset(graph_params, **dataset_params_testing, 
-                                        indices=(num_vertices, sensory_indices, internal_indices, supervision_indices)
-                                        )
-# dataset_params_testing["batch_size"] = 2
-
-test_loader = DataLoader(custom_dataset_test, batch_size=1, shuffle=True, generator=generator_seed)
-
-from helper.eval import get_clean_images_by_label
-
-clean_images = get_clean_images_by_label(mnist_trainset, num_images=10)
-
-######################################################################################################### 
-####                                            Evaluation (tasks)                                  #####
-######################################################################################################### 
- 
-import os
-import logging
-
-from helper.log import write_eval_log
+# y_true, y_pred, accuracy_mean = classification(test_loader, model, test_params)
+# # Log all the evaluation metrics to wandb
+# # After classification
+# eval_data_classification = {
+#     "classification": {
+#         "accuracy_mean": accuracy_mean,
+#         "y_true": y_true,
+#         "y_pred": y_pred
+#     }
+# }
+# write_eval_log(eval_data_classification, model_dir)
 
 
-test_params = {
-    "model_dir": model_dir,
-    "T": 300,
-    "supervised_learning":True, 
-    "num_samples": 5,
-    "add_sens_noise": False,
-    "num_wandb_img_log": num_wandb_img_log,
-}
+# ######################################################################################################### 
 
-# model.pc_conv1.lr_values = 0.1 
-# model.pc_conv1.lr_values = model_params["lr_params"][0]
+# test_params = {
+#     "model_dir": model_dir,
+#     "T": 300,
+#     "supervised_learning":True, 
+#     "num_samples": 6,
+#     "num_wandb_img_log": num_wandb_img_log,
+# }
 
-MSE_values_occ = occlusion(test_loader, model, test_params)
+# # model.pc_conv1.lr_values = 0.1
+# # model.pc_conv1.lr_values = model_params["lr_params"][0]
 
-test_params["add_sens_noise"] = True
-MSE_values_occ_noise = occlusion(test_loader, model, test_params)
+# MSE_values_denoise_sup = denoise(test_loader, model, test_params)
 
-# After occlusion
-eval_data_occlusion = {
-    "occlusion": {
-        "MSE_values_occ_noise": MSE_values_occ_noise,
-        "MSE_values_occ": MSE_values_occ
-    }
-}
-write_eval_log(eval_data_occlusion, model_dir)
-######################################################################################################### 
+# test_params["supervised_learning"] = False
+# MSE_values_denoise = denoise(test_loader, model, test_params)
 
-model.pc_conv1.batchsize = 1
-test_params = {
-    "model_dir": model_dir,
-    "T":300,
-    "supervised_learning":False, 
-    "num_samples": 15,
-    "num_wandb_img_log": num_wandb_img_log,
-}
-
-# model.pc_conv1.lr_values = 0.1
-# model.pc_conv1.lr_values = model_params["lr_params"][0]
-
-y_true, y_pred, accuracy_mean = classification(test_loader, model, test_params)
-# Log all the evaluation metrics to wandb
-# After classification
-eval_data_classification = {
-    "classification": {
-        "accuracy_mean": accuracy_mean,
-        "y_true": y_true,
-        "y_pred": y_pred
-    }
-}
-write_eval_log(eval_data_classification, model_dir)
-
-
-######################################################################################################### 
-
-test_params = {
-    "model_dir": model_dir,
-    "T": 300,
-    "supervised_learning":True, 
-    "num_samples": 6,
-    "num_wandb_img_log": num_wandb_img_log,
-}
-
-# model.pc_conv1.lr_values = 0.1
-# model.pc_conv1.lr_values = model_params["lr_params"][0]
-
-MSE_values_denoise_sup = denoise(test_loader, model, test_params)
-
-test_params["supervised_learning"] = False
-MSE_values_denoise = denoise(test_loader, model, test_params)
-
-eval_data_denoise = {
-    "denoise": {
-        "MSE_values_denoise_sup": MSE_values_denoise_sup,
-        "MSE_values_denoise": MSE_values_denoise
-    }
-}
-write_eval_log(eval_data_denoise, model_dir)
-# MSE_values = denoise(test_loader, model, supervised_learning=True)
-# print("MSE_values", MSE_values)
-######################################################################################################### 
+# eval_data_denoise = {
+#     "denoise": {
+#         "MSE_values_denoise_sup": MSE_values_denoise_sup,
+#         "MSE_values_denoise": MSE_values_denoise
+#     }
+# }
+# write_eval_log(eval_data_denoise, model_dir)
+# # MSE_values = denoise(test_loader, model, supervised_learning=True)
+# # print("MSE_values", MSE_values)
+# ######################################################################################################### 
 
 
 
-test_params = {
-    "model_dir": model_dir,
-    "T": 300,
-    "supervised_learning":True, 
-    "num_samples": 15,
-    "num_wandb_img_log": num_wandb_img_log,
-}
+# test_params = {
+#     "model_dir": model_dir,
+#     "T": 300,
+#     "supervised_learning":True, 
+#     "num_samples": 15,
+#     "num_wandb_img_log": num_wandb_img_log,
+# }
 
-# model.pc_conv1.lr_values = 0.1
-# model.pc_conv1.lr_values = model_params["lr_params"][0]
+# # model.pc_conv1.lr_values = 0.1
+# # model.pc_conv1.lr_values = model_params["lr_params"][0]
 
-model.pc_conv1.trace_activity_values = True 
-model.pc_conv1.trace_activity_preds = True 
+# model.pc_conv1.trace_activity_values = True 
+# model.pc_conv1.trace_activity_preds = True 
 
-avg_SSIM_mean, avg_SSIM_max, avg_MSE_mean, avg_MSE_max = generation(test_loader, model, test_params, clean_images, verbose=0)
+# avg_SSIM_mean, avg_SSIM_max, avg_MSE_mean, avg_MSE_max = generation(test_loader, model, test_params, clean_images, verbose=0)
 
-# After generation
-eval_data_generation = {
-    "Generation": {
-        "avg_SSIM_mean": avg_SSIM_mean,
-        "avg_SSIM_max": avg_SSIM_max,
-        "avg_MSE_mean": avg_MSE_mean,
-        "avg_MSE_max": avg_MSE_max
-    }
-}
-write_eval_log(eval_data_generation, model_dir)
+# # After generation
+# eval_data_generation = {
+#     "Generation": {
+#         "avg_SSIM_mean": avg_SSIM_mean,
+#         "avg_SSIM_max": avg_SSIM_max,
+#         "avg_MSE_mean": avg_MSE_mean,
+#         "avg_MSE_max": avg_MSE_max
+#     }
+# }
+# write_eval_log(eval_data_generation, model_dir)
 
 # MSE_values = denoise(test_loader, model, supervised_learning=True)
 # print("MSE_values", MSE_values)
