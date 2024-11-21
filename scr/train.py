@@ -245,24 +245,6 @@ dataset_params["batch_size"] = args.batch_size
 dataset_params["NUM_INTERNAL_NODES"] = graph_params["internal_nodes"]
 # dataset_params["NUM_INTERNAL_NODES"] = (custom_dataset_train.NUM_INTERNAL_NODES)
 
-
-
-print("CHECK -----------------", custom_dataset_train.num_vertices)
-print("NUM_INTERNAL_NODES", dataset_params["NUM_INTERNAL_NODES"])
-
-
-print(branch1_internal_nodes + branch2_internal_nodes)
-
-print("CHECK OVER \n")
-print("CHECK OVER \n")
-print("CHECK OVER \n")
-print("CHECK OVER \n")
-print("CHECK OVER \n")
-
-
-
-
-
 print("Device \t\t\t:", device)
 print("SUPERVISED on/off \t", dataset_params["supervised_learning"])
 
@@ -779,6 +761,7 @@ for epoch in range(args.epochs):
 end_time = time.time()
 print(f"Training completed in {end_time - start_time:.2f} seconds for {args.epochs} epochs")
 
+############ TRAINING DONE ####################
 
 save_path = os.path.join(model_dir, 'parameter_info/weight_matrix_visualization_epoch_End.png')
 plot_model_weights(model, GRAPH_TYPE, model_dir=save_path, save_wandb=True)

@@ -220,13 +220,15 @@ class PCGraphConv(torch.nn.Module):
             weight_decay = self.use_optimizers[0]
 
             print("------------Using optimizers for values/weights updating ------------")
-            self.optimizer_weights = torch.optim.Adam([self.weights], lr=self.lr_weights, weight_decay=1e-2) #weight_decay=1e-2)        
+            # self.optimizer_weights = torch.optim.Adam([self.weights], lr=self.lr_weights, weight_decay=1e-2) #weight_decay=1e-2)        
             # self.optimizer_weights = torch.optim.SGD([self.weights], lr=self.lr_weights)
-
             # self.optimizer_weights = torch.optim.SGD([self.weights], lr=self.gamma) #weight_decay=1e-2)
+            # self.optimizer_values = torch.optim.SGD([self.values_dummy], lr=self.lr_values)
 
-            self.optimizer_values = torch.optim.SGD([self.values_dummy], lr=self.lr_values)
-            
+            # SGD configured as plain gradient descent
+            self.optimizer_weights = torch.optim.Adam([self.weights], lr=self.lr_weights, momentum=0, weight_decay=0, nesterov=False)      
+            self.optimizer_values = torch.optim.SGD([self.values_dummy], lr=self.lr_values, momentum=0, weight_decay=0, nesterov=False)
+
             self.weights.grad = torch.zeros_like(self.weights)
             self.values_dummy.grad = torch.zeros_like(self.values_dummy)
    
