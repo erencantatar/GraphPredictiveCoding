@@ -225,9 +225,10 @@ class PCGraphConv(torch.nn.Module):
             # self.optimizer_weights = torch.optim.SGD([self.weights], lr=self.gamma) #weight_decay=1e-2)
             # self.optimizer_values = torch.optim.SGD([self.values_dummy], lr=self.lr_values)
 
+            # paper: 
             # SGD configured as plain gradient descent
-            self.optimizer_weights = torch.optim.Adam([self.weights], lr=self.lr_weights, momentum=0, weight_decay=1e-3, nesterov=False)      
-            self.optimizer_values = torch.optim.SGD([self.values_dummy], lr=self.lr_values, momentum=0, weight_decay=1e-3, nesterov=False)
+            self.optimizer_weights = torch.optim.Adam([self.weights], lr=self.lr_weights, momentum=0, weight_decay=weight_decay, nesterov=False)      
+            self.optimizer_values = torch.optim.SGD([self.values_dummy], lr=self.lr_values, momentum=0, weight_decay=weight_decay, nesterov=False)
 
             self.weights.grad = torch.zeros_like(self.weights)
             self.values_dummy.grad = torch.zeros_like(self.values_dummy)
@@ -395,12 +396,12 @@ class PCGraphConv(torch.nn.Module):
 
                     # Log gradient magnitude
                     if self.wandb_logger:
-                        self.wandb_logger.log({f"{name}_grad_magnitude": grad_magnitude})
+                        self.wandb_logger.log({f"{name}/_grad_magnitude": grad_magnitude})
 
                         # Log gradient histograms less frequently
                         if log_histograms:
                             grad_hist = param.grad.cpu().numpy()
-                            self.wandb_logger.log({f"{name}_grad_distribution": wandb.Histogram(grad_hist)})
+                            self.wandb_logger.log({f"{name}/_grad_distribution": wandb.Histogram(grad_hist)})
 
         # Increment step counter
         self.global_step += 1
@@ -1109,9 +1110,9 @@ class PCGraphConv(torch.nn.Module):
                 
                 if self.wandb_logger:
                     self.wandb_logger.log({
-                        f"delta_w_{etype_name}_mean": delta_w_etype.mean().item(),
-                        f"delta_w_{etype_name}_max": delta_w_etype.max().item(),
-                        f"delta_w_{etype_name}_distribution": wandb.Histogram(delta_w_etype.cpu().numpy())
+                        f"{etype_name}/delta_w_{etype_name}_mean": delta_w_etype.mean().item(),
+                        f"{etype_name}/delta_w_{etype_name}_max": delta_w_etype.max().item(),
+                        f"{etype_name}/delta_w_{etype_name}_distribution": wandb.Histogram(delta_w_etype.cpu().numpy())
                     })
 
                 if log:
@@ -1119,7 +1120,7 @@ class PCGraphConv(torch.nn.Module):
             else:
                 if self.wandb_logger:
                     # Log zero if no edges of this type are present
-                    self.wandb_logger.log({f"delta_w_{etype_name}_mean": np.nan, f"delta_w_{etype_name}_max": np.nan})
+                    self.wandb_logger.log({f"{etype_name}/delta_w_{etype_name}_mean": np.nan, f"delta_w_{etype_name}_max": np.nan})
 
         print("delta_w distributions for each edge type logged.")
 

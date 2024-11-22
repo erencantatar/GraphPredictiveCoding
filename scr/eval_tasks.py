@@ -83,7 +83,11 @@ def task():
 """
 
 
-
+"""
+dynamic_task is a decorator function that dynamically sets up 
+a task for a model based on the function name, allowing for 
+flexible and modular task-specific configurations
+"""
 def dynamic_task(func):
     def wrapper(test_loader, model, test_params, *args, **kwargs):
         # Dynamically set the task based on the function name
@@ -649,7 +653,7 @@ def generation(test_loader, model, test_params, clean_images, num_samples=8, ver
 
         if test_params["num_wandb_img_log"] < idx:
             # log fig to wandb
-            wandb.log({"generation_IMG": wandb.Image(fig)})
+            wandb.log({"classification/generation_IMG": wandb.Image(fig)})
             plt.close(fig)
 
 
@@ -776,7 +780,7 @@ def classification(test_loader, model, test_params, num_samples=5):
 
         if test_params["num_wandb_img_log"] < idx:
             # log fig to wandb
-            wandb.log({"classification_IMG": wandb.Image(fig)})
+            wandb.log({"classification/classification_IMG": wandb.Image(fig)})
             plt.close(fig)
 
         if len(y_true) >= test_params["num_samples"]:

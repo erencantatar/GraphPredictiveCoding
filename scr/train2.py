@@ -99,8 +99,6 @@ import wandb
 parser.add_argument('--use_wandb', type=str, default="disabled", help='Wandb mode.', choices=['shared', 'online', 'run', 'dryrun', 'offline', 'disabled'])
 parser.add_argument('--tags', type=str, default="", help="Comma-separated tags to add to wandb logging (e.g., 'experiment,PC,test')")
 
-
-
 args = parser.parse_args()
 
 # Using argparse values
@@ -751,8 +749,8 @@ for epoch in range(args.epochs):
             # Log energy values for this batch/epoch to wandb
             wandb.log({
                 "epoch": epoch,
-                "internal_energy_mean": history_epoch["internal_energy_mean"],
-                "sensory_energy_mean": history_epoch["sensory_energy_mean"]
+                "Training/internal_energy_mean": history_epoch["internal_energy_mean"],
+                "Training/sensory_energy_mean": history_epoch["sensory_energy_mean"]
             })
 
             model.pc_conv1.restart_activity()
@@ -927,7 +925,7 @@ else:
     element_counts = Counter(training_labels)
 
     # Log a bar plot to WandB
-    wandb.log({"element_counts_bar": wandb.plot.bar(
+    wandb.log({"Training/element_counts_bar": wandb.plot.bar(
         wandb.Table(data=[[k, v] for k, v in element_counts.items()], columns=["Label", "Count"]),
         "Label",
         "Count",
