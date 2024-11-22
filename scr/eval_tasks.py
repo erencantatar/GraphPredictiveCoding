@@ -35,6 +35,15 @@ import wandb
 import gc 
 from helper.error import calculate_mse
 
+# maps = RdBu, RdBu_r, RdBu_r, RdBu, BrBG, BrBG_r, coolwarm, coolwarm_r, bwr, bwr_r, seismic, seismic_r
+# cmap = "RdBu_r"
+# cmap = "gray"
+
+from skimage.metrics import structural_similarity as ssim
+    
+def mse(imageA, imageB):
+    """Calculate the Mean Squared Error (MSE) between two images."""
+    return np.mean((imageA - imageB) ** 2)
 
 
 """
@@ -54,7 +63,8 @@ def task():
 
     - alter internal: value, error, preds
 
-    - set supervision nodes
+    - set supervision nodes (already done in dataset)
+        (only remove label if needed)
 
     - Inference 
 
@@ -69,133 +79,37 @@ def task():
 """
 
 
-# maps = RdBu, RdBu_r, RdBu_r, RdBu, BrBG, BrBG_r, coolwarm, coolwarm_r, bwr, bwr_r, seismic, seismic_r
-# cmap = "RdBu_r"
-# cmap = "gray"
 
-# def occlusion(test_loader, model, test_params):
-    
-#     model.pc_conv1.debug = False
-#     model.pc_conv1.set_mode("testing", task="reconstruction")
-#     model.pc_conv1.nodes_2_update = list(model.pc_conv1.sensory_indices[len(model.pc_conv1.sensory_indices)//2:]) +  list(model.pc_conv1.internal_indices)
+def dynamic_task(func):
+    def wrapper(test_loader, model, test_params, *args, **kwargs):
+        # Dynamically set the task based on the function name
+        task_name = func.__name__
+        model.pc_conv1.restart_activity()
+        model.pc_conv1.set_mode("testing", task=task_name)
 
-#     # model.pc_conv1.nodes_2_update +=  list(model.pc_conv1.supervised_labels)
-#     model.pc_conv1.restart_activity()
+        # Default trace setup for most tasks
+        model.pc_conv1.trace['values'] = []
+        model.pc_conv1.trace['preds'] = []
 
-#     model.pc_conv1.debug = False
-#     model.pc_conv1.T = test_params["T"] 
-#     MSE_values = []
+        # Dynamically set T if present in test_params
+        if "T" in test_params:
+            model.pc_conv1.T = test_params["T"]
 
-#     for idx, (noisy_batch, clean_image) in enumerate(test_loader, start=1):
-
-#         print("idx", idx)
-#         # Perform inference to denoise
-#         noisy_batch = noisy_batch.to(model.pc_conv1.device)
-
-#         # init all internal nodes random
-#         noisy_batch.x[:, 0][model.pc_conv1.internal_indices] = torch.rand(noisy_batch.x[:, 0][model.pc_conv1.internal_indices].shape).to(model.pc_conv1.device)
-
-#         # make occlusion
-#         noisy_batch.x[:, 0][784 // 2: ] = 0 
-        
-#         if test_params["add_sens_noise"]:
-#             noisy_batch.x[:, 0][784 // 2: ] = torch.rand( noisy_batch.x[:, 0][784 // 2: ].shape) 
-
-#         #### SURVERVISED ##########
-#         if test_params["supervised_learning"]:
-#             # if during training the label for the supervised node was 60, also here
-#             # model.pc_conv1.values[model.pc_conv1.supervised_labels].data = noisy_batch.x[model.pc_conv1.supervised_labels]
-#             pass 
-#         else:
-#             noisy_batch.x[:, 0][model.pc_conv1.supervised_labels] = 0
-        
-#         print("labels model", noisy_batch.x[:, 0][model.pc_conv1.supervised_labels] )
-
-#         # Extract the denoised output from the sensory nodes
-#         noisy_image = noisy_batch.x[:, 0][0:784].view(28,28).cpu().detach().numpy()
-        
-#         values, predictions, labels = model.query(method="pass", data=noisy_batch)  # query_by_conditioning
-        
-        
-#         denoised_output = predictions[0:784].view(28,28).cpu().detach().numpy()
+        if task_name in ["generation"]:
+            # model.pc_conv1.nodes_2_update = # all good
+            pass 
+        if task_name in ["occulusion"]:
+            model.pc_conv1.nodes_2_update = list(model.pc_conv1.sensory_indices[len(model.pc_conv1.sensory_indices)//2:]) +  list(model.pc_conv1.internal_indices)
 
 
-#         cmap = "gray"
-        
-#         # Creating a subplot mosaic
-#         fig, ax = plt.subplot_mosaic([
-#             ["A", "B", "C", "D", "E"],
-#             ["F", "F", "F", "G", "G"]
-#         ], figsize=(15, 8)) 
+
+        # Pass along any additional arguments or task-specific tweaks
+        return func(test_loader, model, test_params, *args, **kwargs)
+
+    return wrapper
 
 
-#         # WANT TO ONLY COMPARE THE OCClUDED PART WITH THE MODELS CREATIONS 
-#         # Assuming occlusion was applied to the first half of the image
-#         occluded_part = 784 // 2  # Adjust this based on the actual occluded region size
-
-#         # Flatten the images (if not already flattened)
-#         clean_image_flat = clean_image.flatten()
-#         denoised_output_flat = denoised_output.flatten()
-
-#         # Compare only the occluded region
-#         MSE = round(calculate_mse(clean_image_flat[:occluded_part], denoised_output_flat[:occluded_part]), 4)
-
-#         fig.suptitle(f"MSE {MSE} clean/denoised_output")
-
-#         clean_image = clean_image.view(28,28).cpu().numpy()  # Adjust shape as necessary
-#         # Plotting the images
-#         ax["A"].imshow(clean_image, vmin=0, vmax=1, cmap=cmap)
-#         ax["A"].set_title(f"Clean Image of a {noisy_batch.y.item()}")
-
-#         ax["B"].imshow(noisy_image, vmin=0, vmax=1, cmap=cmap)
-#         ax["B"].set_title("Noisy Input")
-
-#         ax["C"].imshow(denoised_output, vmin=0, vmax=1, cmap=cmap)
-#         ax["C"].set_title("Predic. at T")
-
-#         ax["D"].imshow(denoised_output, cmap=cmap)
-#         ax["D"].set_title("Predic. at T, no vmin vmax")
-#         print("Predic. at T, no vmin vmax", max(denoised_output.flatten()), min(denoised_output.flatten()))
-
-#         denoised_output_scaled = (denoised_output - min(denoised_output.flatten())) / (max(denoised_output.flatten()) - min(denoised_output.flatten()))
-#         ax["E"].imshow(clean_image - denoised_output_scaled, vmin=0, vmax=1, cmap=cmap)
-#         ax["E"].set_title("Diff clean - denoised_scaled")
-#         print("Denoised val", max(values[0:784].view(28, 28).cpu().detach().numpy().flatten()), min(values[0:784].view(28, 28).cpu().detach().numpy().flatten()))
-
-#         for a in ["A", "B", "C", "D", "E", "G"]:
-#             ax[a].axis('off')
-
-#         # Plotting the line graphs
-#         ax["F"].plot(model.pc_conv1.energy_vals["internal_energy"][-model.pc_conv1.T:], label="Internal energy")
-#         ax["F"].plot(model.pc_conv1.energy_vals["sensory_energy"][-model.pc_conv1.T:], label="Sensory energy")  # Replace with actual values
-#         ax["F"].legend()
-
-
-#         ax["G"].imshow(values[0:784].view(28,28).cpu().detach().numpy(), vmin=0, vmax=1, cmap=cmap)
-#         ax["G"].set_title("value")
-
-#         if test_params["model_dir"] and test_params["num_wandb_img_log"] < idx:
-#             fig.savefig(f'{test_params["model_dir"]}eval/occlusion/occ_{idx}_T_{model.pc_conv1.T}_{noisy_batch.y.item()}.png')
-        
-#         if not test_params["model_dir"]:
-#             plt.show()
-            
-#         labels = values[model.pc_conv1.supervised_labels]
-#         print(labels)
-
-#         MSE_values.append(MSE)
-
-#         if test_params["num_wandb_img_log"] < idx:
-#             # log fig to wandb
-#             wandb.log({"occlusion_IMG": wandb.Image(fig)})
-#             plt.close(fig)
-
-#         if idx >= test_params["num_samples"]:
-#             break 
-
-#     return MSE_values
-
-
+@dynamic_task
 def occlusion(test_loader, model, test_params, verbose=0):
 
 
@@ -287,25 +201,13 @@ def occlusion(test_loader, model, test_params, verbose=0):
         # noisy_batch.x[sensory_indices] = 0
         # noisy_batch.x[sensory_indices] = 1
         
+        #### SURVERVISED ##########
+        # we can alter the supervision signal during testing as an experiment
         if test_params["supervised_learning"]:
-            a = noisy_batch.x.view(-1)[model.pc_conv1.supervised_labels]
-            print("labels before", a.shape, a)
-
-            one_hot = torch.zeros(10)
-            one_hot[noisy_batch.y] = 10
-            # one_hot[noisy_batch.y + 1] = 0.5
-            # one_hot[noisy_batch.y] = 0
-            one_hot = one_hot.view(-1, 1)
-            one_hot = one_hot.to(model.pc_conv1.device)
-            model.pc_conv1.values.data[model.pc_conv1.supervised_labels] = one_hot
-
-            # for i in model.pc_conv1.supervised_labels: 
-            #     model.pc_conv1.values.data[i] = noisy_batch.x.view(-1)[i]
-
-
-            print("labels after", noisy_batch.x.view(-1)[model.pc_conv1.supervised_labels])
-            print(model.pc_conv1.values.data[model.pc_conv1.supervised_labels])
-
+            # correct supervision label already set in dataset
+            # if during training the label for the supervised node was x, also here
+            # model.pc_conv1.values[model.pc_conv1.supervised_labels].data = noisy_batch.x[model.pc_conv1.supervised_labels]
+            pass
         else:
             noisy_batch.x[:, 0][model.pc_conv1.supervised_labels] = 0
         
@@ -444,10 +346,8 @@ def occlusion(test_loader, model, test_params, verbose=0):
             MSE = 9
             return MSE
 
-
-
     
-
+@dynamic_task
 def denoise(test_loader, model, test_params, sigma=0.1):
     
     model.pc_conv1.debug = False
@@ -576,12 +476,10 @@ def denoise(test_loader, model, test_params, sigma=0.1):
     return MSE_values
 
 
-from skimage.metrics import structural_similarity as ssim
-    
-def mse(imageA, imageB):
-    """Calculate the Mean Squared Error (MSE) between two images."""
-    return np.mean((imageA - imageB) ** 2)
 
+
+
+@dynamic_task
 def generation(test_loader, model, test_params, clean_images, num_samples=8, verbose=0):
 
 
@@ -590,14 +488,9 @@ def generation(test_loader, model, test_params, clean_images, num_samples=8, ver
     +- 2sec    
     """
 
-    # ------------ Setup --------------
-    model.pc_conv1.restart_activity()
-    model.pc_conv1.set_mode("testing", task="generation")
-    model.pc_conv1.trace['values'] = []
-    model.pc_conv1.trace['preds'] = []
-    model.pc_conv1.T = test_params["T"]
+    # ------------ Setup done by Decorator --------------
+    # 
     assert test_params["supervised_learning"] == True, "Need to know what num. to generate"
-    # model.pc_conv1.nodes_2_update = # all good
 
     avg_SSIM_mean, avg_SSIM_max = [], []    
     avg_MSE_mean, avg_MSE_max   = [], []
@@ -612,43 +505,19 @@ def generation(test_loader, model, test_params, clean_images, num_samples=8, ver
         noisy_batch = noisy_batch.to(model.pc_conv1.device)
         clean_image = clean_image.view(28,28).cpu().numpy()  # Adjust shape as necessary
 
-        # noisy_batch.x[:, 0][model.pc_conv1.internal_indices] = torch.rand(noisy_batch.x[:, 0][model.pc_conv1.internal_indices].shape).to(model.pc_conv1.device)
-        # noisy_batch.x[:, 1][model.pc_conv1.internal_indices]  = 0
-        # noisy_batch.x[:, 2][model.pc_conv1.internal_indices]  = 0
 
 
 
 
-
-        # TEST: set x of noisy_batch to equal all zeros
-        # noisy_batch.x = torch.rand(noisy_batch.x.shape).to(device)
-  
-
-        # set bottom half of the image to zero
-        # print("Make occuled")
-        # noisy_batch.x[0:784//2] = 0
-
-        # set sensory
-        
-        # noisy_batch.x[0:784//2] = torch.zeros_like(noisy_batch.x[0:784//2])
-        # model.pc_conv1.set_sensory_nodes(noisy_batch.x)
-
-
-
-
+        # ------------ Alter sensory --------------
         # white = torch.ones_like(noisy_batch.x)
         # black = torch.zeros_like(noisy_batch.x[:, 0][0:-10])
         # random = torch.rand(noisy_batch.x[:, 0][0:-10].shape)
-
-        # ------------ Alter sensory --------------
         # values 
         noisy_batch.x[:, 0][model.pc_conv1.sensory_indices] = torch.rand(noisy_batch.x[:, 0][model.pc_conv1.sensory_indices].shape).to(model.pc_conv1.device)
         # errors 
         # noisy_batch.x[:, 1][model.pc_conv1.sensory_indices] = torch.rand(noisy_batch.x[:, 0][model.pc_conv1.sensory_indices].shape).to(model.pc_conv1.device)
     
-    
-        # noisy_batch.x[:, 2][model.pc_conv1.sensory_indices] = torch.rand(noisy_batch.x[:, 2][model.pc_conv1.sensory_indices].shape).to(model.pc_conv1.device)
-        # noisy_batch.x[:, 0][0:-10] = random
         
         if model.pc_conv1.trace_activity_preds:
             model.pc_conv1.trace["preds"].append(noisy_batch.x[:, 2][0:784].detach())
@@ -656,31 +525,20 @@ def generation(test_loader, model, test_params, clean_images, num_samples=8, ver
             model.pc_conv1.trace["values"].append(noisy_batch.x[:, 0][0:784].detach())
 
         plt.imshow(model.pc_conv1.trace["values"][0][0:784].view(28,28).cpu())
-        # plt.show()
         plt.imshow(model.pc_conv1.trace["preds"][0][0:784].view(28,28).cpu())
         # plt.show()
 
-        
+        # ------------ Alter internal --------------
+        # ... 
+
         # ------------ Alter supervision --------------
+        #### SURVERVISED ##########
+        # we can alter the supervision signal during testing as an experiment
         if test_params["supervised_learning"]:
-            a = noisy_batch.x.view(-1)[model.pc_conv1.supervised_labels]
-            print("labels before", a.shape, a)
-
-            one_hot = torch.zeros(10)
-            one_hot[noisy_batch.y] = 10
-            # one_hot[noisy_batch.y + 1] = 0.5
-            # one_hot[noisy_batch.y] = 0
-            one_hot = one_hot.view(-1, 1)
-            one_hot = one_hot.to(model.pc_conv1.device)
-            model.pc_conv1.values.data[model.pc_conv1.supervised_labels] = one_hot
-
-            # for i in model.pc_conv1.supervised_labels: 
-            #     model.pc_conv1.values.data[i] = noisy_batch.x.view(-1)[i]
-
-
-            print("labels after", noisy_batch.x.view(-1)[model.pc_conv1.supervised_labels])
-            print(model.pc_conv1.values.data[model.pc_conv1.supervised_labels])
-
+            # correct supervision label already set in dataset
+            # if during training the label for the supervised node was x, also here
+            # model.pc_conv1.values[model.pc_conv1.supervised_labels].data = noisy_batch.x[model.pc_conv1.supervised_labels]
+            pass
         else:
             noisy_batch.x[:, 0][model.pc_conv1.supervised_labels] = 0
         
@@ -688,14 +546,12 @@ def generation(test_loader, model, test_params, clean_images, num_samples=8, ver
 
         
         # ----------- Inference ---------------
-        # in 
+        # input
         noisy_image = noisy_batch.x[:, 0][0:784].view(28,28).cpu().detach().numpy()
-        
-        # out 
+        # output
         values, predictions, labels = model.query(method="pass", data=noisy_batch)  # query_by_conditioning
         denoised_output = predictions[0:784].view(28,28).cpu().detach().numpy()
 
-  
 
         # ----------- Plotting ---------------
         cmap = "gray"    
@@ -822,13 +678,14 @@ def generation(test_loader, model, test_params, clean_images, num_samples=8, ver
 
 
 
-
+# ---------------------------------------------------------------------
 from sklearn.metrics import confusion_matrix, classification_report, accuracy_score, precision_score, recall_score, f1_score
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-def classification(test_loader, model, 
-                   test_params, num_samples=5):
+
+@dynamic_task
+def classification(test_loader, model, test_params, num_samples=5):
         
         
     model.pc_conv1.set_mode("testing", task="classification")
@@ -895,9 +752,12 @@ def classification(test_loader, model,
 
         print("CHECK 2 ",  model.pc_conv1.values.data[model.pc_conv1.supervised_labels] )
 
+        # ------------ Alter supervision --------------
         #### SURVERVISED ##########
+        # we can alter the supervision signal during testing as an experiment
         if test_params["supervised_learning"]:
-            # if during training the label for the supervised node was 60, also here
+            # correct supervision label already set in dataset
+            # if during training the label for the supervised node was x, also here
             # model.pc_conv1.values[model.pc_conv1.supervised_labels].data = noisy_batch.x[model.pc_conv1.supervised_labels]
             pass
         else:
@@ -1111,7 +971,153 @@ def classification(test_loader, model,
     # plt.show()
 
 
+# --------------------------------------
 
+
+
+# def occlusion(test_loader, model, test_params):
+    
+#     model.pc_conv1.debug = False
+#     model.pc_conv1.set_mode("testing", task="reconstruction")
+#     model.pc_conv1.nodes_2_update = list(model.pc_conv1.sensory_indices[len(model.pc_conv1.sensory_indices)//2:]) +  list(model.pc_conv1.internal_indices)
+
+#     # model.pc_conv1.nodes_2_update +=  list(model.pc_conv1.supervised_labels)
+#     model.pc_conv1.restart_activity()
+
+#     model.pc_conv1.debug = False
+#     model.pc_conv1.T = test_params["T"] 
+#     MSE_values = []
+
+#     for idx, (noisy_batch, clean_image) in enumerate(test_loader, start=1):
+
+#         print("idx", idx)
+#         # Perform inference to denoise
+#         noisy_batch = noisy_batch.to(model.pc_conv1.device)
+
+#         # init all internal nodes random
+#         noisy_batch.x[:, 0][model.pc_conv1.internal_indices] = torch.rand(noisy_batch.x[:, 0][model.pc_conv1.internal_indices].shape).to(model.pc_conv1.device)
+
+#         # make occlusion
+#         noisy_batch.x[:, 0][784 // 2: ] = 0 
+        
+#         if test_params["add_sens_noise"]:
+#             noisy_batch.x[:, 0][784 // 2: ] = torch.rand( noisy_batch.x[:, 0][784 // 2: ].shape) 
+
+#         #### SURVERVISED ##########
+#         if test_params["supervised_learning"]:
+#             # if during training the label for the supervised node was 60, also here
+#             # model.pc_conv1.values[model.pc_conv1.supervised_labels].data = noisy_batch.x[model.pc_conv1.supervised_labels]
+#             pass 
+#         else:
+#             noisy_batch.x[:, 0][model.pc_conv1.supervised_labels] = 0
+        
+#         print("labels model", noisy_batch.x[:, 0][model.pc_conv1.supervised_labels] )
+
+#         # Extract the denoised output from the sensory nodes
+#         noisy_image = noisy_batch.x[:, 0][0:784].view(28,28).cpu().detach().numpy()
+        
+#         values, predictions, labels = model.query(method="pass", data=noisy_batch)  # query_by_conditioning
+        
+        
+#         denoised_output = predictions[0:784].view(28,28).cpu().detach().numpy()
+
+
+#         cmap = "gray"
+        
+#         # Creating a subplot mosaic
+#         fig, ax = plt.subplot_mosaic([
+#             ["A", "B", "C", "D", "E"],
+#             ["F", "F", "F", "G", "G"]
+#         ], figsize=(15, 8)) 
+
+
+#         # WANT TO ONLY COMPARE THE OCClUDED PART WITH THE MODELS CREATIONS 
+#         # Assuming occlusion was applied to the first half of the image
+#         occluded_part = 784 // 2  # Adjust this based on the actual occluded region size
+
+#         # Flatten the images (if not already flattened)
+#         clean_image_flat = clean_image.flatten()
+#         denoised_output_flat = denoised_output.flatten()
+
+#         # Compare only the occluded region
+#         MSE = round(calculate_mse(clean_image_flat[:occluded_part], denoised_output_flat[:occluded_part]), 4)
+
+#         fig.suptitle(f"MSE {MSE} clean/denoised_output")
+
+#         clean_image = clean_image.view(28,28).cpu().numpy()  # Adjust shape as necessary
+#         # Plotting the images
+#         ax["A"].imshow(clean_image, vmin=0, vmax=1, cmap=cmap)
+#         ax["A"].set_title(f"Clean Image of a {noisy_batch.y.item()}")
+
+#         ax["B"].imshow(noisy_image, vmin=0, vmax=1, cmap=cmap)
+#         ax["B"].set_title("Noisy Input")
+
+#         ax["C"].imshow(denoised_output, vmin=0, vmax=1, cmap=cmap)
+#         ax["C"].set_title("Predic. at T")
+
+#         ax["D"].imshow(denoised_output, cmap=cmap)
+#         ax["D"].set_title("Predic. at T, no vmin vmax")
+#         print("Predic. at T, no vmin vmax", max(denoised_output.flatten()), min(denoised_output.flatten()))
+
+#         denoised_output_scaled = (denoised_output - min(denoised_output.flatten())) / (max(denoised_output.flatten()) - min(denoised_output.flatten()))
+#         ax["E"].imshow(clean_image - denoised_output_scaled, vmin=0, vmax=1, cmap=cmap)
+#         ax["E"].set_title("Diff clean - denoised_scaled")
+#         print("Denoised val", max(values[0:784].view(28, 28).cpu().detach().numpy().flatten()), min(values[0:784].view(28, 28).cpu().detach().numpy().flatten()))
+
+#         for a in ["A", "B", "C", "D", "E", "G"]:
+#             ax[a].axis('off')
+
+#         # Plotting the line graphs
+#         ax["F"].plot(model.pc_conv1.energy_vals["internal_energy"][-model.pc_conv1.T:], label="Internal energy")
+#         ax["F"].plot(model.pc_conv1.energy_vals["sensory_energy"][-model.pc_conv1.T:], label="Sensory energy")  # Replace with actual values
+#         ax["F"].legend()
+
+
+#         ax["G"].imshow(values[0:784].view(28,28).cpu().detach().numpy(), vmin=0, vmax=1, cmap=cmap)
+#         ax["G"].set_title("value")
+
+#         if test_params["model_dir"] and test_params["num_wandb_img_log"] < idx:
+#             fig.savefig(f'{test_params["model_dir"]}eval/occlusion/occ_{idx}_T_{model.pc_conv1.T}_{noisy_batch.y.item()}.png')
+        
+#         if not test_params["model_dir"]:
+#             plt.show()
+            
+#         labels = values[model.pc_conv1.supervised_labels]
+#         print(labels)
+
+#         MSE_values.append(MSE)
+
+#         if test_params["num_wandb_img_log"] < idx:
+#             # log fig to wandb
+#             wandb.log({"occlusion_IMG": wandb.Image(fig)})
+#             plt.close(fig)
+
+#         if idx >= test_params["num_samples"]:
+#             break 
+
+#     return MSE_values
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# --------------------------------------
 
 
 # def reconstruction(test_loader, model, test_params,
