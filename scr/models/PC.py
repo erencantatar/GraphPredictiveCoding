@@ -226,8 +226,8 @@ class PCGraphConv(torch.nn.Module):
             # self.optimizer_values = torch.optim.SGD([self.values_dummy], lr=self.lr_values)
 
             # SGD configured as plain gradient descent
-            self.optimizer_weights = torch.optim.Adam([self.weights], lr=self.lr_weights, momentum=0, weight_decay=0, nesterov=False)      
-            self.optimizer_values = torch.optim.SGD([self.values_dummy], lr=self.lr_values, momentum=0, weight_decay=0, nesterov=False)
+            self.optimizer_weights = torch.optim.Adam([self.weights], lr=self.lr_weights, momentum=0, weight_decay=1e-3, nesterov=False)      
+            self.optimizer_values = torch.optim.SGD([self.values_dummy], lr=self.lr_values, momentum=0, weight_decay=1e-3, nesterov=False)
 
             self.weights.grad = torch.zeros_like(self.weights)
             self.values_dummy.grad = torch.zeros_like(self.values_dummy)
@@ -251,6 +251,7 @@ class PCGraphConv(torch.nn.Module):
             self.convergence_tracker = CombinedConvergence(energy_threshold=0.05, gradient_threshold=1, patience=10)
             self.gradients_log = torch.zeros_like(self.weights) # or and None
 
+        # used for when training with T until convergence 
         self.T_MAX = 5 * self.T
         
         # Create a vector for edge-type-specific learning rates
@@ -797,8 +798,11 @@ class PCGraphConv(torch.nn.Module):
             # Use in-place operation for values_dummy to reduce memory overhead
             self.values_dummy.data.zero_()  # Zero out values_dummy without creating a new tensor
 
-            self.trace["values"] = []
-            self.trace["preds"]  = []
+            # 
+            if len(self.trace["values"]) > 2:
+                self.trace["values"] = []
+                self.trace["preds"]  = []
+
         # Reset optimizer gradients if needed
         if self.use_optimizers:
             self.optimizer_values.zero_grad()

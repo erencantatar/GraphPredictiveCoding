@@ -35,8 +35,43 @@ import wandb
 import gc 
 from helper.error import calculate_mse
 
-# maps = RdBu, RdBu_r, RdBu_r, RdBu, BrBG, BrBG_r, coolwarm, coolwarm_r, bwr, bwr_r, seismic, seismic_r
 
+
+"""
+def task():
+- comment
+
+- setup:
+    - restart_act()
+    - pc_conv1.set_mode("testing", task="")
+    - set nodes_2_update
+    - trace = []
+    - metric = []
+
+- for img, clean in loader:
+
+    - alter sensory_: value, error, preds
+
+    - alter internal: value, error, preds
+
+    - set supervision nodes
+
+    - Inference 
+
+    - metric 
+
+    - log 
+
+    - plot
+
+    - return metric
+
+"""
+
+
+# maps = RdBu, RdBu_r, RdBu_r, RdBu, BrBG, BrBG_r, coolwarm, coolwarm_r, bwr, bwr_r, seismic, seismic_r
+# cmap = "RdBu_r"
+# cmap = "gray"
 
 # def occlusion(test_loader, model, test_params):
     
@@ -302,13 +337,14 @@ def occlusion(test_loader, model, test_params, verbose=0):
         # all cmaps starting with Red, blue with
         # maps = RdBu, RdBu_r, RdBu_r, RdBu, BrBG, BrBG_r, coolwarm, coolwarm_r, bwr, bwr_r, seismic, seismic_r
         # cmap = "RdBu_r"
-        cmap = "gray"
 
         # Plotting both images side by side
     
-        # Creating a subplot mosaic
-        # Creating a subplot mosaic with the row for values and a row for predictions
-        # Creating a subplot mosaic with titles for values and predictions
+
+        
+        cmap = "gray"
+
+
         fig, ax = plt.subplot_mosaic([
             ["A", "B", "C", "D", "E"],   # First row for clean image, noisy image, and denoised output
             ["1", "2", "3", "4", "5"],   # Second row for values with label
@@ -554,41 +590,27 @@ def generation(test_loader, model, test_params, clean_images, num_samples=8, ver
     +- 2sec    
     """
 
-
-    # model.pc_conv1.trace_activity_predictions = True 
+    # ------------ Setup --------------
     model.pc_conv1.restart_activity()
+    model.pc_conv1.set_mode("testing", task="generation")
     model.pc_conv1.trace['values'] = []
     model.pc_conv1.trace['preds'] = []
-
     model.pc_conv1.T = test_params["T"]
-
-    model.pc_conv1.mode = "testing"
-    model.pc_conv1.set_mode("testing", task="generation")
-
-
-    
-    print("model.pc_conv1.values.shape", model.pc_conv1.values.shape)
-    model.pc_conv1.restart_activity()
-
-    batch_idx = 0
-
-    assert test_params["supervised_learning"] == True 
-
-    torch.cuda.empty_cache()
-    gc.collect()
-
-    print("No vmin vmax")
+    assert test_params["supervised_learning"] == True, "Need to know what num. to generate"
+    # model.pc_conv1.nodes_2_update = # all good
 
     avg_SSIM_mean, avg_SSIM_max = [], []    
     avg_MSE_mean, avg_MSE_max   = [], []
- 
+    torch.cuda.empty_cache()
+    gc.collect()
+    # ---------------------------------
+
+    
     for idx, (noisy_batch, clean_image) in enumerate(test_loader, start=1):
 
-        # noisy_batch, clean_image = noisy_batch[0], clean_image[0]
-        print(noisy_batch.y)
 
-        # Perform inference to denoise
         noisy_batch = noisy_batch.to(model.pc_conv1.device)
+        clean_image = clean_image.view(28,28).cpu().numpy()  # Adjust shape as necessary
 
         # noisy_batch.x[:, 0][model.pc_conv1.internal_indices] = torch.rand(noisy_batch.x[:, 0][model.pc_conv1.internal_indices].shape).to(model.pc_conv1.device)
         # noisy_batch.x[:, 1][model.pc_conv1.internal_indices]  = 0
@@ -600,7 +622,7 @@ def generation(test_loader, model, test_params, clean_images, num_samples=8, ver
 
         # TEST: set x of noisy_batch to equal all zeros
         # noisy_batch.x = torch.rand(noisy_batch.x.shape).to(device)
-        print(noisy_batch.x.shape)
+  
 
         # set bottom half of the image to zero
         # print("Make occuled")
@@ -611,18 +633,20 @@ def generation(test_loader, model, test_params, clean_images, num_samples=8, ver
         # noisy_batch.x[0:784//2] = torch.zeros_like(noisy_batch.x[0:784//2])
         # model.pc_conv1.set_sensory_nodes(noisy_batch.x)
 
-        print("omitting setting sensory nodes")
 
-        white = torch.ones_like(noisy_batch.x)
-        black = torch.zeros_like(noisy_batch.x[:, 0][0:-10])
 
-        random = torch.rand(noisy_batch.x[:, 0][0:-10].shape)
 
+        # white = torch.ones_like(noisy_batch.x)
+        # black = torch.zeros_like(noisy_batch.x[:, 0][0:-10])
+        # random = torch.rand(noisy_batch.x[:, 0][0:-10].shape)
+
+        # ------------ Alter sensory --------------
+        # values 
         noisy_batch.x[:, 0][model.pc_conv1.sensory_indices] = torch.rand(noisy_batch.x[:, 0][model.pc_conv1.sensory_indices].shape).to(model.pc_conv1.device)
+        # errors 
         # noisy_batch.x[:, 1][model.pc_conv1.sensory_indices] = torch.rand(noisy_batch.x[:, 0][model.pc_conv1.sensory_indices].shape).to(model.pc_conv1.device)
     
     
-        print("ZZZZZZZZZZZZZZZZZZZZZZZ")
         # noisy_batch.x[:, 2][model.pc_conv1.sensory_indices] = torch.rand(noisy_batch.x[:, 2][model.pc_conv1.sensory_indices].shape).to(model.pc_conv1.device)
         # noisy_batch.x[:, 0][0:-10] = random
         
@@ -633,28 +657,11 @@ def generation(test_loader, model, test_params, clean_images, num_samples=8, ver
 
         plt.imshow(model.pc_conv1.trace["values"][0][0:784].view(28,28).cpu())
         # plt.show()
-
-
         plt.imshow(model.pc_conv1.trace["preds"][0][0:784].view(28,28).cpu())
         # plt.show()
 
-        # self.values, self.errors, self.predictions, = self.data.x[:, 0], self.data.x[:, 1], self.data.x[:, 2]
-
-        # noisy_batch.x[:, 0] = random
-        # noisy_batch.x[:, 0][0:-10] = random
         
-        # print("aa", noisy_batch.x[:, 0].shape)
-        # model.pc_conv1.set_sensory_nodes(noisy_batch.x)
-        # model.pc_conv1.set_sensory_nodes(random)
-        # model.pc_conv1.set_sensory_nodes(white)
-
-        # black[30:60] = 1
-        # model.pc_conv1.set_sensory_nodes(black)
-
-        # print("TST", noisy_batch.x.shape)
-        # noisy_batch.x[sensory_indices] = 0
-        # noisy_batch.x[sensory_indices] = 1
-        
+        # ------------ Alter supervision --------------
         if test_params["supervised_learning"]:
             a = noisy_batch.x.view(-1)[model.pc_conv1.supervised_labels]
             print("labels before", a.shape, a)
@@ -679,39 +686,21 @@ def generation(test_loader, model, test_params, clean_images, num_samples=8, ver
         
         print("labels model", noisy_batch.x[:, 0][model.pc_conv1.supervised_labels] )
 
-        # model.pc_conv1.values[model.pc_conv1.supervised_labels] = noisy_batch.x[model.pc_conv1.supervised_labels]
-        # model.inference()
         
+        # ----------- Inference ---------------
+        # in 
         noisy_image = noisy_batch.x[:, 0][0:784].view(28,28).cpu().detach().numpy()
-
-        print("aaa", model.pc_conv1.mode)
-        # Extract the denoised output from the sensory nodes
-
-        print("CHECK", noisy_batch.x[:,0][-10:])
-
-        plt.imshow(noisy_batch.x[:, 0][0:784].view(28,28).cpu())
-        # plt.show()
-
-        values, predictions, labels = model.query(method="pass", data=noisy_batch)  # query_by_conditioning
-        # values, predictions = values[batch_idx, :, 0], predictions[batch_idx, :, 0]
-        print("CHECK", noisy_batch.x[:,0][-10:])
         
+        # out 
+        values, predictions, labels = model.query(method="pass", data=noisy_batch)  # query_by_conditioning
         denoised_output = predictions[0:784].view(28,28).cpu().detach().numpy()
 
-        # denoised_output = model.reconstruction().view(28,28).cpu().detach().numpy()
+  
 
-        clean_image = clean_image.view(28,28).cpu().numpy()  # Adjust shape as necessary
-
-        # all cmaps starting with Red, blue with
-        # maps = RdBu, RdBu_r, RdBu_r, RdBu, BrBG, BrBG_r, coolwarm, coolwarm_r, bwr, bwr_r, seismic, seismic_r
-        # cmap = "RdBu_r"
-        cmap = "gray"
-
-        # Plotting both images side by side
-    
-        # Creating a subplot mosaic
+        # ----------- Plotting ---------------
+        cmap = "gray"    
+        
         # Creating a subplot mosaic with the row for values and a row for predictions
-        # Creating a subplot mosaic with titles for values and predictions
         fig, ax = plt.subplot_mosaic([
             ["A", "B", "C", "D", "E"],   # First row for clean image, noisy image, and denoised output
             ["1", "2", "3", "4", "5"],   # Second row for values with label
@@ -761,8 +750,6 @@ def generation(test_loader, model, test_params, clean_images, num_samples=8, ver
         ax["K"].imshow(tr_preds[-2*tmp][0:784].view(28,28).cpu().detach().numpy(), cmap=cmap)
         ax["L"].imshow(tr_preds[-1][0:784].view(28,28).cpu().detach().numpy(), cmap=cmap)
 
-
-
         # Hide axis for all image subplots
         for a in ["A", "B", "C", "D", "E", "1", "2", "3", "4", "5", "H", "I", "J", "K", "L", "G"]:
             ax[a].axis('off')
@@ -793,19 +780,9 @@ def generation(test_loader, model, test_params, clean_images, num_samples=8, ver
         if test_params["model_dir"] and test_params["num_wandb_img_log"] < idx:
             fig.savefig(f'{test_params["model_dir"]}eval/generation/generation_condition_label_T_{idx}_{model.pc_conv1.T}_{noisy_batch.y.item()}.png')
 
-   
 
-        # save 
-        print(f"generation_task_{noisy_batch.y.item()}.png")
-        # plt.savefig(f"generation_task_{noisy_batch.y.item()}.png")        
 
-        labels = values[model.pc_conv1.supervised_labels]
-
-        # print(model.pc_conv1.values.data[model.pc_conv1.supervised_labels] )
-        # print(labels)
-
-        print("CHECK", noisy_batch.x[:,0][-10:])
-        
+        # ----------- Metric ---------------
         label = noisy_batch.y.item()
         label_clean_images = clean_images[label]
 
@@ -842,7 +819,6 @@ def generation(test_loader, model, test_params, clean_images, num_samples=8, ver
             wandb.log({"generation_IMG": wandb.Image(fig)})
             plt.close(fig)
 
-        # model_dir=None,
 
 
 
