@@ -629,7 +629,8 @@ plot_model_weights(model, GRAPH_TYPE, model_dir=save_path)
 # device = torch.device('cpu')
 from eval_tasks import classification, denoise, occlusion, generation #, reconstruction
 
-num_wandb_img_log = len(custom_dataset_train.numbers_list)   # Number of images to log to wandb
+# num_wandb_img_log = len(custom_dataset_train.numbers_list)   # Number of images to log to wandb
+num_wandb_img_log = 1   # Number of images to log to wandb
 model.pc_conv1.batchsize = 1
 
 ### Make dataloader for testing where we take all the digits of the number_list we trained on ###
@@ -848,7 +849,7 @@ for epoch in range(args.epochs):
         "T": 100,
         "supervised_learning":True, 
         "num_samples": 5,
-        "num_wandb_img_log": num_wandb_img_log,
+        "num_wandb_img_log": 1,
     }
     avg_SSIM_mean, avg_SSIM_max, avg_MSE_mean, avg_MSE_max = generation(test_loader, model, test_params, clean_images, verbose=0)
     
