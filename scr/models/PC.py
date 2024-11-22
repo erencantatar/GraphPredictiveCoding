@@ -967,6 +967,7 @@ class PCGraphConv(torch.nn.Module):
             self.nodes_2_update_base = self.internal_indices_batch
 
         elif self.mode == "testing":
+            # during testing the batch size is set to 1 for now
             assert self.task in ["classification", "generation", "reconstruction", "denoising", "Associative_Memories"], \
                 "Task not set, (generation, reconstruction, denoising, Associative_Memories)"
 
@@ -974,7 +975,7 @@ class PCGraphConv(torch.nn.Module):
                 # Update both the internal and supervised nodes during classification
                 self.nodes_2_update_base = self.internal_indices_batch + self.supervised_labels_batch
 
-            elif self.task in ["generation", "reconstruction", "denoising"]:
+            elif self.task in ["generation", "reconstruction", "denoising", "occlusion"]:
                 # Update both the internal and sensory nodes during these tasks
                 self.nodes_2_update_base = self.internal_indices_batch + self.sensory_indices_batch
 
