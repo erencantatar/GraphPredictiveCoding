@@ -329,7 +329,10 @@ def plot_model_weights(model, GRAPH_TYPE=None, model_dir=None, save_wandb=False)
     plt.tight_layout(rect=[0, 0, 1, 0.97])  # Adjust layout to fit the title
 
     if save_wandb:
-        wandb.log({"weights": [wandb.Image(fig)]})
+
+        # save_path = os.path.join(model_dir, 'parameter_info/weight_matrix_visualization_epoch0.png')
+        epoch_x = model_dir.split("_")[-1]
+        wandb.log({f"Training/weights_{epoch_x}": [wandb.Image(fig)]})
 
     if model_dir:
         plt.savefig(model_dir)

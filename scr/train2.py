@@ -612,7 +612,7 @@ from helper.plot import plot_model_weights, plot_energy_graphs
 
 save_path = os.path.join(model_dir, 'parameter_info/weight_matrix_visualization_epoch0.png')
 # plot_model_weights(model, save_path)
-plot_model_weights(model, GRAPH_TYPE, model_dir=save_path)
+plot_model_weights(model, GRAPH_TYPE, model_dir=save_path, save_wandb=True)
 
 
 
@@ -853,12 +853,29 @@ for epoch in range(args.epochs):
     
     # Log SSIM and MSE metrics grouped under generation
     wandb.log({
-        "epoch": epoch,
+        "Training/epoch": epoch,
         "generation/SSIM_mean": avg_SSIM_mean,
         "generation/SSIM_max": avg_SSIM_max,
         "generation/MSE_mean": avg_MSE_mean,
         "generation/MSE_max": avg_MSE_max,
     })
+
+    # every 5 epochs 
+    if epoch % 5 == 0:
+        save_path = os.path.join(model_dir, f'parameter_info/weight_matrix_visualization_epoch_{epoch}.png')
+        # plot_model_weights(model, save_path)
+        plot_model_weights(model, GRAPH_TYPE, model_dir=save_path, save_wandb=True)
+
+        element_counts = Counter(training_labels)
+
+    if epoch % 3 == 0:
+        # Log a bar plot to WandB
+        wandb.log({"Training/element_counts_bar": wandb.plot.bar(
+            wandb.Table(data=[[k, v] for k, v in element_counts.items()], columns=["Label", "Count"]),
+            "Label",
+            "Count",
+            title="Element Counts"
+        )})
 
 
 end_time = time.time()

@@ -15,7 +15,7 @@ conda activate PredCod  #(or source activate)
 
 1. Interactive (debug) session: 
 ```bash
-srun --partition=gpu --gpus=1 --ntasks=1 --cpus-per-task=18 --time=02:00:00 --pty bash -i
+srun --partition=gpu --gpus=1 --ntasks=1 --cpus-per-task=18 --time=01:00:00 --pty bash -i
 module purge
 module load 2022
 module load Anaconda3/2022.05
@@ -45,6 +45,10 @@ source activate PredCod
 3. Clear my head
 4. make wandb workbook available. 
 5. see `compare_class_args(IPCGraphConv, PCGraphConv)` 
+6. 
+   if self.edge_type.numel() > 0:
+      self.log_delta_w(adjusted_delta_w if self.adjust_delta_w else delta_w, self.edge_type, log=False)
+      
 
 
 ## File Structure

@@ -227,8 +227,8 @@ class PCGraphConv(torch.nn.Module):
 
             # paper: 
             # SGD configured as plain gradient descent
-            self.optimizer_weights = torch.optim.Adam([self.weights], lr=self.lr_weights, momentum=0, weight_decay=weight_decay, nesterov=False)      
-            self.optimizer_values = torch.optim.SGD([self.values_dummy], lr=self.lr_values, momentum=0, weight_decay=weight_decay, nesterov=False)
+            self.optimizer_weights = torch.optim.Adam([self.weights], lr=self.lr_weights, weight_decay=weight_decay)      
+            self.optimizer_values = torch.optim.SGD([self.values_dummy], lr=self.lr_values, momentum=0, weight_decay=weight_decay, nesterov=False) # nestrov only for momentum > 0
 
             self.weights.grad = torch.zeros_like(self.weights)
             self.values_dummy.grad = torch.zeros_like(self.values_dummy)
@@ -390,18 +390,19 @@ class PCGraphConv(torch.nn.Module):
         """
         print("Logging gradients")
         if self.global_step != 0 and (self.global_step % log_every_n_steps == 0):
+            grad_data = {"gradients": {}}
             for name, param in self.named_parameters():
                 if param.grad is not None:
-                    grad_magnitude = param.grad.norm().item()
+                    grad_data["gradients"][name] = {
+                        "_grad_magnitude": param.grad.norm().item()
+                    }
 
-                    # Log gradient magnitude
-                    if self.wandb_logger:
-                        self.wandb_logger.log({f"{name}/_grad_magnitude": grad_magnitude})
+                    if log_histograms:
+                        grad_hist = param.grad.cpu().numpy()
+                        grad_data["gradients"][name]["_grad_distribution"] = wandb.Histogram(grad_hist)
 
-                        # Log gradient histograms less frequently
-                        if log_histograms:
-                            grad_hist = param.grad.cpu().numpy()
-                            self.wandb_logger.log({f"{name}/_grad_distribution": wandb.Histogram(grad_hist)})
+            if self.wandb_logger:
+                self.wandb_logger.log(grad_data)
 
         # Increment step counter
         self.global_step += 1
@@ -1191,9 +1192,9 @@ class PCGraphConv(torch.nn.Module):
         )
 
         # log delta_w 
-        # self.log_delta_w(delta_w)
-        if self.edge_type.numel() > 0:
-            self.log_delta_w(adjusted_delta_w if self.adjust_delta_w else delta_w, self.edge_type, log=False)
+        # # self.log_delta_w(delta_w)
+        # if self.edge_type.numel() > 0:
+        #     self.log_delta_w(adjusted_delta_w if self.adjust_delta_w else delta_w, self.edge_type, log=False)
             
         if self.use_bias:
             # print((self.lr_weights * self.errors[self.internal_indices].detach()).shape)
