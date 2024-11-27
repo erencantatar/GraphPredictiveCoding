@@ -65,8 +65,8 @@ graph_type_options = {
 
         "custom_two_branch": {
             "params": {
-                "branch1_config": (3, 40, 10),  # 2 layers, 5 clusters per layer, 5 nodes per cluster for Branch 1
-                "branch2_config": (3, 40, 10),  # 2 layers, 5 clusters per layer, 5 nodes per cluster for Branch 2
+                "branch1_config": (1, 100, 10),  # 2 layers, 5 clusters per layer, 5 nodes per cluster for Branch 1
+                "branch2_config": (1, 100, 10),  # 2 layers, 5 clusters per layer, 5 nodes per cluster for Branch 2
                 # "branch1_config": (2, 5, 10),  # 2 layers, 5 clusters per layer, 5 nodes per cluster for Branch 1
                 # "branch2_config": (2, 5, 10),  # 2 layers, 5 clusters per layer, 5 nodes per cluster for Branch 2
             }
@@ -713,12 +713,12 @@ class GraphBuilder:
                 self.edge_type.append(edge_type)
                 self.edge_type.append(edge_type)
  
-
     def connect_clusters(self, source_nodes, target_clusters, edge_type, branch_type=None, dense=False, verify_direction=None):
         """
         Connects clusters in dense or sparse configurations, ensuring directed connections based on the branch type and flow.
-        Adds reverse connections for backward propagation and supports branch-specific handling.
         """
+        violations = []
+
         # Flatten source_nodes if it contains clusters
         if isinstance(source_nodes, range) or isinstance(source_nodes[0], int):
             source_nodes = list(source_nodes)
@@ -729,47 +729,35 @@ class GraphBuilder:
         if isinstance(target_clusters, range) or isinstance(target_clusters[0], int):
             target_clusters = [list(target_clusters)]
 
-        # Handle connections based on density and branch type
         for source in source_nodes:
-            target_list = [node for cluster in target_clusters for node in cluster]  # Flatten target clusters
+            # Flatten target clusters into a list of individual nodes
+            target_list = [node for cluster in target_clusters for node in cluster]
 
             if dense:
                 for target in target_list:
                     if source != target:
                         if branch_type == "branch2":
-                            # Reverse direction for branch2
-                            self.edge_index.append([target, source])
-                            self.edge_type.append(edge_type)
-                            # Add reverse edge (forward for branch2)
-                            self.edge_index.append([source, target])
-                            self.edge_type.append(edge_type)
+                            self.edge_index.append([target, source])  # Reverse direction for branch2
                         else:
-                            # Default forward direction for branch1
-                            self.edge_index.append([source, target])
-                            self.edge_type.append(edge_type)
-                            # Add reverse edge
-                            self.edge_index.append([target, source])
-                            self.edge_type.append(edge_type)
+                            self.edge_index.append([source, target])  # Default direction for branch1
+                        self.edge_type.append(edge_type)
             else:
-                # Sparse connections (e.g., 20% of target nodes)
                 sparse_targets = np.random.choice(target_list, size=int(0.2 * len(target_list)), replace=False)
                 for target in sparse_targets:
                     if branch_type == "branch2":
-                        # Reverse direction for branch2
-                        self.edge_index.append([target, source])
-                        self.edge_type.append(edge_type)
-                        # Add reverse edge (forward for branch2)
-                        self.edge_index.append([source, target])
-                        self.edge_type.append(edge_type)
+                        self.edge_index.append([target, source])  # Reverse direction for branch2
                     else:
-                        # Default forward direction for branch1
-                        self.edge_index.append([source, target])
-                        self.edge_type.append(edge_type)
-                        # Add reverse edge
-                        self.edge_index.append([target, source])
-                        self.edge_type.append(edge_type)
+                        self.edge_index.append([source, target])  # Default direction for branch1
+                    self.edge_type.append(edge_type)
 
 
+        if verify_direction:
+            if violations:
+                print(f"Violations found in {verify_direction}:")
+                for source, target in violations:
+                    print(f"Violation: {source} -> {target}")
+            else:
+                print(f"All connections in {verify_direction} verified successfully.")
 
     def verify_edge_direction(self, source, target, direction):
         if direction == "Internal -> Supervision":

@@ -236,6 +236,23 @@ if graph_params["graph_type"]["name"] in ["custom_two_branch","two_branch_graph"
     # The total number of internal nodes will be the sum of both branches
     graph_params["internal_nodes"] = branch1_internal_nodes + branch2_internal_nodes
 
+# if graph_params["graph_type"]["name"] in ["custom_two_branch", "two_branch_graph"]:
+#     # Configure internal nodes for two_branch_graph
+#     # This assumes two branches with specified configurations
+#     branch1_config = graph_params["graph_type"]["params"]["branch1_config"]
+#     branch2_config = graph_params["graph_type"]["params"]["branch2_config"]
+    
+#     # Calculate total internal nodes for both branches
+#     # Sum up the total internal nodes for Branch 1
+#     branch1_internal_nodes = sum([clusters * nodes_per_cluster for clusters, nodes_per_cluster in branch1_config])
+    
+#     # Sum up the total internal nodes for Branch 2 (Reversed order if required)
+#     branch2_internal_nodes = sum([clusters * nodes_per_cluster for clusters, nodes_per_cluster in branch2_config])
+    
+#     # The total number of internal nodes will be the sum of both branches
+#     graph_params["internal_nodes"] = branch1_internal_nodes + branch2_internal_nodes
+
+
 
 from dataset import CustomGraphDataset
 
