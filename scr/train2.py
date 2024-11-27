@@ -767,8 +767,12 @@ for epoch in range(args.epochs):
             wandb.log({
                 "epoch": epoch,
                 "Training/internal_energy_mean": history_epoch["internal_energy_mean"],
-                "Training/sensory_energy_mean": history_epoch["sensory_energy_mean"]
+                "Training/sensory_energy_mean": history_epoch["sensory_energy_mean"],
+                
             })
+
+     
+                
 
             model.pc_conv1.restart_activity()
 
@@ -810,6 +814,8 @@ for epoch in range(args.epochs):
                                             model_dir=model_dir,
                                             epoch=epoch)
                 
+                # current_lr_values = model.pc_conv1.optimizer_values.param_groups[0]['lr']
+                # print(f"Current LR for values: {current_lr_values}")
 
                 # if reduce_lr_weights:
                 #     print("Reducing learning rate for weights")
@@ -849,7 +855,7 @@ for epoch in range(args.epochs):
         "model_dir": model_dir,
         "T":100,
         "supervised_learning":False, 
-        "num_samples": 10,
+        "num_samples": 12,
         "num_wandb_img_log": num_wandb_img_log,
     }
     y_true, y_pred, accuracy_mean = classification(test_loader, model, test_params)
@@ -893,6 +899,18 @@ for epoch in range(args.epochs):
             "Count",
             title="Element Counts"
         )})
+
+
+        if args.optimizer or model_params["use_learning_optimizer"]:
+            current_lr_values = model.pc_conv1.optimizer_values.param_groups[0]['lr']
+            current_lr_weights = model.pc_conv1.optimizer_weights.param_groups[0]['lr']
+            print(f"Current LR for weights: {current_lr_weights}")
+
+            wandb.log({
+                    "LR/lr_values": current_lr_values, 
+                    "LR/lr_weights": current_lr_weights
+                    })
+                    
 
 
 end_time = time.time()

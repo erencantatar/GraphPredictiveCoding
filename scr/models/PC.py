@@ -12,6 +12,8 @@ from helper.grokfast import gradfilter_ema, gradfilter_ma
 import os 
 import wandb
 import math 
+import torch.optim.lr_scheduler
+
 
 class PCGraphConv(torch.nn.Module): 
     def __init__(self, num_vertices, sensory_indices, internal_indices, 
@@ -232,6 +234,9 @@ class PCGraphConv(torch.nn.Module):
 
             self.weights.grad = torch.zeros_like(self.weights)
             self.values_dummy.grad = torch.zeros_like(self.values_dummy)
+
+            self.scheduler_weights = torch.optim.lr_scheduler.ReduceLROnPlateau(self.optimizer_weights, mode='min', patience=10, factor=0.1)
+
    
         self.effective_learning = {}
         self.effective_learning["w_mean"] = []
@@ -1039,6 +1044,12 @@ class PCGraphConv(torch.nn.Module):
 
         # Calculate energy drop and weight update gain
         self.calculate_energy_metrics()
+
+
+    
+        # if self.wandb_logger:
+        #     self.wandb_logger.log({"Training/lr_values": current_lr_values, "lr_weights": current_lr_weights})
+
         
         # self.helper_GPU(self.print_GPU)
 
@@ -1267,6 +1278,7 @@ class PCGNN(nn.Module):
                                     normalize_msg, 
                                     debug, activation, log_tensorboard, wandb_logger, device)
 
+        self.use_optimizers = use_learning_optimizer
         self.original_weights = None  # Placeholder for storing the original weights
 
 
@@ -1278,6 +1290,14 @@ class PCGNN(nn.Module):
 
         self.pc_conv1.mode = "training"
         self.pc_conv1.learning(batch)
+        
+        if self.use_optimizers:
+            self.pc_conv1.scheduler_values.step(self.pc_conv1.energy_vals["internal_energy_batch"])
+
+            # current_lr_values = self.pc_conv1.optimizer_values.param_groups[0]['lr']
+            # current_lr_weights = self.pc_conv1.optimizer_weights.param_groups[0]['lr']
+            # print(f"Current LR for values: {current_lr_values}")
+            # print(f"Current LR for weights: {current_lr_weights}")
         
         history = {
             "internal_energy_mean": self.pc_conv1.energy_vals["internal_energy_batch"],
