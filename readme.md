@@ -4,7 +4,7 @@
 
 
 ## Installation
-1. ..
+1. **todo** Install conda env. with Pytorch Geometric (PYG)
 ```bash
 conda env create -f environment.yaml
 conda activate PredCod  #(or source activate)
@@ -15,7 +15,7 @@ conda activate PredCod  #(or source activate)
 
 1. Interactive (debug) session: 
 ```bash
-srun --partition=gpu --gpus=1 --ntasks=1 --cpus-per-task=18 --time=01:00:00 --pty bash -i
+srun --partition=gpu --gpus=1 --ntasks=1 --cpus-per-task=18 --time=02:00:00 --pty bash -i
 module purge
 module load 2022
 module load Anaconda3/2022.05

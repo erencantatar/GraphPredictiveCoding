@@ -343,3 +343,55 @@ def plot_model_weights(model, GRAPH_TYPE=None, model_dir=None, save_wandb=False)
         plt.show()
 
     return W
+
+
+
+
+
+import matplotlib.lines as mlines
+
+import matplotlib.pyplot as plt
+import numpy as np
+import torch
+from torch_geometric.utils import to_dense_adj
+
+def plot_graph_with_edge_types(N, edge_index, edge_types, edge_type_map):
+    """
+    Plot an NxN adjacency matrix with edge types represented as distinct colors.
+
+    Parameters:
+    - N: Number of nodes in the graph.
+    - edge_index: Tensor of shape (2, num_edges), edge connections.
+    - edge_types: Tensor of edge types corresponding to each edge.
+    - edge_type_map: Dictionary mapping edge type names to indices.
+    """
+
+    print("----plot_graph_with_edge_types-----")
+    # Create a dense adjacency matrix for edge types
+    adj_matrix = torch.zeros((N, N), dtype=torch.long)
+    for (src, tgt), etype in zip(edge_index.T, edge_types):
+        adj_matrix[src, tgt] = etype
+
+    # Prepare a colormap for the edge types
+    edge_colors = plt.cm.get_cmap("tab10", len(edge_type_map))
+
+    # Plot the adjacency matrix with colors for edge types
+    fig, ax = plt.subplots(figsize=(10, 10))
+    cax = ax.imshow(adj_matrix.numpy(), cmap=edge_colors, origin="upper")
+    ax.set_title("Graph with Edge Types", fontsize=16)
+    ax.set_xlabel("Target Node")
+    ax.set_ylabel("Source Node")
+
+    # Add color bar with edge type labels
+    cbar = fig.colorbar(cax, ticks=range(len(edge_type_map)))
+    cbar.ax.set_yticklabels(list(edge_type_map.keys()))
+    cbar.set_label("Edge Types", rotation=270, labelpad=20)
+
+    plt.tight_layout()
+
+    # log to wandb 
+    wandb.log({"delta_w/Graph_with_Edge_Types": [wandb.Image(fig)]})
+
+    # close the figure
+    plt.close(fig)
+    

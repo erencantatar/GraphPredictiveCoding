@@ -125,6 +125,7 @@ import torchvision.transforms as transforms
 import numpy as np
 
 
+# The ToTensor() transformation is the one responsible for scaling (MNIST) images to the range [0, 1].
 transform_list = [
     transforms.ToTensor()
 ]
@@ -375,6 +376,14 @@ SKIPPING FOR NOW, see local
 # lr_gamma, lr_alpha =  (0.1 ,  0.0001)
 # lr_gamma, lr_alpha =  (0.1, 0.00001)
 
+# Check if learning_optimizer is True with a float value for weight decay
+if isinstance(args.optimizer, float) or isinstance(args.optimizer, int):
+    use_learning_optimizer = [args.optimizer]  # Weight decay is provided, including if it's 0
+    weight_decay = args.optimizer
+else:
+    use_learning_optimizer = False  # No optimizer to be used
+    weight_decay = None
+
 
 model_params = {
     
@@ -393,7 +402,7 @@ model_params = {
     "batch_size": train_loader.batch_size, 
     "edge_type":  custom_dataset_train.edge_type,
 
-    "use_learning_optimizer": args.optimizer if not args.optimizer  else [args.optimizer],    # False or [0], [(weight_decay=)]
+    "use_learning_optimizer": use_learning_optimizer,    # False or [0], [(weight_decay=)]
     
     # "weight_init": "uniform",   # xavier, 'uniform', 'based_on_f', 'zero', 'kaiming'
     "weight_init": args.weight_init,   # xavier, 'uniform', 'based_on_f', 'zero', 'kaiming'
@@ -694,6 +703,28 @@ import logging
 from helper.log import write_eval_log
 
 
+#  try except block for training
+plot_edge_types = False 
+if args.mode == "training" and plot_edge_types:
+    try:
+        from helper.plot import plot_graph_with_edge_types 
+        N = custom_dataset_train.num_vertices
+        edge_index = custom_dataset_train.edge_index
+        edge_types = custom_dataset_train.edge_type
+
+        edge_type_map = {
+            "Sens2Sens": 0, "Sens2Inter": 1, "Sens2Sup": 2,
+            "Inter2Sens": 3, "Inter2Inter": 4, "Inter2Sup": 5,
+            "Sup2Sens": 6, "Sup2Inter": 7, "Sup2Sup": 8
+        }
+
+        plot_graph_with_edge_types(N, edge_index, edge_types, edge_type_map)
+
+    except Exception as e:
+        print("Could not plot graph with edge types")
+        print(e)
+
+
 ######################################################################################################### 
 ####                                              Model  (training)                                 #####
 ######################################################################################################### 
@@ -798,6 +829,9 @@ for epoch in range(args.epochs):
                 earlystop = True
                 break
 
+            if idx % 3 == 0:
+                model.pc_conv1.log_delta_w()
+
             if idx >= 10:
                 print("Epoch checkpoint reached, saving model...")
 
@@ -901,12 +935,13 @@ for epoch in range(args.epochs):
         )})
 
 
-        if args.optimizer or model_params["use_learning_optimizer"]:
+        if model.pc_conv1.optimizer_weights is not None:
             current_lr_values = model.pc_conv1.optimizer_values.param_groups[0]['lr']
             current_lr_weights = model.pc_conv1.optimizer_weights.param_groups[0]['lr']
             print(f"Current LR for weights: {current_lr_weights}")
 
             wandb.log({
+                    "epoch": epoch,
                     "LR/lr_values": current_lr_values, 
                     "LR/lr_weights": current_lr_weights
                     })

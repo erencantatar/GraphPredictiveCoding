@@ -158,7 +158,7 @@ class PCGraphConv(torch.nn.Module):
             std_val = 0.02 # 2% 
             std = max(0.01, abs(mean) * std_val)  # Set std to std_val% of mean or 0.01 minimum
             nn.init.normal_(self.weights, mean=mean, std=std)
-        elif init_type == "uniform":
+        elif init_type == "uniform" or init_type == "nn.linear":
             k = 1 / math.sqrt(num_vertices)
             nn.init.uniform_(self.weights, -k, k)
         elif init_type == "fixed":
@@ -235,8 +235,11 @@ class PCGraphConv(torch.nn.Module):
             self.weights.grad = torch.zeros_like(self.weights)
             self.values_dummy.grad = torch.zeros_like(self.values_dummy)
 
-            self.scheduler_weights = torch.optim.lr_scheduler.ReduceLROnPlateau(self.optimizer_weights, mode='min', patience=10, factor=0.1)
-
+            lr_scheduler = False        
+            if lr_scheduler:
+                self.scheduler_weights = torch.optim.lr_scheduler.ReduceLROnPlateau(self.optimizer_weights, mode='min', patience=10, factor=0.1)
+            else:
+                self.scheduler_weights = None
    
         self.effective_learning = {}
         self.effective_learning["w_mean"] = []
@@ -385,6 +388,43 @@ class PCGraphConv(torch.nn.Module):
 
         self.gpu_cntr = 0 
         self.print_GPU = False 
+
+    def log_activations(self, activations, edge_types):
+        """
+        Log activations for each edge type in a batch using wandb.
+        Parameters:
+        - activations: Tensor of activations corresponding to edges.
+        - edge_types: Tensor of edge types for each edge in the batch.
+        """
+        if self.wandb_logger is None:
+            return  # Skip logging if no wandb logger is provided
+
+        # Check if the sizes of activations and edge_types match
+        if activations.size(0) != edge_types.size(0):
+            raise ValueError(
+                f"Size mismatch: activations has size {activations.size(0)}, "
+                f"but edge_types has size {edge_types.size(0)}"
+            )
+    
+        edge_type_map = {
+            0: "Sens2Sens", 1: "Sens2Inter", 2: "Sens2Sup", 
+            3: "Inter2Sens", 4: "Inter2Inter", 5: "Inter2Sup", 
+            6: "Sup2Sens", 7: "Sup2Inter", 8: "Sup2Sup"
+        }
+
+        # Prepare histograms for activations by edge type
+        histograms = {}
+        for etype, etype_name in edge_type_map.items():
+            mask = edge_types == etype
+            activations_etype = activations[mask]
+            
+            if activations_etype.numel() > 0:
+                # Store histogram for logging
+                histograms[f"activations/{etype_name}"] = wandb.Histogram(activations_etype.cpu().numpy())
+        
+        # Log all histograms in a single step
+        self.wandb_logger.log(histograms)
+
 
     def log_gradients(self, log_histograms=False, log_every_n_steps=100):
         """
@@ -588,7 +628,10 @@ class PCGraphConv(torch.nn.Module):
 
             delta_x = self.values_mp(self.data.x.to(self.device), self.data.edge_index.to(self.device), weights_batched_graph, norm=self.norm.to(self.device)).squeeze()
             delta_x = delta_x.detach()
-        
+
+        # self.log_activations(delta_x, self.edge_type)
+        # self.log_activations(self.data.x[:, 0], self.edge_type)
+
         # self.copy_node_values_to_dummy(self.values)
         self.copy_node_values_to_dummy(self.data.x[:, 0])
                 
@@ -1092,49 +1135,98 @@ class PCGraphConv(torch.nn.Module):
     #     })
 
 
-    def log_delta_w(self, delta_w, edge_type, log):
+    def log_delta_w(self, print_log=False):
         """
-        Log delta_w values separately for each edge connection category type defined by edge_type_map.
-
+        Log delta_w values separately for each edge connection category type defined by self.edge_type.
+        Create a combined histogram plot of all edge types using matplotlib and log it to WandB.
         Parameters:
-        - delta_w: Tensor of weight changes (delta weights) for each edge in the graph.
-        - edge_type: Tensor of edge types corresponding to each edge in delta_w.
-        - wandb_logger: Wandb logging object to log the histograms.
+        - print_log: Whether to print log information for debugging.
         """
+        import matplotlib.pyplot as plt
 
+        delta_w = self.gradients_log  # Assuming `gradients_log` holds the delta weights
+        edge_type = self.edge_type  # Using self.edge_type for the connection types
 
+        # Check if the sizes of delta_w and edge_type match
+        if delta_w.size(0) != edge_type.size(0):
+            raise ValueError(
+                f"Size mismatch: delta_w has size {delta_w.size(0)}, "
+                f"but edge_type has size {edge_type.size(0)}"
+            )
+
+        # Mapping of edge types
         edge_type_map = {
-            0: "Sens2Sens", 1: "Sens2Inter", 2: "Sens2Sup", 
-            3: "Inter2Sens", 4: "Inter2Inter", 5: "Inter2Sup", 
-            6: "Sup2Sens", 7: "Sup2Inter", 8: "Sup2Sup"
+            "Sens2Sens": 0, "Sens2Inter": 1, "Sens2Sup": 2,
+            "Inter2Sens": 3, "Inter2Inter": 4, "Inter2Sup": 5,
+            "Sup2Sens": 6, "Sup2Inter": 7, "Sup2Sup": 8
         }
+        reverse_edge_type_map = {v: k for k, v in edge_type_map.items()}
 
-        # Iterate through each connection category type in the edge_type_map
-        for etype, etype_name in edge_type_map.items():
+        # Prepare a dictionary to store histograms for WandB
+        histograms = {}
+
+        # Initialize a figure for the combined histogram plot
+        plt.figure(figsize=(10, 7))
+
+        num_bins = 25
+        # Iterate through each connection category type in edge_type_map
+        for etype, etype_name in reverse_edge_type_map.items():
             # Mask to select delta_w values corresponding to the current edge type
             mask = (edge_type == etype)
             
             # Select delta_w values for this edge type
             delta_w_etype = delta_w[mask]
             
-            # Log the histogram of delta_w for the current edge type
-            if delta_w_etype.numel() > 0:  # Check if there are any elements to log
-                
-                if self.wandb_logger:
-                    self.wandb_logger.log({
-                        f"{etype_name}/delta_w_{etype_name}_mean": delta_w_etype.mean().item(),
-                        f"{etype_name}/delta_w_{etype_name}_max": delta_w_etype.max().item(),
-                        f"{etype_name}/delta_w_{etype_name}_distribution": wandb.Histogram(delta_w_etype.cpu().numpy())
-                    })
+            if delta_w_etype.numel() > 0:  # Plot and log only if there are elements
+                # Compute statistics
+                # delta_mean = delta_w_etype.mean().item()
+                # delta_max = delta_w_etype.max().item()
 
-                if log:
-                    print(f"delta_w_{etype_name} mean: {delta_w_etype.mean().item()}, max: {delta_w_etype.max().item()}")
+                # Log histograms and stats to WandB
+                # if self.wandb_logger:
+                #     histograms[f"delta_w/{etype_name}_mean"] = delta_mean
+                #     histograms[f"delta_w/{etype_name}_max"] = delta_max
+
+                # Plot histogram for this edge type
+                plt.hist(
+                    delta_w_etype.cpu().numpy(), 
+                    # bins='auto',  # Automatic bin size based on data distribution
+                    bins=num_bins,  # Automatic bin size based on data distribution
+                    alpha=0.5,    # Transparency to overlay histograms
+                    label=etype_name
+                )
+
+                # Print log for debugging if required
+                # if print_log:
+                #     print(f"delta_w_{etype_name}: mean={delta_mean}, max={delta_max}")
             else:
+                # Log NaN if no values for this edge type
                 if self.wandb_logger:
-                    # Log zero if no edges of this type are present
-                    self.wandb_logger.log({f"{etype_name}/delta_w_{etype_name}_mean": np.nan, f"delta_w_{etype_name}_max": np.nan})
+                    histograms[f"delta_w/{etype_name}_mean"] = float('nan')
+                    histograms[f"delta_w/{etype_name}_max"] = float('nan')
 
-        print("delta_w distributions for each edge type logged.")
+        # Add title, labels, and legend to the combined histogram plot
+        plt.title("Delta Weight Distribution by Edge Type")
+        plt.xlabel("Delta Weight")
+        plt.ylabel("Frequency")
+        plt.legend()
+        
+        # Save the figure
+        combined_hist_path = "combined_delta_w_histogram.png"
+        plt.savefig(combined_hist_path)
+
+        # Log the combined histogram image to WandB
+        if self.wandb_logger:
+            self.wandb_logger.log({"delta_w/combined_histogram_plot": wandb.Image(combined_hist_path)})
+
+        # Log all histograms at once to WandB
+        # if self.wandb_logger:
+        #     self.wandb_logger.log(histograms)
+
+        # Clear the plot to free memory
+        plt.clf()
+        
+        print("delta_w distributions for each edge type and combined histogram plot logged.")
 
 
     def weight_update(self):
@@ -1292,7 +1384,11 @@ class PCGNN(nn.Module):
         self.pc_conv1.learning(batch)
         
         if self.use_optimizers:
-            self.pc_conv1.scheduler_values.step(self.pc_conv1.energy_vals["internal_energy_batch"])
+
+            if self.pc_conv1.scheduler_weights is not None:
+                self.pc_conv1.scheduler_weights.step(self.pc_conv1.energy_vals["internal_energy_batch"])
+                
+            # self.pc_conv1.scheduler_values.step(self.pc_conv1.energy_vals["internal_energy_batch"])
 
             # current_lr_values = self.pc_conv1.optimizer_values.param_groups[0]['lr']
             # current_lr_weights = self.pc_conv1.optimizer_weights.param_groups[0]['lr']
