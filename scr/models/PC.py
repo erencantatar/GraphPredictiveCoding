@@ -217,11 +217,15 @@ class PCGraphConv(torch.nn.Module):
             "weights": None, 
         }
 
+        self.scheduler_weights = None
+
+        self.use_optimizers = False
+
         if self.use_optimizers:
             
             weight_decay = self.use_optimizers[0]
 
-            print("------------Using optimizers for values/weights updating ------------")
+            print(f"------------Using optimizers with weight_decay {weight_decay} ------------")
             # self.optimizer_weights = torch.optim.Adam([self.weights], lr=self.lr_weights, weight_decay=1e-2) #weight_decay=1e-2)        
             # self.optimizer_weights = torch.optim.SGD([self.weights], lr=self.lr_weights)
             # self.optimizer_weights = torch.optim.SGD([self.weights], lr=self.gamma) #weight_decay=1e-2)
@@ -238,9 +242,11 @@ class PCGraphConv(torch.nn.Module):
             lr_scheduler = False        
             if lr_scheduler:
                 self.scheduler_weights = torch.optim.lr_scheduler.ReduceLROnPlateau(self.optimizer_weights, mode='min', patience=10, factor=0.1)
-            else:
-                self.scheduler_weights = None
-   
+
+            # log wandb that using optim in delta_w/
+            self.wandb_logger.log({"Using optimizer for delta_w": True})
+
+
         self.effective_learning = {}
         self.effective_learning["w_mean"] = []
         self.effective_learning["w_max"] = []
@@ -1204,6 +1210,13 @@ class PCGraphConv(torch.nn.Module):
                 if self.wandb_logger:
                     histograms[f"delta_w/{etype_name}_mean"] = float('nan')
                     histograms[f"delta_w/{etype_name}_max"] = float('nan')
+
+        # Compute the 5th and 95th percentiles of delta_w values
+        delta_min = np.percentile(delta_w.cpu().numpy(), 5)
+        delta_max = np.percentile(delta_w.cpu().numpy(), 95)
+
+        # Cap the x-axis based on the computed percentiles
+        plt.xlim(delta_min, delta_max)
 
         # Add title, labels, and legend to the combined histogram plot
         plt.title("Delta Weight Distribution by Edge Type")

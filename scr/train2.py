@@ -829,9 +829,6 @@ for epoch in range(args.epochs):
                 earlystop = True
                 break
 
-            if idx % 3 == 0:
-                model.pc_conv1.log_delta_w()
-
             if idx >= 10:
                 print("Epoch checkpoint reached, saving model...")
 
@@ -839,15 +836,19 @@ for epoch in range(args.epochs):
                 # model_path = os.path.join(model_dir, model_filename)
                 # torch.save(model.state_dict(), model_path)
 
+                # if wandb is used omit this
+                if args.use_wandb not in ['online', 'run']:
+                    from helper.plot import plot_energy_during_training
 
-                from helper.plot import plot_energy_during_training
+                    plot_energy_during_training(model.pc_conv1.energy_vals["internal_energy"][:], 
+                                                model.pc_conv1.energy_vals["sensory_energy"][:],
+                                                history, 
+                                                model_dir=model_dir,
+                                                epoch=epoch)
+                    
 
-                plot_energy_during_training(model.pc_conv1.energy_vals["internal_energy"][:], 
-                                            model.pc_conv1.energy_vals["sensory_energy"][:],
-                                            history, 
-                                            model_dir=model_dir,
-                                            epoch=epoch)
-                
+                model.pc_conv1.log_delta_w()
+
                 # current_lr_values = model.pc_conv1.optimizer_values.param_groups[0]['lr']
                 # print(f"Current LR for values: {current_lr_values}")
 
@@ -916,6 +917,25 @@ for epoch in range(args.epochs):
         "generation/MSE_mean": avg_MSE_mean,
         "generation/MSE_max": avg_MSE_max,
     })
+
+
+    test_params = {
+        "model_dir": model_dir,
+        "T": 140,
+        "supervised_learning":True, 
+        "num_samples": 2,
+        "add_sens_noise": False,
+        "num_wandb_img_log": 2,
+    }
+
+    # model.pc_conv1.lr_values = 0.1 
+    # model.pc_conv1.lr_values = model_params["lr_params"][0]
+
+    MSE_values_occ = occlusion(test_loader, model, test_params)
+
+    test_params["add_sens_noise"] = True
+    MSE_values_occ_noise = occlusion(test_loader, model, test_params)
+
 
     # every 5 epochs 
     if epoch % 5 == 0:
