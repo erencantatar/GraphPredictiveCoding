@@ -122,6 +122,7 @@ class PCGraphConv(torch.nn.Module):
         # TODO use torch.nn.Parameter instead of torch.zeros
         
         self.use_optimizers = use_learning_optimizer
+        
 
         self.use_grokfast = False
         print(f"----- using grokfast: {self.use_grokfast}")
@@ -221,6 +222,7 @@ class PCGraphConv(torch.nn.Module):
 
         self.use_optimizers = False
 
+        
         if self.use_optimizers:
             
             weight_decay = self.use_optimizers[0]
@@ -239,13 +241,14 @@ class PCGraphConv(torch.nn.Module):
             self.weights.grad = torch.zeros_like(self.weights)
             self.values_dummy.grad = torch.zeros_like(self.values_dummy)
 
-            lr_scheduler = False        
-            if lr_scheduler:
+            self.lr_scheduler = False        
+            if self.lr_scheduler:
                 self.scheduler_weights = torch.optim.lr_scheduler.ReduceLROnPlateau(self.optimizer_weights, mode='min', patience=10, factor=0.1)
 
             # log wandb that using optim in delta_w/
             self.wandb_logger.log({"Using optimizer for delta_w": True})
-
+        else:
+            print("------------Not using optimizers ------------")
 
         self.effective_learning = {}
         self.effective_learning["w_mean"] = []
@@ -806,19 +809,19 @@ class PCGraphConv(torch.nn.Module):
             self.energy_vals["supervised_energy"].append(energy["supervised_energy"])
 
             if self.wandb_logger:
-                self.wandb_logger.log({"energy_total": energy["energy_total"]})
-                self.wandb_logger.log({"energy_internal": energy["internal_energy"]})
-                self.wandb_logger.log({"energy_sensory": energy["sensory_energy"]})
+                self.wandb_logger.log({"Training/energy_total": energy["energy_total"]})
+                self.wandb_logger.log({"Training/energy_internal": energy["internal_energy"]})
+                self.wandb_logger.log({"Training/energy_sensory": energy["sensory_energy"]})
 
-                self.wandb_logger.log({"mean_internal_energy_sign": self.errors[self.internal_indices].mean().item()})
-                self.wandb_logger.log({"mean_sensory_energy_sign": self.errors[self.sensory_indices].mean().item()})
-                self.wandb_logger.log({"mean_supervised_energy_sign": self.errors[self.supervised_labels].mean().item()})
+                self.wandb_logger.log({"Training/mean_internal_energy_sign": self.errors[self.internal_indices].mean().item()})
+                self.wandb_logger.log({"Training/mean_sensory_energy_sign": self.errors[self.sensory_indices].mean().item()})
+                self.wandb_logger.log({"Training/mean_supervised_energy_sign": self.errors[self.supervised_labels].mean().item()})
 
         if self.mode == "testing":
 
             if self.wandb_logger:
-                self.wandb_logger.log({"energy_internal_testing": energy["internal_energy"]})
-                self.wandb_logger.log({"energy_sensory_testing": energy["sensory_energy"]})
+                self.wandb_logger.log({"Testing/energy_internal_testing": energy["internal_energy"]})
+                self.wandb_logger.log({"Testing/energy_sensory_testing": energy["sensory_energy"]})
     
             self.energy_vals["internal_energy_testing"].append(energy["internal_energy"])
             self.energy_vals["sensory_energy_testing"].append(energy["sensory_energy"])
@@ -855,7 +858,7 @@ class PCGraphConv(torch.nn.Module):
             self.values_dummy.data.zero_()  # Zero out values_dummy without creating a new tensor
 
             # 
-            if len(self.trace["values"]) > 2:
+            if len(self.trace["values"]) > 2 and len(self.trace["values"]) < 5:
                 self.trace["values"] = []
                 self.trace["preds"]  = []
 
@@ -1024,7 +1027,7 @@ class PCGraphConv(torch.nn.Module):
 
         elif self.mode == "testing":
             # during testing the batch size is set to 1 for now
-            assert self.task in ["classification", "generation", "reconstruction", "denoising", "Associative_Memories"], \
+            assert self.task in ["classification", "generation", "occlusion", "reconstruction", "denoising", "Associative_Memories"], \
                 "Task not set, (generation, reconstruction, denoising, Associative_Memories)"
 
             if self.task == "classification":
@@ -1212,11 +1215,17 @@ class PCGraphConv(torch.nn.Module):
                     histograms[f"delta_w/{etype_name}_max"] = float('nan')
 
         # Compute the 5th and 95th percentiles of delta_w values
-        delta_min = np.percentile(delta_w.cpu().numpy(), 5)
-        delta_max = np.percentile(delta_w.cpu().numpy(), 95)
+        delta_min = np.percentile(delta_w.cpu().numpy(), 1)
+        delta_max = np.percentile(delta_w.cpu().numpy(), 99)
 
-        # Cap the x-axis based on the computed percentiles
-        plt.xlim(delta_min, delta_max)
+
+        # Extend the range by 20% on both sides for broader visualization
+        range_extension = 0.7 * (delta_max - delta_min)
+        x_min = delta_min - range_extension
+        x_max = delta_max + range_extension
+
+        # Cap the x-axis with the broader range
+        plt.xlim(x_min, x_max)
 
         # Add title, labels, and legend to the combined histogram plot
         plt.title("Delta Weight Distribution by Edge Type")
@@ -1398,7 +1407,7 @@ class PCGNN(nn.Module):
         
         if self.use_optimizers:
 
-            if self.pc_conv1.scheduler_weights is not None:
+            if self.pc_conv1.scheduler_weights is not None and self.pc_conv1.lr_scheduler:
                 self.pc_conv1.scheduler_weights.step(self.pc_conv1.energy_vals["internal_energy_batch"])
                 
             # self.pc_conv1.scheduler_values.step(self.pc_conv1.energy_vals["internal_energy_batch"])
@@ -1611,6 +1620,11 @@ class PCGNN(nn.Module):
             print("Pass")
         else:
             raise Exception(f"unkown method: {method}")
+
+        if self.pc_conv1.trace_activity_preds:
+            self.pc_conv1.trace["preds"].append(data.x[:, 2][0:784].detach())
+        if self.pc_conv1.trace_activity_values:
+            self.pc_conv1.trace["values"].append(data.x[:, 0][0:784].detach())
 
         self.inference(data)
         

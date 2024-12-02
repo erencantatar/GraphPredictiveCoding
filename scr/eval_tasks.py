@@ -451,6 +451,8 @@ def generation(test_loader, model, test_params, clean_images, num_samples=8, ver
     for idx, (noisy_batch, clean_image) in enumerate(test_loader, start=1):
 
 
+        # remove the whole thing (also label)
+
         noisy_batch = noisy_batch.to(model.pc_conv1.device)
         clean_image = clean_image.view(28,28).cpu().numpy()  # Adjust shape as necessary
         noisy_image = noisy_batch.x[:, 0][0:784].view(28,28).cpu().detach().numpy()
@@ -463,7 +465,9 @@ def generation(test_loader, model, test_params, clean_images, num_samples=8, ver
         # values 
         noisy_batch.x[:, 0][model.pc_conv1.sensory_indices] = torch.rand(noisy_batch.x[:, 0][model.pc_conv1.sensory_indices].shape).to(model.pc_conv1.device)
         # errors 
-        # noisy_batch.x[:, 1][model.pc_conv1.sensory_indices] = torch.rand(noisy_batch.x[:, 0][model.pc_conv1.sensory_indices].shape).to(model.pc_conv1.device)
+        noisy_batch.x[:, 1][model.pc_conv1.sensory_indices] = torch.zeros_like(noisy_batch.x[:, 1][model.pc_conv1.sensory_indices]).to(model.pc_conv1.device)
+        # preds 
+        noisy_batch.x[:, 2][model.pc_conv1.sensory_indices] = torch.zeros_like(noisy_batch.x[:, 2][model.pc_conv1.sensory_indices]).to(model.pc_conv1.device)
     
         
         if model.pc_conv1.trace_activity_preds:

@@ -50,6 +50,9 @@ source activate PredCod
       self.log_delta_w(adjusted_delta_w if self.adjust_delta_w else delta_w, self.edge_type, log=False)
       
 
+## Optimzation for later:
+- Wandb sweep
+- https://github.com/rapidsai/nx-cugraph 
 
 ## File Structure
 

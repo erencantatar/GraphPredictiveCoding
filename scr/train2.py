@@ -610,7 +610,6 @@ print("Model type", args.model_type.lower())
 
 if args.model_type.lower() == "pc":
         
-
     model = PCGNN(**model_params,   
         log_tensorboard=False,
         wandb_logger=run if args.use_wandb in ['online', 'run'] else None,
@@ -636,7 +635,7 @@ wandb.watch(model,
 from helper.plot import plot_model_weights, plot_energy_graphs
 
 
-save_path = os.path.join(model_dir, 'parameter_info/weight_matrix_visualization_epoch0.png')
+save_path = os.path.join(model_dir, 'parameter_info/weight_matrix_visualization_before_training.png')
 # plot_model_weights(model, save_path)
 plot_model_weights(model, GRAPH_TYPE, model_dir=save_path, save_wandb=True)
 
@@ -918,23 +917,34 @@ for epoch in range(args.epochs):
         "generation/MSE_max": avg_MSE_max,
     })
 
+    # only if accuracy_mean is above 0.5 
+    if accuracy_mean > 0.5:
+        test_params = {
+            "model_dir": model_dir,
+            "T": 140,
+            "supervised_learning":True, 
+            "num_samples": 3,
+            "add_sens_noise": False,
+            "num_wandb_img_log": 2,
+        }
 
-    test_params = {
-        "model_dir": model_dir,
-        "T": 140,
-        "supervised_learning":True, 
-        "num_samples": 2,
-        "add_sens_noise": False,
-        "num_wandb_img_log": 2,
-    }
+        # model.pc_conv1.lr_values = 0.1 
+        # model.pc_conv1.lr_values = model_params["lr_params"][0]
 
-    # model.pc_conv1.lr_values = 0.1 
-    # model.pc_conv1.lr_values = model_params["lr_params"][0]
+        MSE_values_occ = occlusion(test_loader, model, test_params)
 
-    MSE_values_occ = occlusion(test_loader, model, test_params)
+        wandb.log({
+            "Training/epoch": epoch,
+            "occlusion/MSE_values_occ": MSE_values_occ,
+        })
 
-    test_params["add_sens_noise"] = True
-    MSE_values_occ_noise = occlusion(test_loader, model, test_params)
+        test_params["add_sens_noise"] = True
+        MSE_values_occ_noise = occlusion(test_loader, model, test_params)
+        wandb.log({
+            "Training/epoch": epoch,
+            "occlusion/MSE_values_occ_noise": MSE_values_occ_noise,
+        })
+
 
 
     # every 5 epochs 
