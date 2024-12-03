@@ -35,12 +35,16 @@ class CustomGraphDataset(Dataset):
         else:
             self.numbers_list = list(range(10))
 
+        # shuffle the numbers_list
+        self.numbers_list_copy = self.numbers_list.copy()
+        np.random.shuffle(self.numbers_list_copy)
+        
         # Instead of storing just the first occurrence, store all occurrences of each digit
-        self.indices = {int(digit): [] for digit in self.numbers_list}
+        self.indices = {int(digit): [] for digit in self.numbers_list_copy}
 
         # Populate the indices dictionary with all occurrences of each digit
         for idx, (image, label) in enumerate(self.mnist_dataset):
-            if int(label) in self.numbers_list:
+            if int(label) in self.numbers_list_copy:
                 self.indices[int(label)].append(idx)
 
         # ------------------- Create the graph structure -------------------
@@ -143,7 +147,7 @@ class CustomGraphDataset(Dataset):
         # digit, selected_idx = flat_indices[idx]
         
 
-        digit = np.random.choice(self.numbers_list)
+        digit = np.random.choice(self.numbers_list_copy)
 
         # fails when working with batch_size == 1 --> 
         # digit = self.numbers_list[idx % len(self.numbers_list)]

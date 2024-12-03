@@ -626,6 +626,185 @@ def generation(test_loader, model, test_params, clean_images, num_samples=8, ver
             plt.close(fig)
 
 
+
+@dynamic_task
+def plot_digits_vertically(test_loader, model, test_params, numbers_list):
+    """
+    Generate and plot digits specified in test_loader.numbers_list using the model.
+
+    Parameters:
+    - test_loader: DataLoader with numbers_list attribute containing digits to generate.
+    - model: Model to use for generating the digits.
+    - test_params: Parameters for the test process.
+    """
+    # Ensure numbers_list exists in the test_loader
+    numbers_list = numbers_list
+
+    # Prepare to store generated digits
+    generated_digits = {digit: None for digit in numbers_list}
+    generated_digits_normalized = {digit: None for digit in numbers_list}
+
+    for idx, (noisy_batch, _) in enumerate(test_loader, start=1):
+        # Move batch to the correct device
+        noisy_batch = noisy_batch.to(model.pc_conv1.device)
+
+        # Set random noise in sensory nodes
+        noisy_batch.x[:, 0][model.pc_conv1.sensory_indices] = torch.rand(
+            noisy_batch.x[:, 0][model.pc_conv1.sensory_indices].shape
+        ).to(model.pc_conv1.device)
+        noisy_batch.x[:, 1][model.pc_conv1.sensory_indices] = 0  # Error nodes
+        noisy_batch.x[:, 2][model.pc_conv1.sensory_indices] = 0  # Prediction nodes
+
+        # Set the supervision signal for the target digits
+        target_digit = noisy_batch.y.item()
+        if target_digit in numbers_list and generated_digits[target_digit] is None:
+            # Perform inference to generate the digit
+            values, predictions, labels = model.query(method="pass", data=noisy_batch)
+            generated_image = values[0:784].view(28, 28).cpu().detach().numpy()
+            generated_digits[target_digit] = generated_image
+
+            # Normalize the image individually
+            min_val = generated_image.min()
+            max_val = generated_image.max()
+            if max_val > min_val:  # Avoid division by zero
+                generated_image_normalized = (generated_image - min_val) / (max_val - min_val)
+            else:
+                generated_image_normalized = generated_image
+            generated_digits_normalized[target_digit] = generated_image_normalized
+
+        # Stop if all requested digits are generated
+        if all(v is not None for v in generated_digits.values()):
+            break
+
+    # Ensure all requested digits are generated
+    missing_digits = [digit for digit, img in generated_digits.items() if img is None]
+    if missing_digits:
+        raise ValueError(f"Could not generate images for the following digits: {missing_digits}")
+
+    # Plot the generated digits in a vertical layout
+    fig, axs = plt.subplots(nrows=1, ncols=len(numbers_list), figsize=(len(numbers_list) * 2, 4))
+    if len(numbers_list) == 1:  # Ensure axs is iterable for a single-column layout
+        axs = [axs]
+
+    for ax, digit in zip(axs, numbers_list):
+        ax.imshow(generated_digits[digit], cmap='gray', vmin=0, vmax=1)
+        ax.set_title(f"Digit: {digit}")
+        ax.axis('off')
+
+    plt.tight_layout()
+    wandb.log({"generation/generated_num_list": wandb.Image(fig)})
+    plt.close(fig)
+
+    # Plot the normalized generated digits in a vertical layout
+    fig_normalized, axs_normalized = plt.subplots(nrows=1, ncols=len(numbers_list), figsize=(len(numbers_list) * 2, 4))
+    if len(numbers_list) == 1:  # Ensure axs is iterable for a single-column layout
+        axs_normalized = [axs_normalized]
+
+    for ax, digit in zip(axs_normalized, numbers_list):
+        ax.imshow(generated_digits_normalized[digit], cmap='gray', vmin=0, vmax=1)
+        ax.set_title(f"Digit: {digit} (Normalized)")
+        ax.axis('off')
+
+    plt.tight_layout()
+    wandb.log({"generation/generated_num_list_normalized": wandb.Image(fig_normalized)})
+    plt.close(fig_normalized)
+
+
+from torch_geometric.data import Data
+
+@dynamic_task
+def progressive_digit_generation(test_loader, model, test_params, numbers_list):
+    """
+    Generate digits iteratively, starting from random noise and transitioning through supervision labels.
+    The last trace value is used as the input for the next label generation. 
+    Focus more on the transitioning before and after the switch to a new supervised label.
+    Visualize the results in a grid plot and log to WandB.
+
+    Parameters:
+    - test_loader: DataLoader to provide graph samples.
+    - model: The predictive coding model.
+    - test_params: Test parameters for evaluation.
+    - numbers_list: List of digits to generate.
+    """
+    import wandb
+    import matplotlib.pyplot as plt
+    import torch
+
+    # Get a single batch from the test_loader
+    for noisy_batch, _ in test_loader:
+        noisy_batch = noisy_batch.to(model.pc_conv1.device)
+        break  # Only take the first batch
+
+    # Modify x to be random for sensory nodes
+    noisy_batch.x[:, 0][model.pc_conv1.sensory_indices] = torch.rand(
+        noisy_batch.x[:, 0][model.pc_conv1.sensory_indices].shape, device=model.pc_conv1.device
+    )
+
+    generated_images = []  # Store generated outputs
+    start_image = noisy_batch.x[:, 0][model.pc_conv1.sensory_indices].view(28, 28).cpu().detach().numpy()
+    total_images = [start_image]  # Initialize with the starting random noise
+
+    for target_digit in numbers_list:
+        # Set the supervision signal for the current target digit
+        supervision_label = torch.zeros((10,), device=model.pc_conv1.device)
+        supervision_label[target_digit] = 1.0
+        supervision_label = supervision_label.unsqueeze(1)  # Change shape to [10, 1]
+
+        noisy_batch.x[:, 0][model.pc_conv1.supervised_labels] = supervision_label
+
+        # Perform inference to generate the target digit
+        values, predictions, labels = model.query(method="pass", data=noisy_batch)
+
+        # Store intermediate snapshots from the trace with focus on transitioning
+        intermediate_images = []
+        if model.pc_conv1.trace_activity_values:
+            trace_length = len(model.pc_conv1.trace["values"])
+            # Capture more points before and after the transition
+            step_size = trace_length // 10
+            transition_focus_indices = list(range(0, trace_length, step_size))[-10:]
+            for idx in transition_focus_indices:
+                trace_snapshot = model.pc_conv1.trace["values"][idx][0:784].view(28, 28).cpu().detach().numpy()
+                trace_snapshot = (trace_snapshot - trace_snapshot.min()) / (trace_snapshot.max() - trace_snapshot.min())
+                intermediate_images.append(trace_snapshot)
+
+        # Normalize the generated image and store it
+        generated_image = values[0:784].view(28, 28).cpu().detach().numpy()
+        min_val, max_val = generated_image.min(), generated_image.max()
+        if max_val > min_val:  # Avoid division by zero
+            generated_image = (generated_image - min_val) / (max_val - min_val)
+        generated_images.append(generated_image)
+
+        # Add intermediate and final generated images to the total
+        total_images += intermediate_images + [generated_image]
+
+        # Use the last trace value as the next input
+        noisy_batch.x[:, 0][model.pc_conv1.sensory_indices] = values[0:784]
+
+    # Determine grid dimensions: one row per digit
+    grid_rows = len(numbers_list)
+    grid_cols = (len(total_images) + grid_rows - 1) // grid_rows
+
+    # Create the figure with a rectangular grid layout
+    fig, axs = plt.subplots(nrows=grid_rows, ncols=grid_cols, figsize=(grid_cols * 2, grid_rows * 2))
+
+    # Flatten axes for easy iteration if the grid is larger than 1x1
+    axs = axs.ravel() if grid_rows * grid_cols > 1 else [axs]
+
+    for ax, img in zip(axs, total_images):
+        ax.imshow(img, cmap="gray", vmin=0, vmax=1)
+        ax.axis("off")
+
+    # Remove unused subplots
+    for ax in axs[len(total_images):]:
+        ax.axis("off")
+
+    plt.tight_layout()
+
+    # Log to WandB
+    wandb.log({"generation/progressive_digit_generation_norm": wandb.Image(fig)})
+    plt.close(fig)
+
+
 @dynamic_task
 def classification(test_loader, model, test_params, num_samples=5):
     

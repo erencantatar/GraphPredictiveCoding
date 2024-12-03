@@ -1,0 +1,80 @@
+\documentclass[a4paper, 12pt]{article}
+
+% Packages
+\usepackage[utf8]{inputenc}  % Encoding
+\usepackage[margin=1in]{geometry}  % Page margins
+\usepackage{amsmath}  % Math symbols
+\usepackage{graphicx}  % Include graphics
+\usepackage{hyperref}  % Hyperlinks
+\usepackage{caption}  % Custom captions for figures/tables
+
+% Title Information
+\title{An Example LaTeX Document}
+\author{Your Name}
+\date{\today}
+
+\begin{document}
+
+% Title Page
+\maketitle
+
+% Abstract
+\begin{abstract}
+This document serves as an example of a basic \LaTeX\ file structure. It demonstrates sections, figures, tables, and references to help users create their documents efficiently.
+\end{abstract}
+
+% Introduction Section
+\section{Introduction}
+This is an example of an introduction section. \LaTeX\ is widely used in academic and professional settings due to its high-quality typesetting capabilities.
+
+% Equations
+\section{Mathematical Expressions}
+Here is an example of an inline equation: \( E = mc^2 \).
+
+A displayed equation:
+\[
+\int_a^b f(x)\,dx = F(b) - F(a)
+\]
+
+% Figures
+\section{Figures}
+Figure \ref{fig:example} shows a placeholder image.
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.5\textwidth]{example-image} % Replace with your image file
+    \caption{This is an example figure.}
+    \label{fig:example}
+\end{figure}
+
+% Tables
+\section{Tables}
+Table \ref{tab:example} shows an example table.
+
+\begin{table}[h]
+    \centering
+    \begin{tabular}{|c|c|c|}
+    \hline
+    Column 1 & Column 2 & Column 3 \\
+    \hline
+    A & B & C \\
+    X & Y & Z \\
+    \hline
+    \end{tabular}
+    \caption{An example table.}
+    \label{tab:example}
+\end{table}
+
+% References
+\section{References}
+References can be added using \texttt{bibtex}. For now, here is a manual example:
+\begin{itemize}
+    \item Knuth, D. E. (1984). \textit{The TeXbook}. Addison-Wesley.
+    \item Lamport, L. (1994). \textit{\LaTeX: A Document Preparation System}. Addison-Wesley.
+\end{itemize}
+
+% Conclusion
+\section{Conclusion}
+This document provides a simple template to get started with \LaTeX. Customize it as per your requirements.
+
+\end{document}

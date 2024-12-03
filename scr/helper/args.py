@@ -43,14 +43,16 @@ def str2bool(v):
         raise argparse.ArgumentTypeError('Boolean value expected.')
 
 def true_with_float(value):
-    if value.lower() == 'false':
+    if value.lower() == 'false' or value is False:
         return False
+    if value.lower() == 'true' or value is True:
+        raise argparse.ArgumentTypeError("If set to True, a float value is required.")
     try:
         float_value = float(value)
         return float_value
     except ValueError:
         raise argparse.ArgumentTypeError(f"Invalid value: {value}. If set to True, a float value is required.")
-    
+
 
 
 def valid_str_or_float(value):

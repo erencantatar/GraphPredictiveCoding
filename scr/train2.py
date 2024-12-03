@@ -376,13 +376,20 @@ SKIPPING FOR NOW, see local
 # lr_gamma, lr_alpha =  (0.1 ,  0.0001)
 # lr_gamma, lr_alpha =  (0.1, 0.00001)
 
-# Check if learning_optimizer is True with a float value for weight decay
-if isinstance(args.optimizer, float) or isinstance(args.optimizer, int):
-    use_learning_optimizer = [args.optimizer]  # Weight decay is provided, including if it's 0
+# Check if args.optimizer is valid
+if isinstance(args.optimizer, (float, int)) and args.optimizer >= 0:
+    # Optimizer enabled with explicit weight decay
+    use_learning_optimizer = [args.optimizer]
     weight_decay = args.optimizer
-else:
-    use_learning_optimizer = False  # No optimizer to be used
+    print(f"Optimizer enabled with weight decay: {weight_decay}")
+elif args.optimizer is False:
+    # Optimizer disabled
+    use_learning_optimizer = False
     weight_decay = None
+    print("Optimizer disabled (False).")
+else:
+    # Catch invalid or improperly parsed True cases
+    raise ValueError(f"Invalid value for optimizer: {args.optimizer}. Expected False or a float value.")
 
 
 model_params = {
@@ -651,6 +658,7 @@ plot_model_weights(model, GRAPH_TYPE, model_dir=save_path, save_wandb=True)
 
 # device = torch.device('cpu')
 from eval_tasks import classification, denoise, occlusion, generation #, reconstruction
+from eval_tasks import plot_digits_vertically, progressive_digit_generation
 
 # num_wandb_img_log = len(custom_dataset_train.numbers_list)   # Number of images to log to wandb
 num_wandb_img_log = 1   # Number of images to log to wandb
@@ -694,7 +702,8 @@ test_loader = DataLoader(custom_dataset_test, batch_size=1, shuffle=True, genera
 
 from helper.eval import get_clean_images_by_label
 
-clean_images = get_clean_images_by_label(mnist_trainset, num_images=10)
+# want to see how good it can recreate the images it has seen during training
+clean_images = get_clean_images_by_label(mnist_trainset, num_images=20)
 
 import os
 import logging
@@ -758,6 +767,7 @@ model.train()
 # Define the early stopping threshold and OOM warning
 threshold_earlystop = 0.05
 max_energy_threshold = 1e6
+accuracy_mean = 0 
 
 start_time = time.time()
 
@@ -885,6 +895,8 @@ for epoch in range(args.epochs):
     model.pc_conv1.trace_activity_values = True 
     model.pc_conv1.trace_activity_preds = True 
     model.pc_conv1.batchsize = 1
+
+    # Adjust num_samples based on accuracy
     test_params = {
         "model_dir": model_dir,
         "T":100,
@@ -892,12 +904,28 @@ for epoch in range(args.epochs):
         "num_samples": 12,
         "num_wandb_img_log": num_wandb_img_log,
     }
+
+    if accuracy_mean > 0.8:  # Adjust the threshold as needed
+        test_params["num_samples"] = 24  # Increase samples if accuracy is high
+    elif accuracy_mean > 0.6:
+        test_params["num_samples"] = 18  # Moderate increase for mid-range accuracy
+        
     y_true, y_pred, accuracy_mean = classification(test_loader, model, test_params)
     # Log accuracy_mean grouped under classification
     wandb.log({
         "epoch": epoch,
         "classification/accuracy_mean": accuracy_mean
     })
+    if accuracy_mean > 0.9:
+        wandb.log({
+            "epoch": epoch,
+            "classification/y_true": y_true,
+            "classification/y_pred": y_pred,
+            "classification/size":  len(y_true),
+        })
+
+        print("Reducing learning rate for weights since accuracy is high")
+        model.pc_conv1.lr_weights = model.pc_conv1.lr_weights / 2
     
     test_params = {
         "model_dir": model_dir,
@@ -917,33 +945,75 @@ for epoch in range(args.epochs):
         "generation/MSE_max": avg_MSE_max,
     })
 
+
+    if epoch % 5 == 0 and epoch >= 2 and avg_SSIM_mean >= 0.1:
+
+        plot_digits_vertically(test_loader, model, test_params, custom_dataset_test.numbers_list)
+
+        # plot_digits_vertically(test_loader, model=model, test_params, numbers_list=custom_dataset_test.numbers_list)
+        progressive_digit_generation(test_loader, model, test_params, custom_dataset_test.numbers_list)
+
+    # change the LR for the weights after 10 epochs
+
+    if model.pc_conv1.optimizer_weights is not None:
+        current_lr_values = model.pc_conv1.optimizer_values.param_groups[0]['lr']
+        current_lr_weights = model.pc_conv1.optimizer_weights.param_groups[0]['lr']
+        print(f"Current LR for weights: {current_lr_weights}")
+
+        wandb.log({
+                "epoch": epoch,
+                "LR/lr_values": current_lr_values, 
+                "LR/lr_weights": current_lr_weights
+                })
+    else:
+        wandb.log({
+        "epoch": epoch,
+        "LR/lr_values": model.pc_conv1.lr_values, 
+        "LR/lr_weights": model.pc_conv1.lr_weights
+        })
+
+    if epoch == 10:
+        print("Reducing learning rate for weights")
+        model.pc_conv1.lr_weights = model.pc_conv1.lr_weights / 2
+
     # only if accuracy_mean is above 0.5 
     if accuracy_mean > 0.5:
+
         test_params = {
             "model_dir": model_dir,
             "T": 140,
             "supervised_learning":True, 
-            "num_samples": 3,
+            "num_samples": 4,
             "add_sens_noise": False,
-            "num_wandb_img_log": 2,
+            "num_wandb_img_log": 3,
         }
-
-        # model.pc_conv1.lr_values = 0.1 
-        # model.pc_conv1.lr_values = model_params["lr_params"][0]
-
         MSE_values_occ = occlusion(test_loader, model, test_params)
+        wandb.log({
+            "Training/epoch": epoch,
+            "occlusion_sup/MSE_values_occ": MSE_values_occ,
+        })
 
+
+        test_params = {
+            "model_dir": model_dir,
+            "T": 140,
+            "supervised_learning":False, 
+            "num_samples": 4,
+            "add_sens_noise": False,
+            "num_wandb_img_log": 3,
+        }
+        MSE_values_occ = occlusion(test_loader, model, test_params)
         wandb.log({
             "Training/epoch": epoch,
             "occlusion/MSE_values_occ": MSE_values_occ,
         })
 
-        test_params["add_sens_noise"] = True
-        MSE_values_occ_noise = occlusion(test_loader, model, test_params)
-        wandb.log({
-            "Training/epoch": epoch,
-            "occlusion/MSE_values_occ_noise": MSE_values_occ_noise,
-        })
+        # test_params["add_sens_noise"] = True
+        # MSE_values_occ_noise = occlusion(test_loader, model, test_params)
+        # wandb.log({
+        #     "Training/epoch": epoch,
+        #     "occlusion/MSE_values_occ_noise": MSE_values_occ_noise,
+        # })
 
 
 
@@ -965,16 +1035,7 @@ for epoch in range(args.epochs):
         )})
 
 
-        if model.pc_conv1.optimizer_weights is not None:
-            current_lr_values = model.pc_conv1.optimizer_values.param_groups[0]['lr']
-            current_lr_weights = model.pc_conv1.optimizer_weights.param_groups[0]['lr']
-            print(f"Current LR for weights: {current_lr_weights}")
 
-            wandb.log({
-                    "epoch": epoch,
-                    "LR/lr_values": current_lr_values, 
-                    "LR/lr_weights": current_lr_weights
-                    })
                     
 
 

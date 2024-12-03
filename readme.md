@@ -11,6 +11,11 @@ conda activate PredCod  #(or source activate)
 ```
 2. run `notebooks/training.ipynb` to train step by step   
 
+3. TODO !!
+conda env export --no-builds > environment.yaml
+pip freeze > requirements.txt
+
+
 ## Snellius cheatsheat 
 
 1. Interactive (debug) session: 

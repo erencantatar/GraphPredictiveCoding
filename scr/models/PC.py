@@ -12,6 +12,9 @@ from helper.grokfast import gradfilter_ema, gradfilter_ma
 import os 
 import wandb
 import math 
+import io
+from PIL import Image
+
 import torch.optim.lr_scheduler
 
 
@@ -220,12 +223,16 @@ class PCGraphConv(torch.nn.Module):
 
         self.scheduler_weights = None
 
-        self.use_optimizers = False
+        # self.use_optimizers = False
 
-        
-        if self.use_optimizers:
-            
+        print("check ______________--", self.use_optimizers)
+        # true if use_optimizers is a list with a float or int as the first element; and if so take the first element as the weight_decay
+
+        # Check if self.use_optimizers is a list and its first element is a valid float or int (not False or similar invalid values)
+        if isinstance(self.use_optimizers, list) and len(self.use_optimizers) > 0 and isinstance(self.use_optimizers[0], (float, int)) and self.use_optimizers[0] is not False:
             weight_decay = self.use_optimizers[0]
+            
+            # weight_decay = self.use_optimizers[0]
 
             print(f"------------Using optimizers with weight_decay {weight_decay} ------------")
             # self.optimizer_weights = torch.optim.Adam([self.weights], lr=self.lr_weights, weight_decay=1e-2) #weight_decay=1e-2)        
@@ -248,6 +255,7 @@ class PCGraphConv(torch.nn.Module):
             # log wandb that using optim in delta_w/
             self.wandb_logger.log({"Using optimizer for delta_w": True})
         else:
+            self.use_optimizers = False
             print("------------Not using optimizers ------------")
 
         self.effective_learning = {}
@@ -1027,14 +1035,15 @@ class PCGraphConv(torch.nn.Module):
 
         elif self.mode == "testing":
             # during testing the batch size is set to 1 for now
-            assert self.task in ["classification", "generation", "occlusion", "reconstruction", "denoising", "Associative_Memories"], \
-                "Task not set, (generation, reconstruction, denoising, Associative_Memories)"
+            # assert self.task in ["classification", "generation", "occlusion", "reconstruction", "denoising", "Associative_Memories"], \
+            #     "Task not set, (generation, reconstruction, denoising, Associative_Memories)"
 
             if self.task == "classification":
                 # Update both the internal and supervised nodes during classification
                 self.nodes_2_update_base = self.internal_indices_batch + self.supervised_labels_batch
 
-            elif self.task in ["generation", "reconstruction", "denoising", "occlusion"]:
+            # elif self.task in ["generation", "reconstruction", "denoising", "occlusion"]:
+            else:
                 # Update both the internal and sensory nodes during these tasks
                 self.nodes_2_update_base = self.internal_indices_batch + self.sensory_indices_batch
 
@@ -1234,13 +1243,26 @@ class PCGraphConv(torch.nn.Module):
         plt.legend()
         
         # Save the figure
-        combined_hist_path = "combined_delta_w_histogram.png"
-        plt.savefig(combined_hist_path)
+        # combined_hist_path = "combined_delta_w_histogram.png"
+        # plt.savefig(combined_hist_path)
 
-        # Log the combined histogram image to WandB
+        # Save the figure to a BytesIO buffer instead of saving locally
+        # Save the figure to a BytesIO buffer
+        buffer = io.BytesIO()
+        plt.savefig(buffer, format='png')
+        buffer.seek(0)
+
+        # Convert the BytesIO object to a PIL Image for WandB
+        image = Image.open(buffer)
+
+        # Log the histogram image to WandB
         if self.wandb_logger:
-            self.wandb_logger.log({"delta_w/combined_histogram_plot": wandb.Image(combined_hist_path)})
+            self.wandb_logger.log({"delta_w/combined_histogram_plot": wandb.Image(image)})
 
+        # Close the plot to free resources
+        plt.close()
+        buffer.close()
+        # 
         # Log all histograms at once to WandB
         # if self.wandb_logger:
         #     self.wandb_logger.log(histograms)
