@@ -1,7 +1,11 @@
 # Graph Predictive Coding
 
 ...
+784 sensory verticestrained with 794 sensory vertices for classification
+and generation tasks (784 pixels plus a 1-hot vector for the 10 labels),
 
+We ommit the model for reconstruction and denoising: 
+and 784 sensory vertices
 
 ## Installation
 1. **todo** Install conda env. with Pytorch Geometric (PYG)
