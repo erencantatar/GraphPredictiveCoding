@@ -29,7 +29,7 @@ wandb online
 
 # lr_val  [1, 0.5, 0.1, 0.01]            lr_weights  [1e-6, 1e-7]
 # uniform 
-lr_val=(0.5 0.1 0.01)
+lr_val=(1 0.5 0.1 0.01)
 lr_weights=(0.0001 0.00001 0.000001)
 
 # fixed  [0.1-0.00001]
@@ -41,7 +41,8 @@ total_trials=$(( ${#lr_val[@]} * ${#lr_weights[@]} * ${#w_init[@]} ))
 for lr_v in "${lr_val[@]}"; do
     for lr_w in "${lr_weights[@]}"; do
         echo "Trial $trial_count/$total_trials: Running with lr_val=${lr_v}, lr_weight=${lr_w}"
-        srun python train2.py --mode experimenting --use_wandb online --tags "exp2, uniform" --model_type IPC --use_bias False --set_abs_small_w_2_zero False --normalize_msg False --dataset_transform none --numbers_list 0,1,2,3,4,5,6 --N "all" --supervision_label_val 10 --num_internal_nodes 1500 --graph_type fully_connected --weight_init "uniform" --T 20 --lr_values $lr_v --lr_weights $lr_w --activation_func swish --epochs 10 --batch_size 4 --seed 42 --optimizer False --remove_sens_2_sens False --remove_sens_2_sup False
+        srun python train2.py --mode experimenting --use_wandb online --tags "exp3, uniform" --model_type IPC --use_bias False --set_abs_small_w_2_zero False --normalize_msg False --dataset_transform none --numbers_list 0,1,2,3,4,5,6 --N "all" --supervision_label_val 10 --num_internal_nodes 1500 --graph_type fully_connected --weight_init "uniform" --T 20 --lr_values $lr_v --lr_weights $lr_w --activation_func swish --epochs 10 --batch_size 4 --seed 42 --optimizer False --remove_sens_2_sens False --remove_sens_2_sup False
+        srun python train2.py --mode experimenting --use_wandb online --tags "exp3, uniform" --model_type IPC --use_bias False --set_abs_small_w_2_zero False --normalize_msg False --dataset_transform none --numbers_list 0,1,2,3,4,5,6 --N "all" --supervision_label_val 10 --num_internal_nodes 1500 --graph_type fully_connected --weight_init "uniform" --T 20 --lr_values $lr_v --lr_weights $lr_w --activation_func swish --epochs 10 --batch_size 4 --seed 42 --optimizer 0 --remove_sens_2_sens False --remove_sens_2_sup False
         
         # # fixed  [0.1-0.00001]
         # for w_v in "${w_init[@]}"; do
