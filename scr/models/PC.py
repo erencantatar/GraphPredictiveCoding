@@ -253,7 +253,8 @@ class PCGraphConv(torch.nn.Module):
                 self.scheduler_weights = torch.optim.lr_scheduler.ReduceLROnPlateau(self.optimizer_weights, mode='min', patience=10, factor=0.1)
 
             # log wandb that using optim in delta_w/
-            self.wandb_logger.log({"Using optimizer for delta_w": True})
+            if self.wandb_logger:
+                self.wandb_logger.log({"Using optimizer for delta_w": True})
         else:
             self.use_optimizers = False
             print("------------Not using optimizers ------------")
@@ -604,7 +605,7 @@ class PCGraphConv(torch.nn.Module):
             if nodes_2_update == "all":
                 parameter.grad = delta  # Apply full delta to the parameter
             else:
-                parameter.grad[nodes_2_update] = delta[nodes_2_update]  # Update only specific nodes
+                parameter.grad[nodes_2_update] = -delta[nodes_2_update]  # Update only specific nodes
           
             # perform optimizer weight update step
             optimizer.step()
