@@ -21,7 +21,7 @@ import torch.optim.lr_scheduler
 class PCGraphConv(torch.nn.Module): 
     def __init__(self, num_vertices, sensory_indices, internal_indices, 
                  learning_rate, T, graph_structure,
-                 batch_size, edge_type, use_bias=False, use_learning_optimizer=False, 
+                 batch_size, edge_type, delta_w_selection, use_bias=False, use_learning_optimizer=False, 
                  weight_init="normal", clamping=None,  
                  supervised_learning=False, normalize_msg=False, debug=False, activation=None, 
                  log_tensorboard=True, wandb_logger=None, device="cpu"):
@@ -47,6 +47,8 @@ class PCGraphConv(torch.nn.Module):
         self.debug = debug
         self.edge_index_single_graph = graph_structure  # a geometric graph structure
         self.mode = ""
+
+        self.delta_w_selection = delta_w_selection
 
         self.task = None
         self.device = device
@@ -559,7 +561,7 @@ class PCGraphConv(torch.nn.Module):
         self.data.x[self.nodes_2_update, 0] = self.values_dummy.data[self.nodes_2_update].unsqueeze(-1).detach()  # Detach to avoid retaining the computation graph
         # node_values.data = self.values_dummy.view(node_values.shape).detach()  
 
-    def gradient_descent_update(self, grad_type, parameter, delta, learning_rate, nodes_2_update, optimizer=None, use_optimizer=False):
+    def gradient_descent_update(self, grad_type, parameter, delta, learning_rate, nodes_or_edge2_update, optimizer=None, use_optimizer=False):
         """
         Perform a gradient descent update on a parameter (weights or values).
 
@@ -602,19 +604,19 @@ class PCGraphConv(torch.nn.Module):
                 parameter.grad.zero_()  # Reset the gradients to zero
 
             # set the gradients
-            if nodes_2_update == "all":
-                parameter.grad = delta  # Apply full delta to the parameter
+            if nodes_or_edge2_update == "all":
+                parameter.grad = delta.detach().clone()  # Apply full delta to the parameter
             else:
-                parameter.grad[nodes_2_update] = -delta[nodes_2_update]  # Update only specific nodes
+                parameter.grad[nodes_or_edge2_update] = delta[nodes_or_edge2_update].detach().clone()  # Update only specific nodes
           
             # perform optimizer weight update step
             optimizer.step()
         else:
             # Manually update the parameter using gradient descent
-            if nodes_2_update == "all":
+            if nodes_or_edge2_update == "all":
                 parameter.data += learning_rate * delta
             else:    
-                parameter.data[nodes_2_update] += learning_rate * delta[nodes_2_update]
+                parameter.data[nodes_or_edge2_update] += learning_rate * delta[nodes_or_edge2_update]
             
 
 
@@ -659,7 +661,7 @@ class PCGraphConv(torch.nn.Module):
             parameter=self.values_dummy,  # Assuming values are in self.data.x[:, 0]
             delta=delta_x,
             learning_rate=self.lr_values,
-            nodes_2_update=self.nodes_2_update,  # Mandatory
+            nodes_or_edge2_update=self.nodes_2_update,  # Mandatory
             optimizer=self.optimizer_values if self.use_optimizers else None,
             use_optimizer=self.use_optimizers
         )
@@ -783,7 +785,7 @@ class PCGraphConv(torch.nn.Module):
         
         self.errors = self.errors.squeeze()
         # manually add error
-        print(self.errors.shape)
+        # print(self.errors.shape)
         # self.errors[self.sensory_indices] += 1
         # self.errors[self.supervised_labels] += 1
 
@@ -1051,7 +1053,55 @@ class PCGraphConv(torch.nn.Module):
         # Ensure nodes_2_update are expanded to include all batch items
         self.nodes_2_update = self.nodes_2_update_base
 
+
+        
+        if self.delta_w_selection == "all":
+        
+            # self.edges_2_update = torch.ones(self.edge_index.size(1), dtype=torch.bool, device=self.device)
+
+            #         # Convert edge_type to tensor (use integers or map to string if preferred)
+            # edge_type_map = {"Sens2Sens": 0, "Sens2Inter": 1, "Sens2Sup": 2, "Inter2Sens": 3, "Inter2Inter": 4, "Inter2Sup": 5, "Sup2Sens": 6, "Sup2Inter": 7, "Sup2Sup": 8}
+            # self.edge_type = torch.tensor([edge_type_map[etype] for etype in self.edge_type], dtype=torch.long)
+
+            # use size of edge_type
+            self.edges_2_update = torch.ones(self.edge_type.size(0), dtype=torch.bool, device=self.device)
+
+            
+
+
+        if self.delta_w_selection == "internal_only":
+            # we want to have the option to only update the weights from and to the internal nodes
+            # Define edge types involving internal nodes
+            # self.edge_type_map = {"Sens2Sens": 0, "Sens2Inter": 1, "Sens2Sup": 2, "Inter2Sens": 3, "Inter2Inter": 4, "Inter2Sup": 5, "Sup2Sens": 6, "Sup2Inter": 7, "Sup2Sup": 8}
+            edge_types_involving_internal = torch.tensor([1, 3, 4, 5, 7], device=self.device)
+
+            # Create a mask for edges to update
+            # self.edges_2_update = torch.isin(self.edge_type, edge_types_involving_internal).to(self.device)
+            self.edges_2_update = torch.isin(self.edge_type, edge_types_involving_internal.to(self.edge_type.device))
+
+        if self.delta_w_selection == "nodes_2_update":
+            
+            self.edges_2_update = self.nodes_2_update
+
+
+        assert self.edges_2_update.any(), "No edges selected for updating"
         assert self.nodes_2_update, "No nodes selected for updating"
+
+        # wandb. log in delta_w  the shape of edges_2_update and the shape of self.nodes_2_update
+        if self.wandb_logger:
+            # make sure both are not list but tensors or np arrays 
+            copy_edges_2_update = self.edges_2_update.cpu().detach().numpy()
+            
+            # if type list 
+            if isinstance(self.nodes_2_update, list):
+                copy_nodes_2_update = np.array(self.nodes_2_update)
+            else:
+                copy_nodes_2_update = self.nodes_2_update.cpu().detach().numpy
+
+            self.wandb_logger.log({"delta_w/edges_2_update_shape": copy_edges_2_update.shape, 
+                                   "delta_w/nodes_2_update_shape": copy_nodes_2_update.shape,
+                                   "delta_w/edge_type": self.edge_type.shape,
+                                   })
 
         print(f"-------------mode {self.mode}--------------")
         print(f"-------------task {self.task}--------------")
@@ -1284,14 +1334,14 @@ class PCGraphConv(torch.nn.Module):
         errors = self.errors.squeeze().detach() 
         f_x    = self.f(self.values).squeeze().detach()  #* self.mask  # * self.mask
 
-        print(errors.shape, f_x.shape)
+        # print(errors.shape, f_x.shape)
 
         print("Errors / max, mean", errors.max(), errors.mean())
         print("f_x / max, mean", f_x.max(), f_x.mean())
 
         # self.delta_w = self.alpha * torch.einsum('i,j->ij', self.f_x_j_T, self.error_i_T)  * self.mask  # * self.mask
 
-        print(errors.shape, f_x.shape)
+        # print(errors.shape, f_x.shape)
         # this gets the delta_w for all possible edges (even non-existing edge in the graph) (assumes fully connected)
         # self.delta_w = torch.einsum('i,j->ij', errors, f_x )    #.view_as(self.weights)  #* self.mask  # * self.mask
 
@@ -1303,8 +1353,13 @@ class PCGraphConv(torch.nn.Module):
         # print("source_nodes shape", source_nodes.shape)
         # print("errors shape", errors.shape)
         # print("f_x shape", f_x.shape)
+
+        #### TODO IMPORTANT SWITCHED
         source_errors = errors[source_nodes].detach()    # get all e_i's 
         target_fx = f_x[target_nodes].detach()           # get all f_x_j's 
+
+        # source_errors = errors[target_nodes].detach()    # get all e_i's 
+        # target_fx = f_x[source_nodes].detach()           # get all f_x_j's 
 
         # print("TEST WEIGHTS", errors.shape, source_nodes.shape)
         # Calculate delta_w in a vectorized manner
@@ -1334,7 +1389,9 @@ class PCGraphConv(torch.nn.Module):
             parameter=self.weights,
             delta=adjusted_delta_w if self.adjust_delta_w else delta_w,
             learning_rate=self.lr_weights,
-            nodes_2_update="all",               # Update certain nodes values/weights 
+            # nodes_or_edge2_update="all",               # Update certain nodes values/weights 
+            # nodes_or_edge2_update=self.nodes_2_update,  # during training, only update internal nodes
+            nodes_or_edge2_update=self.edges_2_update,
             optimizer=self.optimizer_weights if self.use_optimizers else None,
             use_optimizer=self.use_optimizers, 
         )
@@ -1401,7 +1458,7 @@ class PCGNN(nn.Module):
     def __init__(self, num_vertices, sensory_indices, internal_indices, 
                  lr_params, T, graph_structure, 
                  batch_size, edge_type, 
-                 use_bias, 
+                 delta_w_selection, use_bias, 
                  use_learning_optimizer=False, weight_init="xavier", clamping=None, supervised_learning=False, 
                  normalize_msg=False, 
                  debug=False, activation=None, log_tensorboard=True, wandb_logger=None, device='cpu'):
@@ -1411,7 +1468,7 @@ class PCGNN(nn.Module):
         # INSIDE LAYERS CAN HAVE PREDCODING - intra-layer 
         self.pc_conv1 = PCGraphConv(num_vertices, sensory_indices, internal_indices, 
                                     lr_params, T, graph_structure, 
-                                    batch_size, edge_type, use_bias, use_learning_optimizer, weight_init, clamping, supervised_learning, 
+                                    batch_size, edge_type, delta_w_selection, use_bias, use_learning_optimizer, weight_init, clamping, supervised_learning, 
                                     normalize_msg, 
                                     debug, activation, log_tensorboard, wandb_logger, device)
 

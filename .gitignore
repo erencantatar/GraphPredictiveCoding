@@ -5,8 +5,7 @@ jobs/outputs/*
 jobs/outputs/PC/*
 jobs/outputs/IPC/*
 jobs/outputs/PC/slurm_output_7878391_simple.out
-
-jobs/example.job
+jobs/*.job
 
 
 
@@ -48,3 +47,6 @@ jobs/example.job
 notebooks/training.ipynb
 notebooks/training.ipynb
 jobs/best_model_s2s_s2l_impact.job
+jobs/PC_uniform.job
+jobs/Exp2_uniform.job
+jobs/Exp2_uniform.job

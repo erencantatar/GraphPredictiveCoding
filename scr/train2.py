@@ -83,6 +83,7 @@ parser.add_argument('--lr_values', type=float, default=0.001, help='Learning rat
 parser.add_argument('--lr_weights', type=float, default=0.01, help='Learning rate weights (gamma).')
 parser.add_argument('--activation_func', default="swish", type=str, choices=list(activation_functions.keys()), required=True, help='Choose an activation function: tanh, relu, leaky_relu, linear, sigmoid, hard_tanh, swish')
 
+parser.add_argument('--delta_w_selection', type=str, required=True, choices=["all", "internal_only"], help="Which weights to optimize in delta_w")
 
 # -----training----- 
 parser.add_argument('--epochs', type=int, default=5, help='Number of epochs to train.')
@@ -282,6 +283,13 @@ train_loader = DataLoader(custom_dataset_train,
                           pin_memory=True,
                           )
 
+train_loader_1_batch = DataLoader(custom_dataset_train,
+                                    batch_size=1,
+                                    shuffle=True,
+                                    generator=generator_seed,
+                                    num_workers=1,
+                                    pin_memory=True,
+                                    )
 
 NUM_SENSORY = 28*28  # 10
 
@@ -398,6 +406,8 @@ model_params = {
     'sensory_indices': (sensory_indices), 
     'internal_indices': (internal_indices), 
     "supervised_learning": (supervision_indices),
+    "delta_w_selection": args.delta_w_selection,  # "all" or "internal_only"
+
     "use_bias": args.use_bias,
 
     "normalize_msg": args.normalize_msg,
@@ -415,6 +425,7 @@ model_params = {
     "weight_init": args.weight_init,   # xavier, 'uniform', 'based_on_f', 'zero', 'kaiming'
     "activation": args.activation_func,  
     "clamping": None , # (0, torch.inf) or 'None' 
+
  }
 
 # 
@@ -642,7 +653,7 @@ wandb.watch(model,
 from helper.plot import plot_model_weights, plot_energy_graphs
 
 
-save_path = os.path.join(model_dir, 'parameter_info/weight_matrix_visualization_before_training.png')
+save_path = os.path.join(model_dir, 'parameter_info/weight_matrix_visualization_beforeTraining.png')
 # plot_model_weights(model, save_path)
 plot_model_weights(model, GRAPH_TYPE, model_dir=save_path, save_wandb=True)
 
@@ -709,13 +720,13 @@ import os
 import logging
 
 from helper.log import write_eval_log
+from helper.plot import plot_graph_with_edge_types, plot_updated_edges
 
 
 #  try except block for training
-plot_edge_types = False 
+plot_edge_types = False
 if args.mode == "training" and plot_edge_types:
     try:
-        from helper.plot import plot_graph_with_edge_types 
         N = custom_dataset_train.num_vertices
         edge_index = custom_dataset_train.edge_index
         edge_types = custom_dataset_train.edge_type
@@ -732,12 +743,32 @@ if args.mode == "training" and plot_edge_types:
         print("Could not plot graph with edge types")
         print(e)
 
+        # log error to wandb
+        wandb.log({"edge_type_plot_error": str(e)})
+
+
 
 ######################################################################################################### 
 ####                                              Model  (training)                                 #####
 ######################################################################################################### 
-
 model.pc_conv1.set_mode("training")
+
+
+# plot updated edges.
+try:
+    N = model.pc_conv1.num_vertices  # Number of nodes
+    edge_index = model.pc_conv1.edge_index_single_graph
+    edges_2_update = model.pc_conv1.edges_2_update
+    # Plot and save
+    plot_updated_edges(N, edge_index, edges_2_update, args.delta_w_selection, model_dir="plots", show=True, sample_size=15000)
+except Exception as e:
+    print("Could not plot updated edges")
+    print(e)
+
+    # log error to wandb
+    wandb.log({"updated_edges_plot_error": str(e)})
+
+
 import time 
 torch.cuda.empty_cache()
 
@@ -901,22 +932,54 @@ for epoch in range(args.epochs):
         "model_dir": model_dir,
         "T":100,
         "supervised_learning":False, 
-        "num_samples": 12,
+        # "num_samples": 3*len(custom_dataset_test.numbers_list),
         "num_wandb_img_log": num_wandb_img_log,
     }
+    if "num_samples" not in test_params:
+        test_params["num_samples"] = 3 * len(custom_dataset_test.numbers_list)
 
     if accuracy_mean > 0.8:  # Adjust the threshold as needed
-        test_params["num_samples"] = 24  # Increase samples if accuracy is high
-    elif accuracy_mean > 0.6:
-        test_params["num_samples"] = 18  # Moderate increase for mid-range accuracy
+        test_params["num_samples"] = 5 * len(custom_dataset_test.numbers_list)  # Increase samples if accuracy is high
+    elif accuracy_mean == 1:
+        test_params["num_samples"] = 100  # Moderate increase for mid-range accuracy
         
-    y_true, y_pred, accuracy_mean = classification(test_loader, model, test_params)
+    elif accuracy_mean > 0.6:
+        test_params["num_samples"] = 4 * len(custom_dataset_test.numbers_list)  # Moderate increase for mid-range accuracy
+        
+    if accuracy_mean < 0.2 and epoch >= 10:  # Adjust the threshold as needed
+        earlystop = True
+        break
+
+    y_true, y_pred, accuracy_mean = classification(train_loader_1_batch, model, test_params)
     # Log accuracy_mean grouped under classification
     wandb.log({
         "epoch": epoch,
-        "classification/accuracy_mean": accuracy_mean
+        "classification/accuracy_mean": accuracy_mean,
+        "classification/size":  len(y_true),
     })
-    if accuracy_mean > 0.9:
+    
+    if accuracy_mean > 0.85:
+        wandb.log({
+        "epoch": epoch,
+        "classification/y_true": y_true,
+        "classification/y_pred": y_pred,
+        })
+  
+        print("Reducing learning rate for weights since accuracy is high")
+        model.pc_conv1.lr_weights = model.pc_conv1.lr_weights / 2
+        model.pc_conv1.lr_values = model.pc_conv1.lr_values / 2
+
+
+        # if model.pc_conv1.optimizer_weights is not None:
+        #     for param_group in model.pc_conv1.optimizer_weights.param_groups:
+        #         param_group['lr'] = model.pc_conv1.lr_weights
+        #     for param_group in model.pc_conv1.optimizer_values.param_groups:
+        #         param_group['lr'] = model.pc_conv1.lr_values
+
+        
+    if accuracy_mean == 1:
+        print("Accuracy is 1")
+        
         wandb.log({
             "epoch": epoch,
             "classification/y_true": y_true,
@@ -924,9 +987,21 @@ for epoch in range(args.epochs):
             "classification/size":  len(y_true),
         })
 
-        print("Reducing learning rate for weights since accuracy is high")
-        model.pc_conv1.lr_weights = model.pc_conv1.lr_weights / 2
-    
+        test_params["num_samples"] = 100  # Moderate increase for mid-range accuracy
+        y_true, y_pred, accuracy_mean = classification(train_loader_1_batch, model, test_params)
+
+        wandb.log({
+            "epoch": epoch,
+            "classification/y_true": y_true,
+            "classification/y_pred": y_pred,
+            "classification/size":  len(y_true),
+            "classification/accuracy_mean": accuracy_mean,
+        })
+        
+        print("Accuracy is 1, stopping training")
+        earlystop = True
+        break 
+
     test_params = {
         "model_dir": model_dir,
         "T": 100,
@@ -934,7 +1009,7 @@ for epoch in range(args.epochs):
         "num_samples": 5,
         "num_wandb_img_log": 1,
     }
-    avg_SSIM_mean, avg_SSIM_max, avg_MSE_mean, avg_MSE_max = generation(test_loader, model, test_params, clean_images, verbose=0)
+    avg_SSIM_mean, avg_SSIM_max, avg_MSE_mean, avg_MSE_max = generation(train_loader_1_batch, model, test_params, clean_images, verbose=0)
     
     # Log SSIM and MSE metrics grouped under generation
     wandb.log({
@@ -948,10 +1023,10 @@ for epoch in range(args.epochs):
 
     if epoch % 5 == 0 and epoch >= 2 and avg_SSIM_mean >= 0.1:
 
-        plot_digits_vertically(test_loader, model, test_params, custom_dataset_test.numbers_list)
+        plot_digits_vertically(train_loader_1_batch, model, test_params, custom_dataset_test.numbers_list)
 
         # plot_digits_vertically(test_loader, model=model, test_params, numbers_list=custom_dataset_test.numbers_list)
-        progressive_digit_generation(test_loader, model, test_params, custom_dataset_test.numbers_list)
+        progressive_digit_generation(train_loader_1_batch, model, test_params, custom_dataset_test.numbers_list)
 
     # change the LR for the weights after 10 epochs
 
@@ -972,22 +1047,33 @@ for epoch in range(args.epochs):
         "LR/lr_weights": model.pc_conv1.lr_weights
         })
 
-    if epoch == 10:
-        print("Reducing learning rate for weights")
-        model.pc_conv1.lr_weights = model.pc_conv1.lr_weights / 2
+    # if epoch == 10:
+    #     print("Reducing learning rate for weights")
+    #     model.pc_conv1.lr_weights = model.pc_conv1.lr_weights / 2
+
+    # only if accuracy_mean is lower than 0.5 
+    if accuracy_mean < 0.5 and epoch >= 15:
+
+        # break training
+        print("Accuracy is below 0.5, stopping training and exit")
+        earlystop = True
+        break
+
+        
+
 
     # only if accuracy_mean is above 0.5 
-    if accuracy_mean > 0.5:
+    if accuracy_mean > 0.8 and epoch % 5 == 0:
 
         test_params = {
             "model_dir": model_dir,
             "T": 140,
             "supervised_learning":True, 
-            "num_samples": 4,
+            "num_samples": 5,
             "add_sens_noise": False,
-            "num_wandb_img_log": 3,
+            "num_wandb_img_log": 4,
         }
-        MSE_values_occ = occlusion(test_loader, model, test_params)
+        MSE_values_occ = occlusion(train_loader_1_batch, model, test_params)
         wandb.log({
             "Training/epoch": epoch,
             "occlusion_sup/MSE_values_occ": MSE_values_occ,
@@ -1002,7 +1088,7 @@ for epoch in range(args.epochs):
             "add_sens_noise": False,
             "num_wandb_img_log": 3,
         }
-        MSE_values_occ = occlusion(test_loader, model, test_params)
+        MSE_values_occ = occlusion(train_loader_1_batch, model, test_params)
         wandb.log({
             "Training/epoch": epoch,
             "occlusion/MSE_values_occ": MSE_values_occ,
@@ -1043,6 +1129,33 @@ end_time = time.time()
 print(f"Training completed in {end_time - start_time:.2f} seconds for {args.epochs} epochs")
 
 ############ TRAINING DONE ####################
+
+
+
+#########################################################################################################
+####                                            Evaluation (test dataset)                           #####
+
+# Adjust num_samples based on accuracy
+test_params = {
+    "model_dir": model_dir,
+    "T":100,
+    "supervised_learning":False, 
+    "num_samples": 100,
+    "num_wandb_img_log": 4,
+}
+
+y_true, y_pred, accuracy_mean = classification(test_loader, model, test_params)
+
+wandb.log({
+    "epoch": epoch,
+    "classification_test/y_true": y_true,
+    "classification_test/y_pred": y_pred,
+    "classification_test/size":  len(y_true),
+    "classification_test/accuracy_mean": accuracy_mean,
+})
+
+
+#########################################################################################################
 
 save_path = os.path.join(model_dir, 'parameter_info/weight_matrix_visualization_epoch_End.png')
 plot_model_weights(model, GRAPH_TYPE, model_dir=save_path, save_wandb=True)

@@ -149,7 +149,7 @@ def occlusion(test_loader, model, test_params, verbose=0):
     for idx, (noisy_batch, clean_image) in enumerate(test_loader, start=1):
 
         # noisy_batch, clean_image = noisy_batch[0], clean_image[0]
-        print(noisy_batch.y)
+        # print(noisy_batch.y)
 
         # Perform inference to denoise
         noisy_batch = noisy_batch.to(model.pc_conv1.device)
@@ -198,7 +198,7 @@ def occlusion(test_loader, model, test_params, verbose=0):
 
         values, predictions, labels = model.query(method="pass", data=noisy_batch)  # query_by_conditioning
         # values, predictions = values[batch_idx, :, 0], predictions[batch_idx, :, 0]
-        print("CHECK", noisy_batch.x[:,0][-10:])
+        # print("CHECK", noisy_batch.x[:,0][-10:])
         
         denoised_output = predictions[0:784].view(28,28).cpu().detach().numpy()
 

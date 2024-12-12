@@ -165,6 +165,8 @@ class GraphBuilder:
             self.dir += "_normal"  # If neither are removed, label the folder as 'normal'
                 
         self.edge_type = []  # Store edge types
+        self.edge_type_map = {"Sens2Sens": 0, "Sens2Inter": 1, "Sens2Sup": 2, "Inter2Sens": 3, "Inter2Inter": 4, "Inter2Sup": 5, "Sup2Sens": 6, "Sup2Inter": 7, "Sup2Sup": 8}
+
 
         if self.create_new_graph:
             self.graph = self.create_graph()
@@ -217,7 +219,8 @@ class GraphBuilder:
         elif self.graph_type["name"] == "barabasi":
             self.barabasi()
         elif self.graph_type["name"] == "stochastic_block":
-            self.stochastic_block()
+            self.stochastic_block(no_sens2sens=self.graph_params["remove_sens_2_sens"], 
+                                 no_sens2supervised=self.graph_params["remove_sens_2_sup"])
 
         elif self.graph_type["name"] == "stochastic_block_hierarchy":
             self.stoic_block_hierarchy( 
@@ -243,9 +246,8 @@ class GraphBuilder:
         self.edge_index = torch.tensor(self.edge_index, dtype=torch.long).t().contiguous()
 
         # Convert edge_type to tensor (use integers or map to string if preferred)
-        edge_type_map = {"Sens2Sens": 0, "Sens2Inter": 1, "Sens2Sup": 2, "Inter2Sens": 3, "Inter2Inter": 4, "Inter2Sup": 5, "Sup2Sens": 6, "Sup2Inter": 7, "Sup2Sup": 8}
-        self.edge_type = torch.tensor([edge_type_map[etype] for etype in self.edge_type], dtype=torch.long)
 
+        self.edge_type = torch.tensor([self.edge_type_map[etype] for etype in self.edge_type], dtype=torch.long)
 
         # Convert edge_index to tensor only if it's not already a tensor
         if not isinstance(self.edge_index, torch.Tensor):
@@ -541,7 +543,10 @@ class GraphBuilder:
         print(f"Creating Barabási-Albert graph with {num_nodes} nodes and {m} edges to attach per new node")
 
     
-    def stochastic_block(self):
+    def stochastic_block(self, no_sens2sens, no_sens2supervised):
+
+# no_sens2sens=self.graph_params["remove_sens_2_sens"], 
+#                                  no_sens2supervised=self.graph_params["remove_sens_2_sup"])
 
         # Given code parameters; else take default 40, 50
         num_communities = self.graph_params.get("num_communities", 40)  # Example block sizes
@@ -573,7 +578,8 @@ class GraphBuilder:
         np.fill_diagonal(p, p_intra)
 
         # removing sensory to sensory connection
-        if self.graph_params.get("remove_sens_2_sens", True):
+        # if self.graph_params.get("remove_sens_2_sens", True):
+        if no_sens2sens:
             p[0, 0] = 0
         
         # adding connections from community to community  
@@ -581,7 +587,8 @@ class GraphBuilder:
             p[0, i] = 0.1
             p[i, 0] = 0.1
 
-        if self.graph_params.get("remove_sens_2_sup", True):
+        # if self.graph_params.get("remove_sens_2_sup", True):
+        if no_sens2supervised:
             # remove sensory to supervised
             p[0, -1] = 0 
             p[-1, 0] = 0 
@@ -608,6 +615,38 @@ class GraphBuilder:
         # Extract the edge_index tensor
         self.edge_index = data.edge_index
 
+        # Initialize edge containers
+        self.edge_index = []
+        self.edge_type = []
+
+        # Assign edge types
+        for u, v in G.edges():
+            src_block = G.nodes[u]['block']
+            dest_block = G.nodes[v]['block']
+
+            if src_block == 0 and dest_block == 0:
+                etype = "Sens2Sens"
+            elif src_block == 0 and 1 <= dest_block <= num_communities - 2:
+                etype = "Sens2Inter"
+            elif src_block == 0 and dest_block == num_communities - 1:
+                etype = "Sens2Sup"
+            elif 1 <= src_block <= num_communities - 2 and dest_block == 0:
+                etype = "Inter2Sens"
+            elif 1 <= src_block <= num_communities - 2 and dest_block == num_communities - 1:
+                etype = "Inter2Sup"
+            elif src_block == num_communities - 1 and dest_block == 0:
+                etype = "Sup2Sens"
+            elif src_block == num_communities - 1 and 1 <= dest_block <= num_communities - 2:
+                etype = "Sup2Inter"
+            elif src_block == num_communities - 1 and dest_block == num_communities - 1:
+                etype = "Sup2Sup"
+            else:
+                etype = "Inter2Inter"
+
+            self.edge_index.append([u, v])
+            # self.edge_type.append(self.edge_type_map[etype])
+            self.edge_type.append(etype)
+            
         print("done creating Stochastic Block Model graph")
 
 

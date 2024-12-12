@@ -395,3 +395,87 @@ def plot_graph_with_edge_types(N, edge_index, edge_types, edge_type_map):
     # close the figure
     plt.close(fig)
     
+
+import matplotlib.pyplot as plt
+import numpy as np
+import torch
+from torch_geometric.utils import to_dense_adj
+import wandb
+
+def plot_updated_edges(N, edge_index, edges_2_update, delta_w_selection, model_dir=None, show=True, sample_size=1000):
+    """
+    Plot a subset of the graph's adjacency matrix with updated edges highlighted.
+    
+    Parameters:
+    - N: Number of nodes in the graph.
+    - edge_index: Tensor of shape (2, num_edges), edge connections.
+    - edges_2_update: Boolean mask indicating which edges are being updated.
+    - model_dir: Directory to save the plot (optional).
+    - show: Whether to display the plot (default: True).
+    - sample_size: Number of edges to sample for plotting to improve performance.
+    """
+    print("------plot_updated_edges-----")
+    
+    num_edges = edge_index.size(1)
+    
+    # Sample edges if the graph is too large
+    if num_edges > sample_size:
+        sampled_indices = torch.randperm(num_edges)[:sample_size]
+        edge_index_sampled = edge_index[:, sampled_indices]
+        edges_2_update_sampled = edges_2_update[sampled_indices]
+    else:
+        edge_index_sampled = edge_index
+        edges_2_update_sampled = edges_2_update
+    
+    # Convert sampled edges to numpy
+    edge_index_np = edge_index_sampled.cpu().numpy()
+    edges_2_update_np = edges_2_update_sampled.cpu().numpy()
+    
+    # Create adjacency matrix for sampled edges
+    adj_matrix = np.zeros((N, N), dtype=np.float32)
+    src, tgt = edge_index_np
+    adj_matrix[src, tgt] = 1.0
+    
+    # Identify updated edges
+    updated_src = src[edges_2_update_np]
+    updated_tgt = tgt[edges_2_update_np]
+    
+    # Plot the adjacency matrix
+    fig, ax = plt.subplots(figsize=(12, 12))
+    ax.imshow(adj_matrix, cmap="Greys", origin="upper", alpha=0.3)
+
+    # add delta_w_selection to title
+    ax.set_title(f"Graph Adjacency Matrix with Updated Edges Highlighted\nDelta W Selection: {delta_w_selection}", fontsize=16)
+    ax.set_xlabel("Target Node")
+    ax.set_ylabel("Source Node")
+    
+    # Overlay the updated edges in red using vectorized plotting
+    if len(updated_src) > 0:
+        ax.scatter(updated_tgt, updated_src, color="red", s=10, label="Updated Edge")
+    
+    # Adjust axis limits
+    ax.set_xlim(-0.5, N - 0.5)
+    ax.set_ylim(N - 0.5, -0.5)
+    
+    # Add legend if there are updated edges
+    if len(updated_src) > 0:
+        ax.legend(loc="upper right")
+    
+    
+    plt.tight_layout()
+    
+    # Log to WandB
+    if wandb.run and model_dir:
+        wandb.log({"delta_w/Graph_with_Updated_Edges": [wandb.Image(fig)]})
+    
+    # # Save the figure
+    # if model_dir:
+    #     save_path = f"{model_dir}/updated_edges_plot.png"
+    #     plt.savefig(save_path, dpi=300)
+    #     print(f"Figure saved to {save_path}")
+    
+    # # Show or close the figure
+    # if show:
+    #     plt.show()
+    # else:
+    #     plt.close(fig)
