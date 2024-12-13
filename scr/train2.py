@@ -958,16 +958,6 @@ for epoch in range(args.epochs):
         "classification/size":  len(y_true),
     })
     
-    if accuracy_mean > 0.85:
-        wandb.log({
-        "epoch": epoch,
-        "classification/y_true": y_true,
-        "classification/y_pred": y_pred,
-        })
-  
-        print("Reducing learning rate for weights since accuracy is high")
-        model.pc_conv1.lr_weights = model.pc_conv1.lr_weights / 2
-        model.pc_conv1.lr_values = model.pc_conv1.lr_values / 2
 
 
         # if model.pc_conv1.optimizer_weights is not None:
@@ -977,7 +967,7 @@ for epoch in range(args.epochs):
         #         param_group['lr'] = model.pc_conv1.lr_values
 
         
-    if accuracy_mean == 1:
+    if accuracy_mean >= 0.9:
         print("Accuracy is 1")
         
         wandb.log({
@@ -1001,6 +991,18 @@ for epoch in range(args.epochs):
         print("Accuracy is 1, stopping training")
         earlystop = True
         break 
+
+    # if accuracy_mean > 0.85:
+    #     wandb.log({
+    #     "epoch": epoch,
+    #     "classification/y_true": y_true,
+    #     "classification/y_pred": y_pred,
+    #     })
+  
+    #     print("Reducing learning rate for weights since accuracy is high")
+    #     model.pc_conv1.lr_weights = model.pc_conv1.lr_weights / 2
+    #     model.pc_conv1.lr_values = model.pc_conv1.lr_values / 2
+
 
     test_params = {
         "model_dir": model_dir,

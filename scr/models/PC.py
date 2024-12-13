@@ -146,7 +146,7 @@ class PCGraphConv(torch.nn.Module):
         # https://pytorch.org/docs/stable/generated/torch.nn.Linear.html
 
         # USING BATCH SIZE, we want the same edge weights at each subgraph of the batch
-        self.weights = torch.nn.Parameter(torch.zeros(self.edge_index_single_graph.size(1), device=self.device))
+        self.weights = torch.nn.Parameter(torch.zeros(self.edge_index_single_graph.size(1), device=self.device, requires_grad=True))
         # init.uniform_(self.weights.data, -k, k)
         
         if self.use_bias:
@@ -189,7 +189,7 @@ class PCGraphConv(torch.nn.Module):
             #     value = float(bias_params[0]) if bias_params else 0.0
             #     self.biases.data.fill_(value)
 
-        self.w_t_min_1 = self.weights.clone().detach()
+        # self.w_t_min_1 = self.weights.clone()
 
         # https://chatgpt.com/c/0f9c0802-c81b-40df-8870-3cea4d2fc9b7
 
@@ -550,7 +550,8 @@ class PCGraphConv(torch.nn.Module):
             node_values (torch.Tensor): The node values from the graph's node features.
         """
 
-        self.values_dummy.data = node_values.view(-1).detach().clone()  # Copy node values into dummy parameter
+        # self.values_dummy.data = node_values.view(-1).detach().clone()  # Copy node values into dummy parameter
+        self.values_dummy.data = node_values.view(-1).clone()  # Copy node values into dummy parameter
         
     def copy_dummy_to_node_values(self):
         """
@@ -558,10 +559,12 @@ class PCGraphConv(torch.nn.Module):
         Args:
             node_values (torch.Tensor): The node values to be updated in the graph's node features.
         """
-        self.data.x[self.nodes_2_update, 0] = self.values_dummy.data[self.nodes_2_update].unsqueeze(-1).detach()  # Detach to avoid retaining the computation graph
+        # self.data.x[self.nodes_2_update, 0] = self.values_dummy.data[self.nodes_2_update].unsqueeze(-1).detach()  # Detach to avoid retaining the computation graph
+        self.data.x[self.nodes_2_update, 0] = self.values_dummy.data[self.nodes_2_update].unsqueeze(-1)  # Detach to avoid retaining the computation graph
         # node_values.data = self.values_dummy.view(node_values.shape).detach()  
 
-    def gradient_descent_update(self, grad_type, parameter, delta, learning_rate, nodes_or_edge2_update, optimizer=None, use_optimizer=False):
+    def gradient_descent_update(self, grad_type, parameter, delta, learning_rate, nodes_or_edge2_update, 
+                                error=None, optimizer=None, use_optimizer=False):
         """
         Perform a gradient descent update on a parameter (weights or values).
 
@@ -584,6 +587,11 @@ class PCGraphConv(torch.nn.Module):
             Grokfast-MA (with window size = 100, lamb = 5.0) achieved slower generalization improvement compared to EMA, but was still faster than the baseline. 
         """
 
+        if not parameter.requires_grad:
+            parameter.requires_grad = True
+
+        parameter.requires_grad_(True)
+
         # Optionally adjust gradients based on grokfast 
         # In Grokfast, the goal is to amplify the slow gradient component stored in self.grads[grad_type].
         # After calculating the current gradient delta (based on the error or loss function), Grokfast adds a weighted version of this slow gradient component to delta:
@@ -603,12 +611,37 @@ class PCGraphConv(torch.nn.Module):
             else:
                 parameter.grad.zero_()  # Reset the gradients to zero
 
-            # set the gradients
-            if nodes_or_edge2_update == "all":
+
+
+            # print("use_optimizer and optimizer")
+            # print("error", error)
+            # print("parameter", parameter)
+
+            # print("error grad", error.grad)
+            # print("parameter grad", parameter.grad)
+
+            # Set gradients for relevant indices
+            ## --------- New ----------- 
+            # if self.delta_w_selection == "all":
+
+            #     error = error.mean() if self.grad_accum_method == "mean" else error.mean()
+            #     error.backward(retain_graph=False)
+            # else:
+            #     # Manually set gradients only for specified nodes
+            #     # take grad E w.r.t. parameter (weights or values)
+            #     temp_grad = torch.autograd.grad(error, parameter, retain_graph=True, allow_unused=True)[0]
+
+            #     if temp_grad is None:
+            #         raise RuntimeError(f"{grad_type} parameter has no gradient.")
+            #     # parameter.grad[nodes_or_edge2_update] = temp_grad[nodes_or_edge2_update].detach().clone()
+            #     parameter.grad[nodes_or_edge2_update] = temp_grad[nodes_or_edge2_update]
+                
+            ### ---------- OLD ---------- set the gradients
+            if self.delta_w_selection == "all":
                 parameter.grad = delta.detach().clone()  # Apply full delta to the parameter
             else:
                 parameter.grad[nodes_or_edge2_update] = delta[nodes_or_edge2_update].detach().clone()  # Update only specific nodes
-          
+        
             # perform optimizer weight update step
             optimizer.step()
         else:
@@ -647,7 +680,7 @@ class PCGraphConv(torch.nn.Module):
         with torch.no_grad():
 
             delta_x = self.values_mp(self.data.x.to(self.device), self.data.edge_index.to(self.device), weights_batched_graph, norm=self.norm.to(self.device)).squeeze()
-            delta_x = delta_x.detach()
+            # delta_x = delta_x.detach()
 
         # self.log_activations(delta_x, self.edge_type)
         # self.log_activations(self.data.x[:, 0], self.edge_type)
@@ -662,6 +695,8 @@ class PCGraphConv(torch.nn.Module):
             delta=delta_x,
             learning_rate=self.lr_values,
             nodes_or_edge2_update=self.nodes_2_update,  # Mandatory
+
+            error=self.errors if self.optimizer_values else None,
             optimizer=self.optimizer_values if self.use_optimizers else None,
             use_optimizer=self.use_optimizers
         )
@@ -741,7 +776,7 @@ class PCGraphConv(torch.nn.Module):
             self.predictions = self.prediction_mp(self.data.x.to(self.device), self.data.edge_index.to(self.device), weights_batched_graph, norm=self.norm.to(self.device))
             # self.predictions = self.prediction_mp(self.data.x.to(self.device), self.data.edge_index.to(self.device), self.weights)
 
-            self.predictions = self.predictions.detach()
+            # self.predictions = self.predictions.detach()
 
             if self.use_bias:
                 # print(self.predictions.shape)
@@ -776,14 +811,30 @@ class PCGraphConv(torch.nn.Module):
 
 
         self.predictions = self.get_predictions(self.data)
-        self.data.x[:, 2] = self.predictions.detach()
+        # self.data.x[:, 2] = self.predictions.detach()
+        self.data.x[:, 2] = self.predictions
         
         # print("predictions shape", self.predictions.shape)
 
         # self.errors = (self.values.to(self.device) - self.predictions.to(self.device)).squeeze(-1) 
-        self.errors = (self.values.to(self.device) - self.predictions.to(self.device)).detach()  # Detach to avoid retaining the computation graph
+        # self.errors = (self.values.to(self.device) - self.predictions.to(self.device)).detach()  # Detach to avoid retaining the computation graph
+        # self.errors = (self.values.to(self.device) - self.predictions.to(self.device))  # USED FOR loss.backward()
+        calculated_error = (self.values.to(self.device) - self.predictions.to(self.device))  # USED FOR loss.backward()
         
+
+        self.errors.data = calculated_error.detach().clone()
+
+
+
+        print(f"Values requires_grad: {self.values.requires_grad}")
+        print(f"Predictions requires_grad: {self.predictions.requires_grad}")
+
+
         self.errors = self.errors.squeeze()
+        
+        # TODO IMPORTANT TESTING
+        # self.errors = (self.errors ** 2) / 2
+
         # manually add error
         # print(self.errors.shape)
         # self.errors[self.sensory_indices] += 1
@@ -792,7 +843,7 @@ class PCGraphConv(torch.nn.Module):
         # self.errors[self.internal_indices] += 0.1
         # print("!!!!!!!!!!!!!!!!!!!!!!!! IMPORTANT")        
         
-        self.data.x[:, 1] = self.errors.unsqueeze(-1).detach()
+        self.data.x[:, 1] = self.errors.unsqueeze(-1)
         # data.x[self.nodes_2_update, 1] = errors[self.nodes_2_update, :]
 
        
@@ -861,9 +912,10 @@ class PCGraphConv(torch.nn.Module):
 
         # Initialize tensors to zeros without creating new variables where not needed
         with torch.no_grad():
-            self.values = torch.zeros(self.data.size(0), device=self.device) if self.values is None else self.values.zero_()
-            self.errors = torch.zeros(self.data.size(0), device=self.device) if self.errors is None else self.errors.zero_()
-            self.predictions = torch.zeros(self.data.size(0), device=self.device) if self.predictions is None else self.predictions.zero_()
+            # self.values = torch.zeros(self.data.size(0), device=self.device) if self.values is None else self.values.zero_()
+            # self.errors = torch.zeros(self.data.size(0), device=self.device) if self.errors is None else self.errors.zero_()
+            # self.predictions = torch.zeros(self.data.size(0), device=self.device) if self.predictions is None else self.predictions.zero_()
+
 
             # Use in-place operation for values_dummy to reduce memory overhead
             self.values_dummy.data.zero_()  # Zero out values_dummy without creating a new tensor
@@ -1065,11 +1117,7 @@ class PCGraphConv(torch.nn.Module):
 
             # use size of edge_type
             self.edges_2_update = torch.ones(self.edge_type.size(0), dtype=torch.bool, device=self.device)
-
-            
-
-
-        if self.delta_w_selection == "internal_only":
+        elif self.delta_w_selection == "internal_only":
             # we want to have the option to only update the weights from and to the internal nodes
             # Define edge types involving internal nodes
             # self.edge_type_map = {"Sens2Sens": 0, "Sens2Inter": 1, "Sens2Sup": 2, "Inter2Sens": 3, "Inter2Inter": 4, "Inter2Sup": 5, "Sup2Sens": 6, "Sup2Inter": 7, "Sup2Sup": 8}
@@ -1078,9 +1126,8 @@ class PCGraphConv(torch.nn.Module):
             # Create a mask for edges to update
             # self.edges_2_update = torch.isin(self.edge_type, edge_types_involving_internal).to(self.device)
             self.edges_2_update = torch.isin(self.edge_type, edge_types_involving_internal.to(self.edge_type.device))
-
-        if self.delta_w_selection == "nodes_2_update":
-            
+        # if self.delta_w_selection == "nodes_2_update":
+        else:
             self.edges_2_update = self.nodes_2_update
 
 
@@ -1331,8 +1378,12 @@ class PCGraphConv(torch.nn.Module):
         self.get_graph()                
         # self.values, self.errors, self.predictions, = self.data.x[:, 0], self.data.x[:, 1], self.data.x[:, 2]
         
-        errors = self.errors.squeeze().detach() 
-        f_x    = self.f(self.values).squeeze().detach()  #* self.mask  # * self.mask
+        # errors = self.errors.squeeze().detach() 
+        # f_x    = self.f(self.values).squeeze().detach()  #* self.mask  # * self.mask
+
+
+        errors = self.errors.squeeze() 
+        f_x    = self.f(self.values).squeeze()  #* self.mask  # * self.mask
 
         # print(errors.shape, f_x.shape)
 
@@ -1355,24 +1406,36 @@ class PCGraphConv(torch.nn.Module):
         # print("f_x shape", f_x.shape)
 
         #### TODO IMPORTANT SWITCHED
-        source_errors = errors[source_nodes].detach()    # get all e_i's 
-        target_fx = f_x[target_nodes].detach()           # get all f_x_j's 
+        # source_errors = errors[source_nodes].detach()    # get all e_i's 
+        # target_fx = f_x[target_nodes].detach()           # get all f_x_j's 
+
+        # source_errors = errors[source_nodes]    # get all e_i's 
+        # target_fx = f_x[target_nodes]           # get all f_x_j's 
+        # delta_w_batch = source_errors * target_fx
+
+        source_fx   = f_x[source_nodes]       # f(x_i)
+        target_errors = errors[target_nodes]  # (x_j - mu_j)
+
+        delta_w_batch = target_errors * source_fx
+
 
         # source_errors = errors[target_nodes].detach()    # get all e_i's 
         # target_fx = f_x[source_nodes].detach()           # get all f_x_j's 
 
-        # print("TEST WEIGHTS", errors.shape, source_nodes.shape)
-        # Calculate delta_w in a vectorized manner
-        delta_w_batch = source_errors * target_fx
+  
         # print("TEST delta_w_batch", delta_w_batch.shape)
 
-        delta_w = delta_w_batch.reshape(self.batchsize, self.edge_index_single_graph.size(1)) 
+        delta_w = delta_w_batch.view(self.batchsize, -1)
+        # delta_w = delta_w_batch.reshape(self.batchsize, self.edge_index_single_graph.size(1)) 
+
         # print("self.delta_w shape", delta_w.shape)
 
         if self.grad_accum_method == "sum":
-            delta_w = delta_w.sum(0).detach()
+            # delta_w = delta_w.sum(0).detach()
+            delta_w = delta_w.sum(0)
         if self.grad_accum_method == "mean":
-            delta_w = delta_w.mean(0).detach()
+            # delta_w = delta_w.mean(0).detach()
+            delta_w = delta_w.mean(0)
         
         # print("self.delta_w shape", delta_w.shape)
 
@@ -1382,15 +1445,16 @@ class PCGraphConv(torch.nn.Module):
         if self.adjust_delta_w:
             adjusted_delta_w = delta_w * self.lr_by_edtype
 
-        self.gradients_log = delta_w.detach()
+        # self.gradients_log = delta_w.detach()
+        self.gradients_log = delta_w
 
         self.gradient_descent_update(
             grad_type="weights",
             parameter=self.weights,
             delta=adjusted_delta_w if self.adjust_delta_w else delta_w,
             learning_rate=self.lr_weights,
-            # nodes_or_edge2_update="all",               # Update certain nodes values/weights 
-            # nodes_or_edge2_update=self.nodes_2_update,  # during training, only update internal nodes
+      
+            error= self.errors if self.optimizer_values else None,
             nodes_or_edge2_update=self.edges_2_update,
             optimizer=self.optimizer_weights if self.use_optimizers else None,
             use_optimizer=self.use_optimizers, 

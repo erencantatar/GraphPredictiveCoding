@@ -30,6 +30,15 @@ graph_type_options = {
                 # "remove_sens_2_sup": False, 
             }
         }, 
+
+        "single_hidden_layer": {
+            "params": {
+                # "remove_sens_2_sens": True, 
+                # "remove_sens_2_sup": False, 
+            }
+        }, 
+
+
         
         "stochastic_block_hierarchy": {
             "params": {
@@ -216,6 +225,12 @@ class GraphBuilder:
             self.fully_connected(self_connection=True,
                                  no_sens2sens=self.graph_params["remove_sens_2_sens"], 
                                  no_sens2supervised=self.graph_params["remove_sens_2_sup"])
+            
+        elif self.graph_type["name"] == "single_hidden_layer":
+            self.single_hidden_layer(
+                                    no_sens2sens=self.graph_params["remove_sens_2_sens"], 
+                                    no_sens2supervised=self.graph_params["remove_sens_2_sup"])
+        
         elif self.graph_type["name"] == "barabasi":
             self.barabasi()
         elif self.graph_type["name"] == "stochastic_block":
@@ -304,6 +319,84 @@ class GraphBuilder:
             random.seed(seed)  # Seed for random module (if used)
         else:
             print("No seed provided. Using default behavior.")
+
+
+    def single_hidden_layer(self, no_sens2sens=False, no_sens2supervised=False, bidirectional_hidden=True):
+        """Creates a graph with a single hidden layer divided into two segments."""
+        self.edge_index = []
+        self.edge_type = []
+
+        half_hidden = self.NUM_INTERNAL_NODES // 2
+        hidden_layer_1 = self.num_internal_nodes[:half_hidden]
+        hidden_layer_2 = self.num_internal_nodes[half_hidden:]
+
+
+        if bidirectional_hidden:
+            # Connect all hidden nodes bidirectionally within each layer
+            for hidden_node_1 in hidden_layer_1:
+                for hidden_node_2 in hidden_layer_1:
+                    if hidden_node_1 != hidden_node_2:
+
+                        # make sparse connections 0.1 
+                        if random.random() < 0.1:
+                            self.edge_index.append([hidden_node_1, hidden_node_2])
+                            self.edge_type.append("Inter2Inter")
+          
+            
+            for hidden_node_1 in hidden_layer_2:
+                for hidden_node_2 in hidden_layer_2:
+                    if hidden_node_1 != hidden_node_2:
+                        if random.random() < 0.1:
+                            self.edge_index.append([hidden_node_1, hidden_node_2])
+                            self.edge_type.append("Inter2Inter")
+                
+                # for hidden_node_2 in self.num_internal_nodes:
+                #     if hidden_node_1 != hidden_node_2:
+                #         self.edge_index.append([hidden_node_1, hidden_node_2])
+                #         self.edge_type.append("Inter2Inter")
+
+
+
+
+        # Connect sensory -> hidden_layer_1 -> supervision
+        for sensory_node in self.num_sensor_nodes:
+            for hidden_node in hidden_layer_1:
+                self.edge_index.append([sensory_node, hidden_node])
+                self.edge_type.append("Sens2Inter")
+
+        for hidden_node in hidden_layer_1:
+            for sup_node in self.supervision_indices:
+                self.edge_index.append([hidden_node, sup_node])
+                self.edge_type.append("Inter2Sup")
+
+        # Connect supervision -> hidden_layer_2 -> sensory
+        for sup_node in self.supervision_indices:
+            for hidden_node in hidden_layer_2:
+                self.edge_index.append([sup_node, hidden_node])
+                self.edge_type.append("Sup2Inter")
+
+        for hidden_node in hidden_layer_2:
+            for sensory_node in self.num_sensor_nodes:
+                self.edge_index.append([hidden_node, sensory_node])
+                self.edge_type.append("Inter2Sens")
+
+        # Add Sens2Sens and Sens2Sup connections
+        if not no_sens2sens:
+            for i in self.num_sensor_nodes:
+                for j in self.num_sensor_nodes:
+                    if i != j:
+                        self.edge_index.append([i, j])
+                        self.edge_type.append("Sens2Sens")
+
+        if not no_sens2supervised:
+            for i in self.num_sensor_nodes:
+                for sup_node in self.supervision_indices:
+                    self.edge_index.append([i, sup_node])
+                    self.edge_type.append("Sens2Sup")
+
+        print("Custom graph with single hidden layer created.")
+
+
 
     def stoic_block_hierarchy(self, no_sens2sens=False, no_sens2supervised=False):
         sensory_grid_size = 28
