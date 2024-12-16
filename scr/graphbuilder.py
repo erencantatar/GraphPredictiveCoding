@@ -502,6 +502,8 @@ class GraphBuilder:
                     self.edge_type.append("Sup2Inter")
 
     def fully_connected(self, self_connection, no_sens2sens=False, no_sens2supervised=False):
+        # Initialize a set to track seen edges
+        seen_edges = set()
 
         # Define node groups for easy reference
         node_groups = {
@@ -530,101 +532,66 @@ class GraphBuilder:
             elif src in node_groups["Supervision"] and dest in node_groups["Supervision"]:
                 return "Sup2Sup"
 
+        def add_edge(src, dest, edge_type):
+            if (src, dest) not in seen_edges:
+                self.edge_index.append([src, dest])
+                self.edge_type.append(edge_type)
+                seen_edges.add((src, dest))
+
         # Create fully connected edges with edge types
-        if (not no_sens2sens) and (not no_sens2supervised):
+        if not no_sens2sens and not no_sens2supervised:
             for i in self.num_all_nodes:
                 for j in self.num_all_nodes:
                     if i != j or self_connection:
-                        self.edge_index.append([i, j])
-                        self.edge_type.append(get_edge_type(i, j))
+                        add_edge(i, j, get_edge_type(i, j))
         else:
-
             print(f"Doing from scratch; Creating fully connected directed graph with self connections: {self_connection}")
 
-            # 1. Sensory to all others (sensory, internal, supervision)
             for i in self.sensory_indices:
-                # Sensory to sensory
                 if not no_sens2sens:
                     for j in self.sensory_indices:
-                        if i != j or self_connection:  # Allow self-connection only if specified
-                            self.edge_index.append([i, j])
-                            self.edge_type.append("Sens2Sens")
+                        if i != j or self_connection:
+                            add_edge(i, j, "Sens2Sens")
 
-
-                # Sensory to internal (and vice versa)
                 for j in self.internal_indices:
-                    self.edge_index.append([i, j])  # Sensory to internal
-                    self.edge_type.append("Sens2Inter")
+                    add_edge(i, j, "Sens2Inter")
+                    add_edge(j, i, "Inter2Sens")
 
-                    self.edge_index.append([j, i])  # Internal to sensory
-                    self.edge_type.append("Inter2Sens")
-
-
-                # Sensory to supervision (and vice versa)
                 if self.supervised_learning and not no_sens2supervised:
                     for j in self.supervision_indices:
-                        self.edge_index.append([i, j])  # Sensory to supervision
-                        self.edge_type.append("Sens2Sup")
+                        add_edge(i, j, "Sens2Sup")
+                        add_edge(j, i, "Sup2Sens")
 
-                        self.edge_index.append([j, i])  # Supervision to sensory
-                        self.edge_type.append("Sup2Sens")
-
-
-            # 2. Internal to all others (sensory, internal, supervision)
-
-            # 2. Internal to all others (sensory, internal, supervision)
             for i in self.internal_indices:
-                # Internal to internal
                 for j in self.internal_indices:
-                    if i != j or self_connection:  # Internal to internal (both ways)
-                        self.edge_index.append([i, j])
-                        self.edge_type.append("Inter2Inter")
+                    if i != j or self_connection:
+                        add_edge(i, j, "Inter2Inter")
 
-                # Internal to sensory (and vice versa)
                 for j in self.sensory_indices:
-                    self.edge_index.append([i, j])  # Internal to sensory
-                    self.edge_type.append("Inter2Sens")
+                    add_edge(i, j, "Inter2Sens")
+                    add_edge(j, i, "Sens2Inter")
 
-                    self.edge_index.append([j, i])  # Sensory to internal
-                    self.edge_type.append("Sens2Inter")
-
-                # Internal to supervision (and vice versa)
                 if self.supervised_learning:
                     for j in self.supervision_indices:
-                        self.edge_index.append([i, j])  # Internal to supervision
-                        self.edge_type.append("Inter2Sup")
+                        add_edge(i, j, "Inter2Sup")
+                        add_edge(j, i, "Sup2Inter")
 
-                        self.edge_index.append([j, i])  # Supervision to internal
-                        self.edge_type.append("Sup2Inter")
-
-            # 3. Supervision to all others (sensory, internal, supervision)
             if self.supervised_learning:
                 for i in self.supervision_indices:
-                    # Supervision to sensory (and vice versa)
                     if not no_sens2supervised:
                         for j in self.sensory_indices:
-                            self.edge_index.append([i, j])  # Supervision to sensory
-                            self.edge_type.append("Sup2Sens")
+                            add_edge(i, j, "Sup2Sens")
+                            add_edge(j, i, "Sens2Sup")
 
-                            self.edge_index.append([j, i])  # Sensory to supervision
-                            self.edge_type.append("Sens2Sup")
-
-                    # Supervision to internal (and vice versa)
                     for j in self.internal_indices:
-                        self.edge_index.append([i, j])  # Supervision to internal
-                        self.edge_type.append("Sup2Inter")
+                        add_edge(i, j, "Sup2Inter")
+                        add_edge(j, i, "Inter2Sup")
 
-                        self.edge_index.append([j, i])  # Internal to supervision
-                        self.edge_type.append("Inter2Sup")
-
-                    # Supervision to supervision
                     for j in self.supervision_indices:
-                        if i != j or self_connection:  # Supervision to supervision (both ways)
-                            self.edge_index.append([i, j])
-                            self.edge_type.append("Sup2Sup")
+                        if i != j or self_connection:
+                            add_edge(i, j, "Sup2Sup")
 
-            print("Fully connected graph creation complete.")
-
+        print("Fully connected graph creation complete.")
 
 
 

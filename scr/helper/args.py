@@ -8,6 +8,8 @@ def validate_weight_init(value):
 
     init_type = parts[0]
     if init_type == "normal":
+        # if len(parts) != 1:
+        #     raise argparse.ArgumentTypeError("Invalid format for 'normal'. Expected: 'normal' with no additional parameters.")
         if len(parts) != 2:
             raise argparse.ArgumentTypeError("Invalid format for 'normal'. Expected: 'normal <mean>'")
         try:

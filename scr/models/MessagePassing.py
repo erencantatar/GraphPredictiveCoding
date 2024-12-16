@@ -57,19 +57,26 @@ class PredictionMessagePassing(MessagePassing):
         
             
 
-    def message(self, x_j, weight_matrix, norm):
-        # x_j: Node features of the neighboring nodes
-        # edge_weight: Weights of the edges
+    # def message(self, x_j, weight_matrix, norm):
+    #     # x_j: Node features of the neighboring nodes
+    #     # edge_weight: Weights of the edges
 
-        # Compute the message for each edge, which is the weighted activated value of the neighboring node
+    #     # Compute the message for each edge, which is the weighted activated value of the neighboring node
 
-        # COMPUTES θj,i * f(xj,t) for each edge
+    #     # COMPUTES θj,i * f(xj,t) for each edge
         
-        # return thetaJI * self.activation(x_j[:, 0]).view(-1, 1)
+    #     # return thetaJI * self.activation(x_j[:, 0]).view(-1, 1)
 
-        return weight_matrix.view(-1, 1) * self.f(x_j[:, 0]).view(-1, 1) 
-        # return weight_matrix.view(-1, 1) * self.f(x_j[:, 0]).view(-1, 1) * norm 
-        # return norm.view(-1, 1) * edge_weight.view(-1, 1) * self.activation(x_j[:, 0]).view(-1, 1)
+
+    #     return weight_matrix.view(-1, 1) * self.f(x_j[:, 0]).view(-1, 1) 
+    #     # return weight_matrix.view(-1, 1) * self.f(x_j[:, 0]).view(-1, 1) * norm 
+    #     # return norm.view(-1, 1) * edge_weight.view(-1, 1) * self.activation(x_j[:, 0]).view(-1, 1)
+    
+    # Corrected to match paper's Eq. (1):
+    def message(self, x_j, weight_matrix, norm):
+        # θj,i * f(xj,t) as per paper
+        return self.f(x_j[:, 0]).view(-1, 1) * weight_matrix.view(-1, 1)
+
 
     def update(self, aggr_out, x):
         # aggr_out: Aggregated messages for each node

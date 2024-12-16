@@ -160,10 +160,16 @@ class PCGraphConv(torch.nn.Module):
         # Weight initialization
         init_type, *params = weight_init.split()
         if init_type == "normal":
-            mean = float(params[0]) if params else 0.0
-            std_val = 0.02 # 2% 
-            std = max(0.01, abs(mean) * std_val)  # Set std to std_val% of mean or 0.01 minimum
-            nn.init.normal_(self.weights, mean=mean, std=std)
+            # mean = float(params[0]) if params else 0.0
+            # std_val = 0.02 # 2% 
+            # std = max(0.01, abs(mean) * std_val)  # Set std to std_val% of mean or 0.01 minimum
+            # nn.init.normal_(self.weights, mean=mean, std=std)
+
+            # Because of: Predictive Coding Networks and Inference Learning: Tutorial and Survey
+
+            m = float(params[0]) if params else 0
+            nn.init.normal_(self.weights, mean=m, std=0.05)   
+
         elif init_type == "uniform" or init_type == "nn.linear":
             k = 1 / math.sqrt(num_vertices)
             nn.init.uniform_(self.weights, -k, k)
@@ -171,10 +177,29 @@ class PCGraphConv(torch.nn.Module):
             value = float(params[0]) if params else 0.1
             self.weights.data.fill_(value)
 
+            noise_std = 0.005  # Standard deviation of the noise
+
+            # Fill with fixed value
+            # self.weights.data.fill_(value)
+
+            # Add small random noise
+            noise = torch.randn_like(self.weights) * noise_std
+            self.weights.data.add_(noise)
+
+
+        if self.wandb_logger:
+            # log the weights init and params
+            self.wandb_logger.log({"Weights/weights_init": weight_init})
+            self.wandb_logger.log({"Weights/weight_params": params})
+
+
         # Bias initialization (if use_bias is enabled)
         if self.use_bias:
-            dataset_mean = 0.1307  # Replace with actual dataset mean (0.1307 MNIST)
-            self.biases.data.fill_(dataset_mean)
+
+            nn.init.normal_(self.biases, mean=0, std=0) 
+
+            # dataset_mean = 0.1307  # Replace with actual dataset mean (0.1307 MNIST)
+            # self.biases.data.fill_(dataset_mean)
 
             # raise NotImplementedError 
             # bias_type, *bias_params = bias_init.split()
@@ -244,7 +269,10 @@ class PCGraphConv(torch.nn.Module):
 
             # paper: 
             # SGD configured as plain gradient descent
-            self.optimizer_weights = torch.optim.Adam([self.weights], lr=self.lr_weights, weight_decay=weight_decay)      
+
+            # if overfitting is a risk or bigger more complex model, use AdamW
+            self.optimizer_weights = torch.optim.AdamW([self.weights], lr=self.lr_weights, weight_decay=weight_decay)      
+            # self.optimizer_weights = torch.optim.Adam([self.weights], lr=self.lr_weights, weight_decay=weight_decay)      
             self.optimizer_values = torch.optim.SGD([self.values_dummy], lr=self.lr_values, momentum=0, weight_decay=weight_decay, nesterov=False) # nestrov only for momentum > 0
 
             self.weights.grad = torch.zeros_like(self.weights)
@@ -638,9 +666,9 @@ class PCGraphConv(torch.nn.Module):
                 
             ### ---------- OLD ---------- set the gradients
             if self.delta_w_selection == "all":
-                parameter.grad = delta.detach().clone()  # Apply full delta to the parameter
+                parameter.grad = -delta.detach().clone()  # Apply full delta to the parameter
             else:
-                parameter.grad[nodes_or_edge2_update] = delta[nodes_or_edge2_update].detach().clone()  # Update only specific nodes
+                parameter.grad[nodes_or_edge2_update] = -delta[nodes_or_edge2_update].detach().clone()  # Update only specific nodes
         
             # perform optimizer weight update step
             optimizer.step()
@@ -1400,36 +1428,18 @@ class PCGraphConv(torch.nn.Module):
         source_nodes = self.edge_index[0]   # all i's 
         target_nodes = self.edge_index[1]   # all j's 
 
-        # Gather the corresponding errors and f_x values for each edge
-        # print("source_nodes shape", source_nodes.shape)
-        # print("errors shape", errors.shape)
-        # print("f_x shape", f_x.shape)
-
         #### TODO IMPORTANT SWITCHED
-        # source_errors = errors[source_nodes].detach()    # get all e_i's 
-        # target_fx = f_x[target_nodes].detach()           # get all f_x_j's 
 
-        # source_errors = errors[source_nodes]    # get all e_i's 
-        # target_fx = f_x[target_nodes]           # get all f_x_j's 
-        # delta_w_batch = source_errors * target_fx
+        fx   = f_x[source_nodes]       # f(x_i)
+        errors = errors[target_nodes]  # (x_j - mu_j)
 
-        source_fx   = f_x[source_nodes]       # f(x_i)
-        target_errors = errors[target_nodes]  # (x_j - mu_j)
+        # fx = f_x[target_nodes]       # f(xj,T)
+        # errors = errors[source_nodes]  # εi,T
 
-        delta_w_batch = target_errors * source_fx
-
-
-        # source_errors = errors[target_nodes].detach()    # get all e_i's 
-        # target_fx = f_x[source_nodes].detach()           # get all f_x_j's 
-
-  
-        # print("TEST delta_w_batch", delta_w_batch.shape)
+        delta_w_batch = errors * fx  # α · εi,T f(xj,T)
 
         delta_w = delta_w_batch.view(self.batchsize, -1)
-        # delta_w = delta_w_batch.reshape(self.batchsize, self.edge_index_single_graph.size(1)) 
-
-        # print("self.delta_w shape", delta_w.shape)
-
+    
         if self.grad_accum_method == "sum":
             # delta_w = delta_w.sum(0).detach()
             delta_w = delta_w.sum(0)
@@ -1437,6 +1447,9 @@ class PCGraphConv(torch.nn.Module):
             # delta_w = delta_w.mean(0).detach()
             delta_w = delta_w.mean(0)
         
+        # grad clipping 
+        delta_w = torch.clamp(delta_w, min=-1, max=1)
+
         # print("self.delta_w shape", delta_w.shape)
 
         # self.log_gradients(log_histograms=True, log_every_n_steps=20 * self.T)
