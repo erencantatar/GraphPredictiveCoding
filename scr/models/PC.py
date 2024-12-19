@@ -22,6 +22,7 @@ class PCGraphConv(torch.nn.Module):
     def __init__(self, num_vertices, sensory_indices, internal_indices, 
                  learning_rate, T, graph_structure,
                  batch_size, edge_type, delta_w_selection, use_bias=False, use_learning_optimizer=False, 
+                 use_grokfast=False,
                  weight_init="normal", clamping=None,  
                  supervised_learning=False, normalize_msg=False, debug=False, activation=None, 
                  log_tensorboard=True, wandb_logger=None, device="cpu"):
@@ -41,9 +42,9 @@ class PCGraphConv(torch.nn.Module):
         self.supervised_labels = self.supervised_labels_single_graph 
         
         self.lr_values , self.lr_weights = learning_rate  
-
         self.T = T  # Number of iterations for gradient descent
 
+   
         self.debug = debug
         self.edge_index_single_graph = graph_structure  # a geometric graph structure
         self.mode = ""
@@ -63,6 +64,7 @@ class PCGraphConv(torch.nn.Module):
             "errors": [],
             "preds" : [],
         }
+
 
         self.energy_vals = {
             # training
@@ -129,11 +131,15 @@ class PCGraphConv(torch.nn.Module):
         self.use_optimizers = use_learning_optimizer
         
 
-        self.use_grokfast = False
+        self.use_grokfast = use_grokfast
         print(f"----- using grokfast: {self.use_grokfast}")
 
         self.use_bias = use_bias 
         print(f"----- using use_bias: {self.use_bias}")
+
+        if self.wandb_logger:
+            self.wandb_logger.log({"use_bias": self.use_bias})
+            self.wandb_logger.log({"use_grokfast": self.use_grokfast})
 
         
         self.grad_accum_method = "mean" 
@@ -145,16 +151,34 @@ class PCGraphConv(torch.nn.Module):
 
         # https://pytorch.org/docs/stable/generated/torch.nn.Linear.html
 
-        # USING BATCH SIZE, we want the same edge weights at each subgraph of the batch
-        self.weights = torch.nn.Parameter(torch.zeros(self.edge_index_single_graph.size(1), device=self.device, requires_grad=True))
-        # init.uniform_(self.weights.data, -k, k)
-        
-        if self.use_bias:
-            self.biases = torch.nn.Parameter(torch.zeros(self.batchsize * self.num_vertices, device=self.device), requires_grad=False) # requires_grad=False)                
-            # TODO 
-            print("INIT BIAS WITH THE MEAN OF THE DATASET???")
-            # self.biases..data.fill_(0.01) 
-            # self.biases.data = torch.full_like(self.biases.data, 0.01)
+        self.update_rules = "Van_Zwol"  # "Van_Zwol" or "Tommasi "
+        # self.update_rules = "Tommasi"  # "Van_Zwol" or "Tommasi "
+
+        if self.update_rules == "Van_Zwol":
+            print("Using Van Zwol update rules with mu = f(wx+b) (optional bias) without MessagePassing " )
+            print("weights shape", self.num_vertices, self.num_vertices)
+            self.weights = torch.nn.Parameter(torch.zeros(self.num_vertices, self.num_vertices, device=self.device, requires_grad=True))
+            
+            # self.weights = NN.Linear(self.num_vertices, self.num_vertices, bias=False)
+
+            adj = to_dense_adj(self.edge_index_single_graph).squeeze(0)
+            self.weights = adj * self.weights
+
+
+        elif self.update_rules == "Tommasi":
+            print("Using Tommasi update rules with mu = (wf(x)+b) (optional bias) with MessagePassing " )
+
+
+            # USING BATCH SIZE, we want the same edge weights at each subgraph of the batch
+            self.weights = torch.nn.Parameter(torch.zeros(self.edge_index_single_graph.size(1), device=self.device, requires_grad=True))
+            # init.uniform_(self.weights.data, -k, k)
+            
+            if self.use_bias:
+                self.biases = torch.nn.Parameter(torch.zeros(self.batchsize * self.num_vertices, device=self.device), requires_grad=False) # requires_grad=False)                
+                # TODO 
+                print("INIT BIAS WITH THE MEAN OF THE DATASET???")
+                # self.biases..data.fill_(0.01) 
+                # self.biases.data = torch.full_like(self.biases.data, 0.01)
 
 
         # Weight initialization
@@ -700,15 +724,28 @@ class PCGraphConv(torch.nn.Module):
 
         self.get_graph()
 
-        # num_nodes, (features)
-        weights_batched_graph = self.weights.repeat(1, self.batchsize).to(self.device)
-    
-        self.helper_GPU(self.print_GPU)
+        if self.update_rules == "Tommasi":
 
-        with torch.no_grad():
+            weights_batched_graph = self.weights.repeat(1, self.batchsize).to(self.device)
 
-            delta_x = self.values_mp(self.data.x.to(self.device), self.data.edge_index.to(self.device), weights_batched_graph, norm=self.norm.to(self.device)).squeeze()
-            # delta_x = delta_x.detach()
+            self.predictions = self.prediction_mp(self.data.x.to(self.device), self.data.edge_index.to(self.device), weights_batched_graph, norm=self.norm.to(self.device))
+            # self.predictions = self.prediction_mp(self.data.x.to(self.device), self.data.edge_index.to(self.device), self.weights)
+            # num_nodes, (features)
+        
+            self.helper_GPU(self.print_GPU)
+
+            with torch.no_grad():
+
+                delta_x = self.values_mp(self.data.x.to(self.device), self.data.edge_index.to(self.device), weights_batched_graph, norm=self.norm.to(self.device)).squeeze()
+                # delta_x = delta_x.detach()
+
+        if self.update_rules == "Van_Zwol":
+            # delta_x = (-errors.view(-1, 1) + f_prime_x_i * aggr_out)
+
+            # self.weights_NxN = 
+
+            delta_x = -self.gamma * (self.errors - self.weights_NxN.T * self.errors @ self.f_prime(self.weights_NxN.T * self.values))
+
 
         # self.log_activations(delta_x, self.edge_type)
         # self.log_activations(self.data.x[:, 0], self.edge_type)
@@ -801,8 +838,21 @@ class PCGraphConv(torch.nn.Module):
 
         with torch.no_grad():
 
-            self.predictions = self.prediction_mp(self.data.x.to(self.device), self.data.edge_index.to(self.device), weights_batched_graph, norm=self.norm.to(self.device))
-            # self.predictions = self.prediction_mp(self.data.x.to(self.device), self.data.edge_index.to(self.device), self.weights)
+
+            if self.update_rules == "Tommasi":
+
+
+                self.predictions = self.prediction_mp(self.data.x.to(self.device), self.data.edge_index.to(self.device), weights_batched_graph, norm=self.norm.to(self.device))
+                # self.predictions = self.prediction_mp(self.data.x.to(self.device), self.data.edge_index.to(self.device), self.weights)
+
+            if self.update_rules == "Van_Zwol":
+
+
+                # make weights a NxN matrix using the edge_index
+                # self.weights_NxN = 
+                a = self.data.x[:, 0]
+                self.prediction = self.f(self.weights_NxN @ a).to(self.device)
+                
 
             # self.predictions = self.predictions.detach()
 
@@ -822,6 +872,8 @@ class PCGraphConv(torch.nn.Module):
         Don't need to reset preds/errors/values because we already set them in the dataloader to be zero's
         """
         self.values, self.errors, self.predictions = self.data.x[:, 0], self.data.x[:, 1], self.data.x[:, 2]
+
+        # self.weights_NxN = 
 
         return self.values, self.errors, self.predictions
 
@@ -1409,37 +1461,46 @@ class PCGraphConv(torch.nn.Module):
         # errors = self.errors.squeeze().detach() 
         # f_x    = self.f(self.values).squeeze().detach()  #* self.mask  # * self.mask
 
-
         errors = self.errors.squeeze() 
         f_x    = self.f(self.values).squeeze()  #* self.mask  # * self.mask
 
-        # print(errors.shape, f_x.shape)
-
+  
         print("Errors / max, mean", errors.max(), errors.mean())
         print("f_x / max, mean", f_x.max(), f_x.mean())
 
-        # self.delta_w = self.alpha * torch.einsum('i,j->ij', self.f_x_j_T, self.error_i_T)  * self.mask  # * self.mask
 
-        # print(errors.shape, f_x.shape)
-        # this gets the delta_w for all possible edges (even non-existing edge in the graph) (assumes fully connected)
-        # self.delta_w = torch.einsum('i,j->ij', errors, f_x )    #.view_as(self.weights)  #* self.mask  # * self.mask
 
-        # Gather the indices of the source and target nodes for each edge
-        source_nodes = self.edge_index[0]   # all i's 
-        target_nodes = self.edge_index[1]   # all j's 
+        if self.update_rules == "Tommasi":
 
-        #### TODO IMPORTANT SWITCHED
 
-        fx   = f_x[source_nodes]       # f(x_i)
-        errors = errors[target_nodes]  # (x_j - mu_j)
+            # Gather the indices of the source and target nodes for each edge
+            source_nodes = self.edge_index[0]   # all i's 
+            target_nodes = self.edge_index[1]   # all j's 
 
-        # fx = f_x[target_nodes]       # f(xj,T)
-        # errors = errors[source_nodes]  # εi,T
+            #### TODO IMPORTANT SWITCHED
 
-        delta_w_batch = errors * fx  # α · εi,T f(xj,T)
+            fx   = f_x[source_nodes]       # f(x_i)
+            errors = errors[target_nodes]  # (x_j - mu_j)
 
+            # fx = f_x[target_nodes]       # f(xj,T)
+            # errors = errors[source_nodes]  # εi,T
+
+            delta_w_batch = errors * fx  # α · εi,T f(xj,T)
+
+        if self.update_rules == "Van_Zwol":
+
+            # make weights a NxN matrix using the edge_index
+            # self.weights_NxN = 
+            bias = self.biases if self.use_bias else 0
+            x = self.data.x[:, 0]
+            w = self.weights_NxN 
+            temp = self.errors*self.f_prime( torch.matmul(x, w.T) + bias )
+            delta_w_batch = -torch.matmul(temp.T,  x ) # matmul takes care of batch sum
+
+        # check size 
+        # if delta_w_batch.size(0) != self.edge_index.size(1):
         delta_w = delta_w_batch.view(self.batchsize, -1)
-    
+
         if self.grad_accum_method == "sum":
             # delta_w = delta_w.sum(0).detach()
             delta_w = delta_w.sum(0)
@@ -1536,7 +1597,9 @@ class PCGNN(nn.Module):
                  lr_params, T, graph_structure, 
                  batch_size, edge_type, 
                  delta_w_selection, use_bias, 
-                 use_learning_optimizer=False, weight_init="xavier", clamping=None, supervised_learning=False, 
+                 use_learning_optimizer=False, 
+                 use_grokfast=False,
+                 weight_init="xavier", clamping=None, supervised_learning=False, 
                  normalize_msg=False, 
                  debug=False, activation=None, log_tensorboard=True, wandb_logger=None, device='cpu'):
         super(PCGNN, self).__init__()  # Ensure the correct super call
@@ -1545,7 +1608,8 @@ class PCGNN(nn.Module):
         # INSIDE LAYERS CAN HAVE PREDCODING - intra-layer 
         self.pc_conv1 = PCGraphConv(num_vertices, sensory_indices, internal_indices, 
                                     lr_params, T, graph_structure, 
-                                    batch_size, edge_type, delta_w_selection, use_bias, use_learning_optimizer, weight_init, clamping, supervised_learning, 
+                                    batch_size, edge_type, delta_w_selection, use_bias, use_learning_optimizer, 
+                                    use_grokfast, weight_init, clamping, supervised_learning, 
                                     normalize_msg, 
                                     debug, activation, log_tensorboard, wandb_logger, device)
 

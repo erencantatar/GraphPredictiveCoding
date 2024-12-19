@@ -47,6 +47,9 @@ source activate PredCod
 
 ## TODO
 
+-1. random_internal=True, inside:
+model.query(method="pass", 
+         random_internal=True,
 -1. 
         # self.errors[self.internal_indices] += 0.1
         # print("!!!!!!!!!!!!!!!!!!!!!!!! IMPORTANT")    

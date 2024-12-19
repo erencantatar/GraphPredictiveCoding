@@ -38,8 +38,7 @@ graph_type_options = {
             }
         }, 
 
-
-        
+         
         "stochastic_block_hierarchy": {
             "params": {
                             # "remove_sens_2_sens": True, 

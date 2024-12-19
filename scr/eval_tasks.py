@@ -196,7 +196,11 @@ def occlusion(test_loader, model, test_params, verbose=0):
         
         noisy_image = noisy_batch.x[:, 0][0:784].view(28,28).cpu().detach().numpy()
 
-        values, predictions, labels = model.query(method="pass", data=noisy_batch)  # query_by_conditioning
+        values, predictions, labels = model.query(method="pass", 
+                                                  random_internal=True,
+                                                  data=noisy_batch)  # query_by_conditioning
+
+
         # values, predictions = values[batch_idx, :, 0], predictions[batch_idx, :, 0]
         # print("CHECK", noisy_batch.x[:,0][-10:])
         
@@ -351,7 +355,9 @@ def denoise(test_loader, model, test_params, sigma=0.1):
         noisy_image = noisy_batch.x[:, 0][0:784].view(28,28).cpu().detach().numpy()
         
         
-        values, predictions, labels = model.query(method="pass", data=noisy_batch)  # query_by_conditioning
+        values, predictions, labels = model.query(method="pass", 
+                                                random_internal=True,
+                                                  data=noisy_batch)  # query_by_conditioning
         # values, predictions = values[batch_idx, :, 0], predictions[batch_idx, :, 0]
         
         denoised_output = predictions[0:784].view(28,28).cpu().detach().numpy()

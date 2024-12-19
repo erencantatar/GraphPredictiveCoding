@@ -84,6 +84,7 @@ parser.add_argument('--lr_weights', type=float, default=0.01, help='Learning rat
 parser.add_argument('--activation_func', default="swish", type=str, choices=list(activation_functions.keys()), required=True, help='Choose an activation function: tanh, relu, leaky_relu, linear, sigmoid, hard_tanh, swish')
 
 parser.add_argument('--delta_w_selection', type=str, required=True, choices=["all", "internal_only"], help="Which weights to optimize in delta_w")
+parser.add_argument('--use_grokfast', type=str, default="False", choices=["True", "False"], help="GroKfast fast and slow weights before using the optimizer")
 
 # -----training----- 
 parser.add_argument('--epochs', type=int, default=5, help='Number of epochs to train.')
@@ -119,6 +120,7 @@ if torch.cuda.is_available():
 args.normalize_msg = args.normalize_msg == 'True'
 args.use_bias = args.use_bias == 'True'
 args.set_abs_small_w_2_zero = args.set_abs_small_w_2_zero == 'True'
+args.grokfast = args.use_grokfast == 'True'
 
 tags_list = args.tags.split(",") if args.tags else []
 
@@ -420,6 +422,7 @@ model_params = {
     "edge_type":  custom_dataset_train.edge_type,
 
     "use_learning_optimizer": use_learning_optimizer,    # False or [0], [(weight_decay=)]
+    "use_grokfast": args.grokfast,  # False or True
     
     # "weight_init": "uniform",   # xavier, 'uniform', 'based_on_f', 'zero', 'kaiming'
     "weight_init": args.weight_init,   # xavier, 'uniform', 'based_on_f', 'zero', 'kaiming'
@@ -919,6 +922,28 @@ for epoch in range(args.epochs):
                 raise e
 
     print(f"Epoch {epoch} / {args.epochs} completed")
+
+
+    #### CUT WEIGHTS ####
+    if epoch >= 6 and args.set_abs_small_w_2_zero:
+
+        w_copy = model.pc_conv1.weights.clone()
+
+        # Flatten the weights and calculate absolute values
+        abs_weights = torch.abs(w_copy.flatten())
+
+        # Determine the cutoff value to remove at least 60% of the smallest weights
+        cutoff_index = int(0.6 * abs_weights.numel())
+        threshold = torch.topk(abs_weights, cutoff_index, largest=False).values.max()
+
+        print(f"Removing weights with absolute values below {threshold}")
+
+        # Apply the threshold: set weights with absolute values below the threshold to zero
+        new_w = torch.where(torch.abs(w_copy) < threshold, torch.tensor(0.0, device=w_copy.device), w_copy)
+
+        # Assign the thresholded weights back to the model
+        model.pc_conv1.weights.data = new_w
+
 
     # Evaluation
     print(f"Starting evaluation for epoch {epoch}...")
