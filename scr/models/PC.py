@@ -157,12 +157,15 @@ class PCGraphConv(torch.nn.Module):
         if self.update_rules == "Van_Zwol":
             print("Using Van Zwol update rules with mu = f(wx+b) (optional bias) without MessagePassing " )
             print("weights shape", self.num_vertices, self.num_vertices)
-            self.weights = torch.nn.Parameter(torch.zeros(self.num_vertices, self.num_vertices, device=self.device, requires_grad=True))
-            
-            # self.weights = NN.Linear(self.num_vertices, self.num_vertices, bias=False)
+            # Initialize weights as a parameter with correct shape and device
+            self.weights = torch.nn.Parameter(
+                torch.zeros(self.num_vertices, self.num_vertices, device=self.device, requires_grad=True)
+            )
 
-            adj = to_dense_adj(self.edge_index_single_graph).squeeze(0)
-            self.weights = adj * self.weights
+            # Convert edge index to dense adjacency matrix and apply to weights
+            adj = to_dense_adj(self.edge_index_single_graph).squeeze(0).to(self.device)
+            with torch.no_grad():
+                self.weights.data *= adj
 
 
         elif self.update_rules == "Tommasi":
@@ -209,6 +212,15 @@ class PCGraphConv(torch.nn.Module):
             # Add small random noise
             noise = torch.randn_like(self.weights) * noise_std
             self.weights.data.add_(noise)
+
+        ### Apply mask to weights
+        if self.update_rules == "Van_Zwol":
+        
+            # Convert edge index to dense adjacency matrix and apply to weights
+            adj = to_dense_adj(self.edge_index_single_graph).squeeze(0).to(self.device)
+            with torch.no_grad():
+                self.weights.data *= adj
+
 
 
         if self.wandb_logger:
@@ -689,6 +701,10 @@ class PCGraphConv(torch.nn.Module):
             #     parameter.grad[nodes_or_edge2_update] = temp_grad[nodes_or_edge2_update]
                 
             ### ---------- OLD ---------- set the gradients
+
+            if delta.shape != parameter.shape:
+                delta = delta.view_as(parameter)
+
             if self.delta_w_selection == "all":
                 parameter.grad = -delta.detach().clone()  # Apply full delta to the parameter
             else:
@@ -743,9 +759,50 @@ class PCGraphConv(torch.nn.Module):
             # delta_x = (-errors.view(-1, 1) + f_prime_x_i * aggr_out)
 
             # self.weights_NxN = 
+            # self.weights_NxN = self.weights.repeat(1, self.batchsize).to(self.device)
+            # delta_x = -self.lr_values * (self.errors - self.weights_NxN.T * self.errors @ self.f_prime(self.weights_NxN.T * self.values))
+            # delta_x = (self.errors - self.weights_NxN.T * self.errors @ self.f_prime(self.weights_NxN.T * self.values))
+            # delta_x = self.errors - self.weights_NxN.T @ (self.errors * self.f_prime(self.weights_NxN.T @ self.values))
 
-            delta_x = -self.gamma * (self.errors - self.weights_NxN.T * self.errors @ self.f_prime(self.weights_NxN.T * self.values))
+         
+    
+            # # Compute weighted input and its derivative
+            # weighted_input = torch.einsum('ij,jk->ik', batch_weights, self.values)
+            # f_prime_values = self.f_prime(weighted_input)
 
+            # # Apply predictive coding delta update using einsum
+            # delta_x = self.errors - torch.einsum('ij,ij->i', self.errors, f_prime_values)
+
+
+            # # Ensure correct shapes for operations
+            # self.values = self.values.view(-1, 1)
+
+            # # Expand weights across the batch of graphs correctly
+            # batch_weights = self.weights.repeat(self.batchsize, 1)
+
+
+            # Ensure correct shapes for operations
+            self.values = self.values.view(-1, 1)
+
+            # Expand weights correctly across the batch
+            batch_weights = self.weights.repeat(self.batchsize, 1).T
+
+            print(f"batch_weights shape: {batch_weights.shape}")
+            print(f"self.values shape: {self.values.shape}")
+            print(f"self.errors shape: {self.errors.shape}")
+
+            # Correct matrix multiplication with aligned dimensions
+            weighted_input = torch.matmul(batch_weights, self.values)
+            delta_x = self.errors - torch.matmul(batch_weights.T, self.errors * self.f_prime(weighted_input))
+
+            delta_x = (self.errors - torch.matmul(batch_weights.T, self.errors * self.f_prime(weighted_input)))
+            # delta_values = -self.lr_values * (self.errors - torch.matmul(batch_weights.T, self.errors * self.f_prime(weighted_input)))
+
+            # squee for now since batchsize = 1
+            delta_x = -delta_x.squeeze()
+    
+
+            # delta_values = self.errors - batch_weights.T @ (self.errors * self.f_prime(batch_weights @ self.values))
 
         # self.log_activations(delta_x, self.edge_type)
         # self.log_activations(self.data.x[:, 0], self.edge_type)
@@ -850,6 +907,8 @@ class PCGraphConv(torch.nn.Module):
 
                 # make weights a NxN matrix using the edge_index
                 # self.weights_NxN = 
+                self.weights_NxN = self.weights.repeat(1, self.batchsize).to(self.device)
+
                 a = self.data.x[:, 0]
                 self.prediction = self.f(self.weights_NxN @ a).to(self.device)
                 
@@ -874,6 +933,7 @@ class PCGraphConv(torch.nn.Module):
         self.values, self.errors, self.predictions = self.data.x[:, 0], self.data.x[:, 1], self.data.x[:, 2]
 
         # self.weights_NxN = 
+        self.weights_NxN = self.weights.repeat(1, self.batchsize).to(self.device)
 
         return self.values, self.errors, self.predictions
 
@@ -1343,12 +1403,34 @@ class PCGraphConv(torch.nn.Module):
         delta_w = self.gradients_log  # Assuming `gradients_log` holds the delta weights
         edge_type = self.edge_type  # Using self.edge_type for the connection types
 
+        if self.update_rules == "Van_Zwol":
+            # Ensure delta_w is flattened for size comparison
+            if delta_w.dim() > 1:
+                delta_w = delta_w.view(-1)
+
+            # Use edge indices to gather the corresponding delta_w elements
+            if delta_w.dim() == 2:  # Ensure 2D weights
+                delta_w_edges = delta_w[self.edge_index[0], self.edge_index[1]]
+            else:
+                delta_w_edges = delta_w
+
         # Check if the sizes of delta_w and edge_type match
         if delta_w.size(0) != edge_type.size(0):
             raise ValueError(
                 f"Size mismatch: delta_w has size {delta_w.size(0)}, "
                 f"but edge_type has size {edge_type.size(0)}"
             )
+
+
+      
+
+        # Ensure sizes match
+        if delta_w_edges.size(0) != edge_type.size(0):
+            raise ValueError(
+                f"Size mismatch: delta_w_edges has size {delta_w_edges.size(0)}, "
+                f"but edge_type has size {edge_type.size(0)}"
+            )
+
 
         # Mapping of edge types
         edge_type_map = {
@@ -1492,10 +1574,17 @@ class PCGraphConv(torch.nn.Module):
             # make weights a NxN matrix using the edge_index
             # self.weights_NxN = 
             bias = self.biases if self.use_bias else 0
-            x = self.data.x[:, 0]
-            w = self.weights_NxN 
-            temp = self.errors*self.f_prime( torch.matmul(x, w.T) + bias )
-            delta_w_batch = -torch.matmul(temp.T,  x ) # matmul takes care of batch sum
+            x = self.data.x[:, 0].view(-1, 1)  # Ensure shape is [1794, 1]
+
+            self.weights_NxN = self.weights.repeat(1, self.batchsize).to(self.device)
+            w = self.weights_NxN
+
+            # Compute temp with compatible matrix multiplication
+            temp = self.errors.view(-1, 1) * self.f_prime(torch.matmul(w, x) + bias)
+
+            # Perform the delta weight update
+            delta_w_batch = -torch.matmul(temp, x.T)  # [1794, 1] @ [1, 1794] -> [1794, 1794]
+            # delta_w_batch = torch.matmul(temp, x.T)  # [1794, 1] @ [1, 1794] -> [1794, 1794]
 
         # check size 
         # if delta_w_batch.size(0) != self.edge_index.size(1):
@@ -1511,6 +1600,10 @@ class PCGraphConv(torch.nn.Module):
         # grad clipping 
         delta_w = torch.clamp(delta_w, min=-1, max=1)
 
+        # Correct shape of delta_w after computation
+        if delta_w.dim() == 1 or delta_w.shape != self.weights.shape:
+            delta_w = delta_w.view(self.weights.shape)
+
         # print("self.delta_w shape", delta_w.shape)
 
         # self.log_gradients(log_histograms=True, log_every_n_steps=20 * self.T)
@@ -1521,6 +1614,8 @@ class PCGraphConv(torch.nn.Module):
 
         # self.gradients_log = delta_w.detach()
         self.gradients_log = delta_w
+
+        delta_w = delta_w_batch.view(self.weights.shape)  # Correct the shape before the update
 
         self.gradient_descent_update(
             grad_type="weights",

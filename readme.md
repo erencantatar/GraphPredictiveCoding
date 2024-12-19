@@ -47,12 +47,15 @@ source activate PredCod
 
 ## TODO
 
+
 -1. random_internal=True, inside:
 model.query(method="pass", 
          random_internal=True,
 -1. 
         # self.errors[self.internal_indices] += 0.1
         # print("!!!!!!!!!!!!!!!!!!!!!!!! IMPORTANT")    
+
+-                 # model.pc_conv1.log_delta_w() --> not work if Van_Zwol
 0. Weird bugg: tracing errors (preds are weird)
 0. add energy drop in "ipc"
 0. self.graph = self.use_old_graph(), for SBM --> make graph save folder name the **params

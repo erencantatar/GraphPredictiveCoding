@@ -280,71 +280,48 @@ def plot_model_weights(model, GRAPH_TYPE=None, model_dir=None, save_wandb=False)
     edge_index = model.pc_conv1.edge_index_single_graph.cpu().numpy()
     weights = model.pc_conv1.weights.cpu().detach().numpy()
 
-    # Create a sparse matrix using the edge indices and weights
-    W_sparse = sp.coo_matrix((weights, (edge_index[0], edge_index[1])), shape=(model.pc_conv1.num_vertices, model.pc_conv1.num_vertices))
+    if weights.ndim == 1:
+        W_sparse = sp.coo_matrix((weights, (edge_index[0], edge_index[1])), shape=(model.pc_conv1.num_vertices, model.pc_conv1.num_vertices))
+    else:
+        W_sparse = sp.coo_matrix(weights)
 
     # Convert to dense for detailed visualization (if the graph is not too large)
     W = W_sparse.toarray()
 
-    # Create a figure with multiple subplots
     fig, axes = plt.subplots(3, 2, figsize=(20, 30))
-    if GRAPH_TYPE:
-        fig.suptitle(f'Visualization of Weight Matrix of {GRAPH_TYPE}', fontsize=20)
-    else:
-        fig.suptitle(f'Visualization of Weight Matrix', fontsize=20)
+    title = f'Visualization of Weight Matrix of {GRAPH_TYPE}' if GRAPH_TYPE else 'Visualization of Weight Matrix'
+    fig.suptitle(title, fontsize=20)
 
-    # Subplot 1: Full weight matrix
-    zero_weights = (W == 0).astype(int)  # Create a binary mask of zero weights
+    zero_weights = (W == 0).astype(int)
     im1 = axes[0, 0].imshow(zero_weights, cmap='viridis', aspect='auto')
     fig.colorbar(im1, ax=axes[0, 0], label='Weight value')
     axes[0, 0].set_title('Zero weights')
 
-
-    # Subplot 2: Full weight matrix
-    im1 = axes[0, 1].imshow(W, cmap='viridis', aspect='auto')
-    fig.colorbar(im1, ax=axes[0, 1], label='Weight value')
+    im2 = axes[0, 1].imshow(W, cmap='viridis', aspect='auto')
+    fig.colorbar(im2, ax=axes[0, 1], label='Weight value')
     axes[0, 1].set_title('Full Weight Matrix')
 
-    # Subplot 3: Weights > 0.001
-    im2 = axes[1, 0].imshow(W > 0.001, cmap='viridis', aspect='auto')
-    fig.colorbar(im2, ax=axes[1, 0], label='Weight value')
-    axes[1, 0].set_title('Weights > 0.001')
+    thresholds = [0.001, 0.0001, 0.00001, 0.000001]
+    for idx, thresh in enumerate(thresholds):
+        row, col = divmod(idx + 2, 2)
+        im = axes[row, col].imshow(W > thresh, cmap='viridis', aspect='auto')
+        fig.colorbar(im, ax=axes[row, col], label='Weight value')
+        axes[row, col].set_title(f'Weights > {thresh}')
 
-    # Subplot 4: Weights > 0.0001
-    im3 = axes[1, 1].imshow(W > 0.0001, cmap='viridis', aspect='auto')
-    fig.colorbar(im3, ax=axes[1, 1], label='Weight value')
-    axes[1, 1].set_title('Weights > 0.0001')
+    plt.tight_layout(rect=[0, 0, 1, 0.97])
 
-    # Subplot 5: Weights > 0.00001
-    im4 = axes[2, 0].imshow(W > 0.00001, cmap='viridis', aspect='auto')
-    fig.colorbar(im4, ax=axes[2, 0], label='Weight value')
-    axes[2, 0].set_title('Weights > 0.00001')
-
-    # Subplot 6: Weights > 0.000001
-    im5 = axes[2, 1].imshow(W > 0.000001, cmap='viridis', aspect='auto')
-    fig.colorbar(im5, ax=axes[2, 1], label='Weight value')
-    axes[2, 1].set_title('Weights > 0.000001')
-
-    # Adjust layout and save the figure
-    plt.tight_layout(rect=[0, 0, 1, 0.97])  # Adjust layout to fit the title
-
-    if save_wandb:
-
-        # save_path = os.path.join(model_dir, 'parameter_info/weight_matrix_visualization_epoch0.png')
+    if save_wandb and model_dir:
         epoch_x = model_dir.split("_")[-1]
         wandb.log({f"Weights/weights_{epoch_x}": [wandb.Image(fig)]})
 
     if model_dir:
         plt.savefig(model_dir)
         plt.close(fig)
-
         print(f'Figure saved to {model_dir}')
     else:
         plt.show()
 
     return W
-
-
 
 
 

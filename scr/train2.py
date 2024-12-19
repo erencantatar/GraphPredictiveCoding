@@ -890,7 +890,11 @@ for epoch in range(args.epochs):
                                                 epoch=epoch)
                     
 
-                model.pc_conv1.log_delta_w()
+                # TODO 
+                # model.pc_conv1.log_delta_w()
+
+
+                
 
                 # current_lr_values = model.pc_conv1.optimizer_values.param_groups[0]['lr']
                 # print(f"Current LR for values: {current_lr_values}")
