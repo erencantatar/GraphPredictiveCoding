@@ -8,7 +8,7 @@ import math
 from torch_geometric.utils import to_dense_adj, degree
 from models.MessagePassing import PredictionMessagePassing, ValueMessagePassing
 from helper.activation_func import set_activation
-from helper.grokfast import gradfilter_ema, gradfilter_ma
+from helper.grokfast import gradfilter_ema, gradfilter_ma, gradfilter_ema_adjust
 import os 
 import wandb
 import math 
@@ -131,6 +131,20 @@ class PCGraphConv(torch.nn.Module):
         self.use_optimizers = use_learning_optimizer
         
 
+        # Initialize grads for weight updates only
+        # self.grads = {"weights": None}
+
+        # for grokfast optionally 
+        # self.grads = {
+        #     # "values" : None,
+        #     "weights": None, 
+        # }
+
+        self.grads = None
+
+        self.grokfast_type = "ema"  # "ema" or "ma"
+        self.avg_grad = None
+
         self.use_grokfast = use_grokfast
         print(f"----- using grokfast: {self.use_grokfast}")
 
@@ -151,8 +165,8 @@ class PCGraphConv(torch.nn.Module):
 
         # https://pytorch.org/docs/stable/generated/torch.nn.Linear.html
 
-        self.update_rules = "Van_Zwol"  # "Van_Zwol" or "Tommasi "
-        # self.update_rules = "Tommasi"  # "Van_Zwol" or "Tommasi "
+        # self.update_rules = "Van_Zwol"  # "Van_Zwol" or "Tommasi "
+        self.update_rules = "Tommasi"  # "Van_Zwol" or "Tommasi "
 
         if self.update_rules == "Van_Zwol":
             print("Using Van Zwol update rules with mu = f(wx+b) (optional bias) without MessagePassing " )
@@ -161,11 +175,6 @@ class PCGraphConv(torch.nn.Module):
             self.weights = torch.nn.Parameter(
                 torch.zeros(self.num_vertices, self.num_vertices, device=self.device, requires_grad=True)
             )
-
-            # Convert edge index to dense adjacency matrix and apply to weights
-            adj = to_dense_adj(self.edge_index_single_graph).squeeze(0).to(self.device)
-            with torch.no_grad():
-                self.weights.data *= adj
 
 
         elif self.update_rules == "Tommasi":
@@ -220,6 +229,9 @@ class PCGraphConv(torch.nn.Module):
             adj = to_dense_adj(self.edge_index_single_graph).squeeze(0).to(self.device)
             with torch.no_grad():
                 self.weights.data *= adj
+
+        
+
 
 
 
@@ -278,11 +290,7 @@ class PCGraphConv(torch.nn.Module):
 
         self.optimizer_values, self.optimizer_weights = None, None 
         
-        # for grokfast optionally 
-        self.grads = {
-            "values" : None,
-            "weights": None, 
-        }
+        
 
         self.scheduler_weights = None
 
@@ -659,13 +667,31 @@ class PCGraphConv(torch.nn.Module):
         # Optionally adjust gradients based on grokfast 
         # In Grokfast, the goal is to amplify the slow gradient component stored in self.grads[grad_type].
         # After calculating the current gradient delta (based on the error or loss function), Grokfast adds a weighted version of this slow gradient component to delta:
+        # CAN be used for both weights and values
+        # CAN be used with optimizer or without optimizer
         if self.use_grokfast:
             if grad_type == "weights" and self.use_grokfast:
                 param_type = "weights"
-            if self.grokfast_type == 'ema':
-                self.grads[grad_type] = gradfilter_ema(self, grads=self.grads[grad_type], alpha=0.8, lamb=0.1)
-            elif self.grokfast_type == 'ma':
-                self.grads[grad_type] = gradfilter_ma(self, grads=self.grads[grad_type], window_size=100, lamb=5.0, filter_type='mean')
+                
+                # assert 
+                 # Collect parameters explicitly
+                params = {"weights": self.weights}
+
+                if self.grokfast_type == 'ema':
+                    
+                    # python main_mnist.py --label test --alpha 0.8 --lamb 0.1 --weight_decay 2.0
+                    final_grad, self.avg_grad = gradfilter_ema_adjust(delta, self.avg_grad, alpha=0.8, lamb=0.1)
+                    delta = final_grad  # Replace gradient with modified version
+
+                    # # Call the gradfilter_ema function
+                    # self.grads = gradfilter_ema(grads=self.grads, params=params, alpha=0.8, lamb=0.1)
+
+
+                    # self.grads[grad_type] = gradfilter_ema(self, grads=self.grads[grad_type], alpha=0.8, lamb=0.1)
+                elif self.grokfast_type == 'ma':
+                    self.grads[grad_type] = gradfilter_ma(self, grads=self.grads[grad_type], window_size=100, lamb=5.0, filter_type='mean')
+
+
 
         if use_optimizer and optimizer:
             # Clear 
@@ -1600,9 +1626,17 @@ class PCGraphConv(torch.nn.Module):
         # grad clipping 
         delta_w = torch.clamp(delta_w, min=-1, max=1)
 
-        # Correct shape of delta_w after computation
-        if delta_w.dim() == 1 or delta_w.shape != self.weights.shape:
-            delta_w = delta_w.view(self.weights.shape)
+
+
+        if self.update_rules == "Van_Zwol":
+
+            # Correct shape of delta_w after computation
+            if delta_w.dim() == 1 or delta_w.shape != self.weights.shape:
+                delta_w = delta_w.view(self.weights.shape)
+
+            # TODO ???
+            delta_w = delta_w_batch.view(self.weights.shape)  # Correct the shape before the update
+
 
         # print("self.delta_w shape", delta_w.shape)
 
@@ -1614,8 +1648,6 @@ class PCGraphConv(torch.nn.Module):
 
         # self.gradients_log = delta_w.detach()
         self.gradients_log = delta_w
-
-        delta_w = delta_w_batch.view(self.weights.shape)  # Correct the shape before the update
 
         self.gradient_descent_update(
             grad_type="weights",

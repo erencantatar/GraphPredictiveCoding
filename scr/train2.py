@@ -115,6 +115,7 @@ print(f'Using device: {device}')
 print(f"Seed used", args.seed)
 if torch.cuda.is_available():
     print("Device name: ", torch.cuda.get_device_name(0))
+print("---------------model.pc_conv1.log_delta_w() turned off-----------------")
 
 # Make True of False bool
 args.normalize_msg = args.normalize_msg == 'True'
@@ -928,26 +929,6 @@ for epoch in range(args.epochs):
     print(f"Epoch {epoch} / {args.epochs} completed")
 
 
-    #### CUT WEIGHTS ####
-    if epoch >= 6 and args.set_abs_small_w_2_zero:
-
-        w_copy = model.pc_conv1.weights.clone()
-
-        # Flatten the weights and calculate absolute values
-        abs_weights = torch.abs(w_copy.flatten())
-
-        # Determine the cutoff value to remove at least 60% of the smallest weights
-        cutoff_index = int(0.6 * abs_weights.numel())
-        threshold = torch.topk(abs_weights, cutoff_index, largest=False).values.max()
-
-        print(f"Removing weights with absolute values below {threshold}")
-
-        # Apply the threshold: set weights with absolute values below the threshold to zero
-        new_w = torch.where(torch.abs(w_copy) < threshold, torch.tensor(0.0, device=w_copy.device), w_copy)
-
-        # Assign the thresholded weights back to the model
-        model.pc_conv1.weights.data = new_w
-
 
     # Evaluation
     print(f"Starting evaluation for epoch {epoch}...")
@@ -996,28 +977,63 @@ for epoch in range(args.epochs):
         #         param_group['lr'] = model.pc_conv1.lr_values
 
         
-    if accuracy_mean >= 0.9:
-        print("Accuracy is 1")
-        
-        wandb.log({
-            "epoch": epoch,
-            "classification/y_true": y_true,
-            "classification/y_pred": y_pred,
-            "classification/size":  len(y_true),
-        })
+    if accuracy_mean >= 0.9 or (args.set_abs_small_w_2_zero == True and accuracy_mean > 0.8) or (args.set_abs_small_w_2_zero == True and epoch >= 8):
 
-        test_params["num_samples"] = 100  # Moderate increase for mid-range accuracy
+        #### CUT WEIGHTS ####
+        if args.set_abs_small_w_2_zero:
+
+            w_copy = model.pc_conv1.weights.clone()
+
+            # Flatten the weights and calculate absolute values
+            abs_weights = torch.abs(w_copy.flatten())
+
+            # Determine the cutoff value to remove at least 60% of the smallest weights
+            cutoff_index = int(0.85 * abs_weights.numel())
+            threshold = torch.topk(abs_weights, cutoff_index, largest=False).values.max()
+
+            print(f"Removing weights with absolute values below {threshold}")
+
+            # Apply the threshold: set weights with absolute values below the threshold to zero
+            new_w = torch.where(torch.abs(w_copy) < threshold, torch.tensor(0.0, device=w_copy.device), w_copy)
+
+            # Assign the thresholded weights back to the model
+            model.pc_conv1.weights.data = new_w
+
+            # log the weights to wandb
+            save_path = os.path.join(model_dir, 'parameter_info/weight_matrix_visualization_smallWeight2zero.png')
+
+            # plot_model_weights(model, save_path)
+            plot_model_weights(model, GRAPH_TYPE, model_dir=save_path, save_wandb=True)
+
+        print("Accuracy is high, stopping training")
+        # Adjust num_samples based on accuracy
+        test_params = {
+            "model_dir": model_dir,
+            "T":100,
+            "supervised_learning":False, 
+            "num_samples": 100,
+            "num_wandb_img_log": num_wandb_img_log,
+        }
+
         y_true, y_pred, accuracy_mean = classification(train_loader_1_batch, model, test_params)
 
         wandb.log({
             "epoch": epoch,
-            "classification/y_true": y_true,
-            "classification/y_pred": y_pred,
-            "classification/size":  len(y_true),
-            "classification/accuracy_mean": accuracy_mean,
+            "classification_test/accuracy_mean_smallWeight2zero": accuracy_mean,
         })
         
-        print("Accuracy is 1, stopping training")
+        test_params = {
+            "model_dir": model_dir,
+            "T": 100,
+            "supervised_learning":True, 
+            "num_samples": 5,
+            "num_wandb_img_log": 3,
+        }
+        avg_SSIM_mean, avg_SSIM_max, avg_MSE_mean, avg_MSE_max = generation(train_loader_1_batch, model, test_params, clean_images, verbose=0)
+        
+        print("Ommited model saving")
+        
+        exit()
         earlystop = True
         break 
 

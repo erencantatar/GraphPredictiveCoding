@@ -41,6 +41,34 @@ source activate PredCod
 3. myquota
 
 
+<summary>(2-1) ...or, copy and paste the method directly into your code!</summary>
+
+```python
+### Imports
+from collections import deque
+from typing import Dict, Optional, Literal
+import torch
+import torch.nn as nn
+
+
+### Grokfast
+def gradfilter_ema(
+    m: nn.Module,
+    grads: Optional[Dict[str, torch.Tensor]] = None,
+    alpha: float = 0.99,
+    lamb: float = 5.0,
+) -> Dict[str, torch.Tensor]:
+    if grads is None:
+        grads = {n: p.grad.data.detach() for n, p in m.named_parameters() if p.requires_grad}
+
+    for n, p in m.named_parameters():
+        if p.requires_grad:
+            grads[n] = grads[n] * alpha + p.grad.data.detach() * (1 - alpha)
+            p.grad.data = p.grad.data + grads[n] * lamb
+
+    return grads
+
+
 ## Branches
 - master
 - dynamic graph; during training update the graph with new neurons/clusters
@@ -48,13 +76,12 @@ source activate PredCod
 ## TODO
 
 
--1. random_internal=True, inside:
+- random_internal=True, inside:
 model.query(method="pass", 
          random_internal=True,
--1. 
+- 
         # self.errors[self.internal_indices] += 0.1
         # print("!!!!!!!!!!!!!!!!!!!!!!!! IMPORTANT")    
-
 -                 # model.pc_conv1.log_delta_w() --> not work if Van_Zwol
 0. Weird bugg: tracing errors (preds are weird)
 0. add energy drop in "ipc"
