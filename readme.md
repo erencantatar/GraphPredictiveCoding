@@ -40,8 +40,12 @@ source activate PredCod
 2. accinfo
 3. myquota
 
+4.  
+from helper.validation import validate_messagePassing
+validate_messagePassing()
 
-<summary>(2-1) ...or, copy and paste the method directly into your code!</summary>
+<details>
+  <summary>Grokfast</summary>
 
 ```python
 ### Imports
@@ -67,7 +71,8 @@ def gradfilter_ema(
             p.grad.data = p.grad.data + grads[n] * lamb
 
     return grads
-
+```
+</details>
 
 ## Branches
 - master

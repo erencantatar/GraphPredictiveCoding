@@ -320,66 +320,81 @@ class GraphBuilder:
             print("No seed provided. Using default behavior.")
 
 
-    def single_hidden_layer(self, no_sens2sens=False, no_sens2supervised=False, bidirectional_hidden=True):
-        """Creates a graph with a single hidden layer divided into two segments."""
+
+    def single_hidden_layer(self, no_sens2sens=False, no_sens2supervised=False, bidirectional_hidden=False):
+        """Creates a graph with shared internal nodes and layers for discriminative and generative paths."""
         self.edge_index = []
         self.edge_type = []
 
-        half_hidden = self.NUM_INTERNAL_NODES // 2
-        hidden_layer_1 = self.num_internal_nodes[:half_hidden]
-        hidden_layer_2 = self.num_internal_nodes[half_hidden:]
+        discriminative_hidden_layers = [700, 200, 100] 
+        generative_hidden_layers = [100, 200, 700]
+
+        # Create ranges for discriminative and generative layers
+        discriminative_layers = [
+            range(sum(discriminative_hidden_layers[:i]), sum(discriminative_hidden_layers[:i + 1]))
+            for i in range(len(discriminative_hidden_layers))
+        ]
+
+        generative_layers = [
+            range(sum(generative_hidden_layers[:i]) + sum(discriminative_hidden_layers),
+                  sum(generative_hidden_layers[:i + 1]) + sum(discriminative_hidden_layers))
+            for i in range(len(generative_hidden_layers))
+        ]
+
+       
+        total_hidden_nodes = sum(discriminative_hidden_layers) + sum(generative_hidden_layers)
+        num_internal_nodes = self.num_internal_nodes if isinstance(self.num_internal_nodes, int) else sum(self.num_internal_nodes)
+        internal_nodes = range(total_hidden_nodes, total_hidden_nodes + num_internal_nodes)
 
 
-        if bidirectional_hidden:
-            # Connect all hidden nodes bidirectionally within each layer
-            for hidden_node_1 in hidden_layer_1:
-                for hidden_node_2 in hidden_layer_1:
-                    if hidden_node_1 != hidden_node_2:
+         # Connect internal_nodes <- discriminative_hidden_layer_last
+        for hidden_node in discriminative_layers[-1]:
+            for internal_node in internal_nodes:
+                self.edge_index.append([hidden_node, internal_node])
+                self.edge_type.append("Inter2Inter")
 
-                        # make sparse connections 0.1 
-                        if random.random() < 0.1:
-                            self.edge_index.append([hidden_node_1, hidden_node_2])
-                            self.edge_type.append("Inter2Inter")
-          
-            
-            for hidden_node_1 in hidden_layer_2:
-                for hidden_node_2 in hidden_layer_2:
-                    if hidden_node_1 != hidden_node_2:
-                        if random.random() < 0.1:
-                            self.edge_index.append([hidden_node_1, hidden_node_2])
-                            self.edge_type.append("Inter2Inter")
-                
-                # for hidden_node_2 in self.num_internal_nodes:
-                #     if hidden_node_1 != hidden_node_2:
-                #         self.edge_index.append([hidden_node_1, hidden_node_2])
-                #         self.edge_type.append("Inter2Inter")
-
-
-
-
-        # Connect sensory -> hidden_layer_1 -> supervision
+        # Connect sensory -> discriminative_hidden_layer_1
         for sensory_node in self.num_sensor_nodes:
-            for hidden_node in hidden_layer_1:
+            for hidden_node in discriminative_layers[0]:
                 self.edge_index.append([sensory_node, hidden_node])
                 self.edge_type.append("Sens2Inter")
 
-        for hidden_node in hidden_layer_1:
-            for sup_node in self.supervision_indices:
-                self.edge_index.append([hidden_node, sup_node])
-                self.edge_type.append("Inter2Sup")
+        # Connect discriminative layers sequentially
+        for i in range(len(discriminative_layers) - 1):
+            for node_from in discriminative_layers[i]:
+                for node_to in discriminative_layers[i + 1]:
+                    self.edge_index.append([node_from, node_to])
+                    self.edge_type.append("Inter2Inter")
 
-        # Connect supervision -> hidden_layer_2 -> sensory
-        for sup_node in self.supervision_indices:
-            for hidden_node in hidden_layer_2:
-                self.edge_index.append([sup_node, hidden_node])
-                self.edge_type.append("Sup2Inter")
+        # Connect internal_nodes -> generative_hidden_layer_1
+        for internal_node in internal_nodes:
+            for hidden_node in generative_layers[0]:
+                self.edge_index.append([internal_node, hidden_node])
+                self.edge_type.append("Inter2Inter")
 
-        for hidden_node in hidden_layer_2:
+        # Connect generative layers sequentially
+        for i in range(len(generative_layers) - 1):
+            for node_from in generative_layers[i]:
+                for node_to in generative_layers[i + 1]:
+                    self.edge_index.append([node_from, node_to])
+                    self.edge_type.append("Inter2Inter")
+
+        # Connect generative_hidden_layer_last -> sensory
+        for hidden_node in generative_layers[-1]:
             for sensory_node in self.num_sensor_nodes:
                 self.edge_index.append([hidden_node, sensory_node])
                 self.edge_type.append("Inter2Sens")
 
-        # Add Sens2Sens and Sens2Sup connections
+        # Add bidirectional connections within each layer if needed
+        if bidirectional_hidden:
+            for layer in discriminative_layers + generative_layers:
+                for node_from in layer:
+                    for node_to in layer:
+                        if node_from != node_to and random.random() < 0.1:
+                            self.edge_index.append([node_from, node_to])
+                            self.edge_type.append("Inter2Inter")
+
+        # Add Sens2Sens connections if enabled
         if not no_sens2sens:
             for i in self.num_sensor_nodes:
                 for j in self.num_sensor_nodes:
@@ -387,14 +402,14 @@ class GraphBuilder:
                         self.edge_index.append([i, j])
                         self.edge_type.append("Sens2Sens")
 
+        # Add Sens2Sup connections if enabled
         if not no_sens2supervised:
-            for i in self.num_sensor_nodes:
+            for sensory_node in self.num_sensor_nodes:
                 for sup_node in self.supervision_indices:
-                    self.edge_index.append([i, sup_node])
+                    self.edge_index.append([sensory_node, sup_node])
                     self.edge_type.append("Sens2Sup")
 
-        print("Custom graph with single hidden layer created.")
-
+        print("Custom graph with shared internal nodes and multi-layer paths created.")
 
 
     def stoic_block_hierarchy(self, no_sens2sens=False, no_sens2supervised=False):

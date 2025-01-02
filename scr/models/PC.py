@@ -992,8 +992,8 @@ class PCGraphConv(torch.nn.Module):
 
 
 
-        print(f"Values requires_grad: {self.values.requires_grad}")
-        print(f"Predictions requires_grad: {self.predictions.requires_grad}")
+        # print(f"Values requires_grad: {self.values.requires_grad}")
+        # print(f"Predictions requires_grad: {self.predictions.requires_grad}")
 
 
         self.errors = self.errors.squeeze()

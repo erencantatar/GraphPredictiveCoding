@@ -356,7 +356,7 @@ for batch, clean_image in train_loader:
 ####                                            VALIDATION                                          #####
 ######################################################################################################### 
  
-# from helper.validation import validate_messagePassing
+from helper.validation import validate_messagePassing
 # validate_messagePassing()
 
 
@@ -1017,11 +1017,17 @@ for epoch in range(args.epochs):
 
         y_true, y_pred, accuracy_mean = classification(train_loader_1_batch, model, test_params)
 
-        wandb.log({
-            "epoch": epoch,
-            "classification_test/accuracy_mean_smallWeight2zero": accuracy_mean,
-        })
-        
+        if args.set_abs_small_w_2_zero:
+            wandb.log({
+                "epoch": epoch,
+                "classification_test/accuracy_mean_smallWeight2zero": accuracy_mean,
+            })
+        else:
+            wandb.log({
+                "epoch": epoch,
+                "classification_test/accuracy_mean": accuracy_mean,
+            })
+            
         test_params = {
             "model_dir": model_dir,
             "T": 100,
