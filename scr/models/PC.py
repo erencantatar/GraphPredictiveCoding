@@ -825,14 +825,22 @@ class PCGraphConv(torch.nn.Module):
 
         if self.update_rules == "vectorized":
 
-            self.errors = self.errors.view(self.batchsize, self.num_vertices)
-            # self.values = self.values.view(self.batchsize, self.num_vertices)
-            # delta_w = torch.einsum('bi,bj->ij', self.errors, self.f(self.values))
+            # self.errors = self.errors.view(self.batchsize, self.num_vertices)
+            # # self.values = self.values.view(self.batchsize, self.num_vertices)
+            # # delta_w = torch.einsum('bi,bj->ij', self.errors, self.f(self.values))
 
-            feedback = np.dot(self.errors, self.weights)  # (batch_size, N) @ (N, N) -> (batch_size, N)
+            # feedback = np.dot(self.errors, self.weights)  # (batch_size, N) @ (N, N) -> (batch_size, N)
+            # delta_x = -self.errors + self.f_prime(self.values) * feedback
+
+            # feedback = torch.matmul(self.weights.T, self.errors.T).T
+
+            feedback = torch.matmul(self.errors, self.weights.T)
+
             delta_x = -self.errors + self.f_prime(self.values) * feedback
 
 
+            # temp = e*self.dfdx( torch.matmul(x, w.T) + bias )
+            # out = -torch.matmul( temp.T,  x ) # matmul takes care of batch sum
 
         # self.log_activations(delta_x, self.edge_type)
         # self.log_activations(self.data.x[:, 0], self.edge_type)
@@ -992,10 +1000,22 @@ class PCGraphConv(torch.nn.Module):
 
         self.predictions = self.get_predictions(self.data)
         # self.data.x[:, 2] = self.predictions.detach()
-        self.data.x[:, 2] = self.predictions
+
+        # view the predictions as batch_size x num_vertices
+        # self.predictions = self.predictions.view(self.batchsize, self.num_vertices)
+
+        # Ensure predictions are correctly shaped
+        self.predictions = self.predictions.view(-1, 1)  # Flatten batch and add singleton dimension if necessary
+
+        # Assign to the data tensor
+        if self.update_rules == "Salvatori":
+            self.data.x[:, 2] = self.predictions.squeeze()  # Remove the extra dimension if needed
+        else:
+            self.data.x[:, 2] = self.predictions  # Remove the extra dimension if needed
         
         # print("predictions shape", self.predictions.shape)
 
+        
         # self.errors = (self.values.to(self.device) - self.predictions.to(self.device)).squeeze(-1) 
         # self.errors = (self.values.to(self.device) - self.predictions.to(self.device)).detach()  # Detach to avoid retaining the computation graph
         # self.errors = (self.values.to(self.device) - self.predictions.to(self.device))  # USED FOR loss.backward()
@@ -1046,7 +1066,20 @@ class PCGraphConv(torch.nn.Module):
         # self.errors[self.internal_indices] += 0.1
         # print("!!!!!!!!!!!!!!!!!!!!!!!! IMPORTANT")        
         
-        self.data.x[:, 1] = self.errors.unsqueeze(-1)
+        # self.errors = self.errors.view(self.batchsize, self.num_vertices)
+
+        # self.predictions = self.predictions.view(-1, 1)  # Flatten batch and add singleton dimension if necessary
+        
+       
+        if self.update_rules == "Salvatori":
+            self.errors = self.errors.squeeze()
+
+        print("errors shape", self.errors.shape)
+        print("values shape", self.values.shape)
+        print("predictions shape", self.predictions.shape)
+        print("weights shape", self.weights.shape)
+        print("self.data.x[:, 1] shape", self.data.x[:, 1].shape)
+        self.data.x[:, 1] = self.errors.flatten()  # Flatten the errors and assign to the data tensor
         # data.x[self.nodes_2_update, 1] = errors[self.nodes_2_update, :]
 
        

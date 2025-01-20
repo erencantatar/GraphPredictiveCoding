@@ -314,12 +314,20 @@ def plot_model_weights(model, GRAPH_TYPE=None, model_dir=None, save_wandb=False)
         epoch_x = model_dir.split("_")[-1]
         wandb.log({f"Weights/weights_{epoch_x}": [wandb.Image(fig)]})
 
+        # if negative weights are present, log a single small image
+        if (W < 0).any():
+            fig = plt.figure(figsize=(5, 5))
+            plt.imshow(W < 0, cmap='viridis')
+            plt.title('Negative Weights')
+            plt.axis('off')
+            wandb.log({f"Weights/weights_negative_{epoch_x}": [wandb.Image(fig)]})
+
     if model_dir:
         plt.savefig(model_dir)
         plt.close(fig)
         print(f'Figure saved to {model_dir}')
-    else:
-        plt.show()
+    # else:
+    #     plt.show()
 
     return W
 
