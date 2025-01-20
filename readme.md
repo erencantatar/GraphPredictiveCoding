@@ -80,7 +80,7 @@ def gradfilter_ema(
 
 ## TODO
 
-
+- # validate_messagePassing()
 - random_internal=True, inside:
 model.query(method="pass", 
          random_internal=True,
@@ -102,6 +102,12 @@ model.query(method="pass",
    if self.edge_type.numel() > 0:
       self.log_delta_w(adjusted_delta_w if self.adjust_delta_w else delta_w, self.edge_type, log=False)
       
+
+## Sources:
+- https://github.com/bjornvz/PRECO/tree/main 
+- https://github.com/emptydiagram/pc-graphs 
+
+
 
 ## Optimzation for later:
 - Wandb sweep

@@ -61,11 +61,17 @@ parser.add_argument('--N', type=valid_int_or_all, default=20, help="Number of di
 parser.add_argument('--supervision_label_val', default=10, type=int, required=True, help='An integer value.')
 
 
-# -----graph-----  
+## -----graph-----  
 parser.add_argument('--num_internal_nodes', type=int, default=1500, help='Number of internal nodes.')
 parser.add_argument('--graph_type', type=str, default="fully_connected", help='Type of Graph', choices=list(graph_type_options.keys()))
 parser.add_argument('--remove_sens_2_sens', type=str2bool, required=True, help='Whether to remove sensory-to-sensory connections.')
 parser.add_argument('--remove_sens_2_sup', type=str2bool, required=True, help='Whether to remove sensory-to-supervised connections.')
+parser.add_argument('--discriminative_hidden_layers', type=valid_int_list, default=None, 
+                    help="Optional: Comma-separated list of integers specifying the number of nodes in each discriminative hidden layer. Only used if graph_type is 'single_hidden_layer'.")
+parser.add_argument('--generative_hidden_layers', type=valid_int_list, default=None, 
+                    help="Optional: Comma-separated list of integers specifying the number of nodes in each generative hidden layer. Only used if graph_type is 'single_hidden_layer'.")
+
+
 
 # --MessagePassing--
 parser.add_argument('--normalize_msg', choices=['True', 'False'], required=True,  help='Normalize message passing, expected True or False')
@@ -82,6 +88,11 @@ parser.add_argument('--T', type=int, default=40, help='Number of iterations for 
 parser.add_argument('--lr_values', type=float, default=0.001, help='Learning rate values (alpha).')
 parser.add_argument('--lr_weights', type=float, default=0.01, help='Learning rate weights (gamma).')
 parser.add_argument('--activation_func', default="swish", type=str, choices=list(activation_functions.keys()), required=True, help='Choose an activation function: tanh, relu, leaky_relu, linear, sigmoid, hard_tanh, swish')
+
+# update rules
+# parser str choices "Van_Zwol" or "salvatori", "vectorized"
+parser.add_argument('--update_rules', type=str, default="Salvatori", choices=["Van_Zwol", "Salvatori", "vectorized"], help="Choose the update rules for the model equations")
+
 
 parser.add_argument('--delta_w_selection', type=str, required=True, choices=["all", "internal_only"], help="Which weights to optimize in delta_w")
 parser.add_argument('--use_grokfast', type=str, default="False", choices=["True", "False"], help="GroKfast fast and slow weights before using the optimizer")
@@ -240,6 +251,40 @@ if graph_params["graph_type"]["name"] in ["custom_two_branch","two_branch_graph"
     
     # The total number of internal nodes will be the sum of both branches
     graph_params["internal_nodes"] = branch1_internal_nodes + branch2_internal_nodes
+
+
+
+if graph_params["graph_type"]["name"] in ["single_hidden_layer"]:
+
+    
+    # # discriminative_hidden_layers = [0]  # Adjust if layers change
+    # generative_hidden_layers = [50, 100, 200] # Adjust if layers change
+    
+    # # Calculate total number of nodes
+    # discriminative_hidden_layers = [200, 100, 50]  # Adjust if layers change
+    # # generative_hidden_layers = [0] # Adjust if layers change
+
+    discriminative_hidden_layers = args.discriminative_hidden_layers or [200, 100, 50]  # Default if not provided
+    generative_hidden_layers = args.generative_hidden_layers or [50, 100, 200]  # Default if not provided
+
+
+    num_discriminative_nodes = sum(discriminative_hidden_layers)
+    num_generative_nodes = sum(generative_hidden_layers)
+
+    graph_params["graph_type"]["params"]["discriminative_hidden_layers"] = discriminative_hidden_layers
+    graph_params["graph_type"]["params"]["generative_hidden_layers"]  = generative_hidden_layers
+   
+    graph_params["internal_nodes"] = num_discriminative_nodes + num_generative_nodes
+
+    # edge_index, N = test_single_hidden_layer(discriminative_hidden_layers, generative_hidden_layers,
+    #                                         no_sens2sens=True, no_sens2supervised=True)
+
+if graph_params["graph_type"]["name"] not in ["single_hidden_layer"]:
+    # Ensure these arguments are not specified for other graph types
+    assert args.discriminative_hidden_layers is None, \
+        "The argument --discriminative_hidden_layers can only be used if graph_type is 'single_hidden_layer'."
+    assert args.generative_hidden_layers is None, \
+        "The argument --generative_hidden_layers can only be used if graph_type is 'single_hidden_layer'."
 
 # if graph_params["graph_type"]["name"] in ["custom_two_branch", "two_branch_graph"]:
 #     # Configure internal nodes for two_branch_graph
@@ -409,6 +454,8 @@ model_params = {
     'sensory_indices': (sensory_indices), 
     'internal_indices': (internal_indices), 
     "supervised_learning": (supervision_indices),
+
+    "update_rules": args.update_rules,  # "Van_Zwol" or "salvatori", "vectorized"
     "delta_w_selection": args.delta_w_selection,  # "all" or "internal_only"
 
     "use_bias": args.use_bias,
@@ -819,6 +866,7 @@ for epoch in range(args.epochs):
     model.pc_conv1.batchsize = train_loader.batch_size
     model.pc_conv1.trace_activity_values = False 
     model.pc_conv1.trace_activity_preds = False
+    # model.pc_conv1.set_mode("training")
 
     for idx, (batch, clean) in enumerate(train_loader):
         torch.cuda.empty_cache()
@@ -976,8 +1024,8 @@ for epoch in range(args.epochs):
         #     for param_group in model.pc_conv1.optimizer_values.param_groups:
         #         param_group['lr'] = model.pc_conv1.lr_values
 
-        
-    if accuracy_mean >= 0.9 or (args.set_abs_small_w_2_zero == True and accuracy_mean > 0.8) or (args.set_abs_small_w_2_zero == True and epoch >= 8):
+    # if accuracy_mean >= 0.9 or (args.set_abs_small_w_2_zero == True and accuracy_mean > 0.8) or (args.set_abs_small_w_2_zero == True and epoch >= 8):
+    if (args.set_abs_small_w_2_zero == True and accuracy_mean > 0.8) or (args.set_abs_small_w_2_zero == True and epoch >= 8):
 
         #### CUT WEIGHTS ####
         if args.set_abs_small_w_2_zero:
@@ -1074,7 +1122,7 @@ for epoch in range(args.epochs):
     })
 
 
-    if epoch % 5 == 0 and epoch >= 2 and avg_SSIM_mean >= 0.1:
+    if epoch % 5 == 0 and epoch >= 2 and (avg_SSIM_mean >= 0.1 or avg_MSE_max > 0.4):
 
         plot_digits_vertically(train_loader_1_batch, model, test_params, custom_dataset_test.numbers_list)
 
@@ -1209,6 +1257,49 @@ wandb.log({
 
 
 #########################################################################################################
+
+test_params = {
+    "model_dir": model_dir,
+    "T": 20,
+    "supervised_learning":True, 
+    "num_samples": 5,
+    "add_sens_noise": False,
+    "num_wandb_img_log": 4,
+}
+MSE_values_occ = occlusion(train_loader_1_batch, model, test_params)
+wandb.log({
+    "Training/epoch": epoch,
+    "occlusion_sup/MSE_values_occ": MSE_values_occ,
+})
+
+### -------------------------------- UNSUP  --------------------------------
+# test_params = {
+#     "model_dir": model_dir,
+#     "T": 20,
+#     "supervised_learning":False, 
+#     "num_samples": 4,
+#     "add_sens_noise": False,
+#     "num_wandb_img_log": 3,
+# }
+# MSE_values_occ = occlusion(train_loader_1_batch, model, test_params)
+# wandb.log({
+#     "Training/epoch": epoch,
+#     "occlusion/MSE_values_occ": MSE_values_occ,
+# })
+
+
+test_params = {
+    "model_dir": model_dir,
+    "T": 20,
+    "supervised_learning":True, 
+    "num_samples": 3,
+    "num_wandb_img_log": 3,
+}
+
+# model.pc_conv1.lr_values = 0.1
+# model.pc_conv1.lr_values = model_params["lr_params"][0]
+
+MSE_values_denoise_sup = denoise(test_loader, model, test_params)
 
 save_path = os.path.join(model_dir, 'parameter_info/weight_matrix_visualization_epoch_End.png')
 plot_model_weights(model, GRAPH_TYPE, model_dir=save_path, save_wandb=True)
