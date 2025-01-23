@@ -316,11 +316,13 @@ def plot_model_weights(model, GRAPH_TYPE=None, model_dir=None, save_wandb=False)
 
         # if negative weights are present, log a single small image
         if (W < 0).any():
-            fig = plt.figure(figsize=(5, 5))
-            plt.imshow(W < 0, cmap='viridis')
-            plt.title('Negative Weights')
+            fig_neg, ax_neg = plt.subplots(figsize=(10, 8))
+            negative_weights = W * (W < 0)
+            im_neg = ax_neg.imshow(negative_weights, cmap='coolwarm', aspect='auto')
+            fig_neg.colorbar(im_neg, ax=ax_neg, label='Negative weight magnitude')
+            ax_neg.set_title('Negative Weights and Their Magnitudes')
             plt.axis('off')
-            wandb.log({f"Weights/weights_negative_{epoch_x}": [wandb.Image(fig)]})
+            wandb.log({f"Weights_neg/weights_negative_{epoch_x}": [wandb.Image(fig)]})
 
     if model_dir:
         plt.savefig(model_dir)

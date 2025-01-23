@@ -226,7 +226,7 @@ class CustomGraphDataset(Dataset):
             if idx == 0:  # Only print for the first batch to avoid repetitive output
                 print("Adding label", label, label_vector)
 
-        print("Done for idx", idx)
+        # print("Done for idx", idx)
         # Node features: value, prediction, and error for each node
         errors = torch.zeros_like(values)
         predictions = torch.zeros_like(values)

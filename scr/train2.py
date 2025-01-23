@@ -85,6 +85,8 @@ parser.add_argument('--use_bias',  choices=['True', 'False'], required=True, hel
 parser.add_argument("--bias_init", type=str, default="", required=False, help="ege. fixed 0.0 Initialization method and params for biases")
 
 parser.add_argument('--T', type=int, default=40, help='Number of iterations for gradient descent.')
+# TODO make T_train and T_test
+# parser.add_argument('--T', type=int, default=40, help='Number of iterations for gradient descent.')
 parser.add_argument('--lr_values', type=float, default=0.001, help='Learning rate values (alpha).')
 parser.add_argument('--lr_weights', type=float, default=0.01, help='Learning rate weights (gamma).')
 parser.add_argument('--activation_func', default="swish", type=str, choices=list(activation_functions.keys()), required=True, help='Choose an activation function: tanh, relu, leaky_relu, linear, sigmoid, hard_tanh, swish')
@@ -126,6 +128,7 @@ print(f'Using device: {device}')
 print(f"Seed used", args.seed)
 if torch.cuda.is_available():
     print("Device name: ", torch.cuda.get_device_name(0))
+
 print("---------------model.pc_conv1.log_delta_w() turned off-----------------")
 
 # Make True of False bool
@@ -156,6 +159,9 @@ if args.dataset_transform:
     if "random_rotation" in args.dataset_transform:
         transform_list.append(transforms.RandomRotation(degrees=20))
     
+
+
+
 
 # Create the transform
 transform = transforms.Compose(transform_list)
@@ -219,14 +225,11 @@ graph_params = {
 }
 
 
-
-
 # add graph specific info: 
-print("zzz", args.remove_sens_2_sens, args.remove_sens_2_sup)
+# print("zzz", args.remove_sens_2_sens, args.remove_sens_2_sup)
 graph_params["graph_type"]["params"]["remove_sens_2_sens"] = args.remove_sens_2_sens  
 graph_params["graph_type"]["params"]["remove_sens_2_sup"]  = args.remove_sens_2_sup 
 
-print("graph_params 1 ", graph_params)
 
 if graph_params["graph_type"]["name"] == "stochastic_block":
     
@@ -253,6 +256,7 @@ if graph_params["graph_type"]["name"] in ["custom_two_branch","two_branch_graph"
     graph_params["internal_nodes"] = branch1_internal_nodes + branch2_internal_nodes
 
 
+eval_generation, eval_classification, eval_denoise, eval_occlusion = True, True, 0, 0 
 
 if graph_params["graph_type"]["name"] in ["single_hidden_layer"]:
 
@@ -279,6 +283,13 @@ if graph_params["graph_type"]["name"] in ["single_hidden_layer"]:
     # edge_index, N = test_single_hidden_layer(discriminative_hidden_layers, generative_hidden_layers,
     #                                         no_sens2sens=True, no_sens2supervised=True)
 
+    if sum(discriminative_hidden_layers) == 0:
+        eval_classification = False
+    if sum(generative_hidden_layers) == 0:
+        eval_generation = False
+
+    # eval_generation, eval_classification, eval_denoise, eval_occlusion = True, True, 0, 0 
+
 if graph_params["graph_type"]["name"] not in ["single_hidden_layer"]:
     # Ensure these arguments are not specified for other graph types
     assert args.discriminative_hidden_layers is None, \
@@ -302,6 +313,7 @@ if graph_params["graph_type"]["name"] not in ["single_hidden_layer"]:
 #     # The total number of internal nodes will be the sum of both branches
 #     graph_params["internal_nodes"] = branch1_internal_nodes + branch2_internal_nodes
 
+print("graph_params 1 :", graph_params)
 
 
 from dataset import CustomGraphDataset
@@ -446,6 +458,16 @@ elif args.optimizer is False:
 else:
     # Catch invalid or improperly parsed True cases
     raise ValueError(f"Invalid value for optimizer: {args.optimizer}. Expected False or a float value.")
+
+
+# if args.update_rules == "Van_Zwol":
+
+#     # transpose adj
+#     custom_dataset_train.edge_index_tensor = torch.flip(custom_dataset_train.edge_index_tensor, dims=[0])
+
+#     print("DISREGARDING EDGE TYPES FOR NOW")
+#     # "edge_type":  custom_dataset_train.edge_type,
+
 
 
 model_params = {
@@ -695,6 +717,9 @@ if args.model_type.lower() == "ipc":
         debug=False, device=device)
     print("-----------Loading IPC model-----------")
 
+model.pc_conv1.graph_type = args.graph_type
+
+
 # Magic
 wandb.watch(model, 
             log="all",   # (str) One of "gradients", "parameters", "all", or None
@@ -851,6 +876,12 @@ threshold_earlystop = 0.05
 max_energy_threshold = 1e6
 accuracy_mean = 0 
 
+items_per_epoch = 10 
+# because batch size is 1
+if args.update_rules == "Van_Zwol":
+    items_per_epoch = 50
+
+
 start_time = time.time()
 
 training_labels = [] 
@@ -921,7 +952,8 @@ for epoch in range(args.epochs):
                 earlystop = True
                 break
 
-            if idx >= 10:
+            
+            if idx >= items_per_epoch:
                 print("Epoch checkpoint reached, saving model...")
 
                 # model_filename = f"model_state_dict_{epoch}.pth"
@@ -988,7 +1020,7 @@ for epoch in range(args.epochs):
     # Adjust num_samples based on accuracy
     test_params = {
         "model_dir": model_dir,
-        "T":100,
+        #"T":100,
         "supervised_learning":False, 
         # "num_samples": 3*len(custom_dataset_test.numbers_list),
         "num_wandb_img_log": num_wandb_img_log,
@@ -1008,14 +1040,15 @@ for epoch in range(args.epochs):
         earlystop = True
         break
 
-    y_true, y_pred, accuracy_mean = classification(train_loader_1_batch, model, test_params)
-    # Log accuracy_mean grouped under classification
-    wandb.log({
-        "epoch": epoch,
-        "classification/accuracy_mean": accuracy_mean,
-        "classification/size":  len(y_true),
-    })
-    
+    if eval_classification:
+        y_true, y_pred, accuracy_mean = classification(train_loader_1_batch, model, test_params)
+        # Log accuracy_mean grouped under classification
+        wandb.log({
+            "epoch": epoch,
+            "classification/accuracy_mean": accuracy_mean,
+            "classification/size":  len(y_true),
+        })
+        
 
 
         # if model.pc_conv1.optimizer_weights is not None:
@@ -1057,34 +1090,38 @@ for epoch in range(args.epochs):
         # Adjust num_samples based on accuracy
         test_params = {
             "model_dir": model_dir,
-            "T":100,
+            #"T":100,
             "supervised_learning":False, 
             "num_samples": 100,
             "num_wandb_img_log": num_wandb_img_log,
         }
 
-        y_true, y_pred, accuracy_mean = classification(train_loader_1_batch, model, test_params)
+        if eval_classification:
+            y_true, y_pred, accuracy_mean = classification(train_loader_1_batch, model, test_params)
 
-        if args.set_abs_small_w_2_zero:
-            wandb.log({
-                "epoch": epoch,
-                "classification_test/accuracy_mean_smallWeight2zero": accuracy_mean,
-            })
-        else:
-            wandb.log({
-                "epoch": epoch,
-                "classification_test/accuracy_mean": accuracy_mean,
-            })
+            if args.set_abs_small_w_2_zero:
+                wandb.log({
+                    "epoch": epoch,
+                    "classification_test/accuracy_mean_smallWeight2zero": accuracy_mean,
+                })
+            else:
+                wandb.log({
+                    "epoch": epoch,
+                    "classification_test/accuracy_mean": accuracy_mean,
+                })
+
+        if eval_generation:
             
-        test_params = {
-            "model_dir": model_dir,
-            "T": 100,
-            "supervised_learning":True, 
-            "num_samples": 5,
-            "num_wandb_img_log": 3,
-        }
-        avg_SSIM_mean, avg_SSIM_max, avg_MSE_mean, avg_MSE_max = generation(train_loader_1_batch, model, test_params, clean_images, verbose=0)
-        
+            test_params = {
+                "model_dir": model_dir,
+                #"T": 100,
+                "supervised_learning":True, 
+                "num_samples": 5,
+                "num_wandb_img_log": 3,
+            }
+            avg_SSIM_mean, avg_SSIM_max, avg_MSE_mean, avg_MSE_max = generation(train_loader_1_batch, model, test_params, clean_images, verbose=0)
+            
+
         print("Ommited model saving")
         
         exit()
@@ -1102,32 +1139,33 @@ for epoch in range(args.epochs):
     #     model.pc_conv1.lr_weights = model.pc_conv1.lr_weights / 2
     #     model.pc_conv1.lr_values = model.pc_conv1.lr_values / 2
 
-
-    test_params = {
-        "model_dir": model_dir,
-        "T": 100,
-        "supervised_learning":True, 
-        "num_samples": 5,
-        "num_wandb_img_log": 1,
-    }
-    avg_SSIM_mean, avg_SSIM_max, avg_MSE_mean, avg_MSE_max = generation(train_loader_1_batch, model, test_params, clean_images, verbose=0)
-    
-    # Log SSIM and MSE metrics grouped under generation
-    wandb.log({
-        "Training/epoch": epoch,
-        "generation/SSIM_mean": avg_SSIM_mean,
-        "generation/SSIM_max": avg_SSIM_max,
-        "generation/MSE_mean": avg_MSE_mean,
-        "generation/MSE_max": avg_MSE_max,
-    })
+    if  eval_generation:
+        test_params = {
+            "model_dir": model_dir,
+            #"T": 100,
+            "supervised_learning":True, 
+            "num_samples": 5,
+            "num_wandb_img_log": 1,
+        }
+        avg_SSIM_mean, avg_SSIM_max, avg_MSE_mean, avg_MSE_max = generation(train_loader_1_batch, model, test_params, clean_images, verbose=0)
+        
+        # Log SSIM and MSE metrics grouped under generation
+        wandb.log({
+            "Training/epoch": epoch,
+            "generation/SSIM_mean": avg_SSIM_mean,
+            "generation/SSIM_max": avg_SSIM_max,
+            "generation/MSE_mean": avg_MSE_mean,
+            "generation/MSE_max": avg_MSE_max,
+        })
 
 
     if epoch % 5 == 0 and epoch >= 2 and (avg_SSIM_mean >= 0.1 or avg_MSE_max > 0.4):
+        
+        if eval_generation:
+            plot_digits_vertically(train_loader_1_batch, model, test_params, custom_dataset_test.numbers_list)
 
-        plot_digits_vertically(train_loader_1_batch, model, test_params, custom_dataset_test.numbers_list)
-
-        # plot_digits_vertically(test_loader, model=model, test_params, numbers_list=custom_dataset_test.numbers_list)
-        progressive_digit_generation(train_loader_1_batch, model, test_params, custom_dataset_test.numbers_list)
+            # plot_digits_vertically(test_loader, model=model, test_params, numbers_list=custom_dataset_test.numbers_list)
+            progressive_digit_generation(train_loader_1_batch, model, test_params, custom_dataset_test.numbers_list)
 
     # change the LR for the weights after 10 epochs
 
@@ -1168,7 +1206,7 @@ for epoch in range(args.epochs):
 
         test_params = {
             "model_dir": model_dir,
-            "T": 140,
+            #"T": 140,
             "supervised_learning":True, 
             "num_samples": 5,
             "add_sens_noise": False,
@@ -1183,7 +1221,7 @@ for epoch in range(args.epochs):
 
         test_params = {
             "model_dir": model_dir,
-            "T": 140,
+            #"T": 140,
             "supervised_learning":False, 
             "num_samples": 4,
             "add_sens_noise": False,
@@ -1213,15 +1251,17 @@ for epoch in range(args.epochs):
         element_counts = Counter(training_labels)
 
     if epoch % 3 == 0:
-        # Log a bar plot to WandB
-        wandb.log({"Training/element_counts_bar": wandb.plot.bar(
-            wandb.Table(data=[[k, v] for k, v in element_counts.items()], columns=["Label", "Count"]),
-            "Label",
-            "Count",
-            title="Element Counts"
-        )})
-
-
+        # try except block for training
+        try:
+            # Log a bar plot to WandB
+            wandb.log({"Training/element_counts_bar": wandb.plot.bar(
+                wandb.Table(data=[[k, v] for k, v in element_counts.items()], columns=["Label", "Count"]),
+                "Label",
+                "Count",
+                title="Element Counts"
+            )})
+        except Exception as e:
+            print(f"Could not log element counts: {e}")
 
                     
 
@@ -1239,28 +1279,29 @@ print(f"Training completed in {end_time - start_time:.2f} seconds for {args.epoc
 # Adjust num_samples based on accuracy
 test_params = {
     "model_dir": model_dir,
-    "T":100,
+    #"T":100,
     "supervised_learning":False, 
     "num_samples": 100,
     "num_wandb_img_log": 4,
 }
 
-y_true, y_pred, accuracy_mean = classification(test_loader, model, test_params)
+if eval_classification:
+    y_true, y_pred, accuracy_mean = classification(test_loader, model, test_params)
 
-wandb.log({
-    "epoch": epoch,
-    "classification_test/y_true": y_true,
-    "classification_test/y_pred": y_pred,
-    "classification_test/size":  len(y_true),
-    "classification_test/accuracy_mean": accuracy_mean,
-})
+    wandb.log({
+        "epoch": epoch,
+        "classification_test/y_true": y_true,
+        "classification_test/y_pred": y_pred,
+        "classification_test/size":  len(y_true),
+        "classification_test/accuracy_mean": accuracy_mean,
+    })
 
 
 #########################################################################################################
 
 test_params = {
     "model_dir": model_dir,
-    "T": 20,
+    #"T": 20,
     "supervised_learning":True, 
     "num_samples": 5,
     "add_sens_noise": False,
@@ -1275,7 +1316,7 @@ wandb.log({
 ### -------------------------------- UNSUP  --------------------------------
 # test_params = {
 #     "model_dir": model_dir,
-#     "T": 20,
+#     #"T": 20,
 #     "supervised_learning":False, 
 #     "num_samples": 4,
 #     "add_sens_noise": False,
@@ -1290,7 +1331,7 @@ wandb.log({
 
 test_params = {
     "model_dir": model_dir,
-    "T": 20,
+    #"T": 20,
     "supervised_learning":True, 
     "num_samples": 3,
     "num_wandb_img_log": 3,
@@ -1398,7 +1439,7 @@ wandb.log({"model_dir": model_dir})
 # model.pc_conv1.batchsize = 1
 # test_params = {
 #     "model_dir": model_dir,
-#     "T":300,
+#     #"T":300,
 #     "supervised_learning":False, 
 #     "num_samples": 15,
 #     "num_wandb_img_log": num_wandb_img_log,
@@ -1424,7 +1465,7 @@ wandb.log({"model_dir": model_dir})
 
 # test_params = {
 #     "model_dir": model_dir,
-#     "T": 300,
+#     #"T": 300,
 #     "supervised_learning":True, 
 #     "num_samples": 6,
 #     "num_wandb_img_log": num_wandb_img_log,
@@ -1453,7 +1494,7 @@ wandb.log({"model_dir": model_dir})
 
 # test_params = {
 #     "model_dir": model_dir,
-#     "T": 300,
+#     #"T": 300,
 #     "supervised_learning":True, 
 #     "num_samples": 15,
 #     "num_wandb_img_log": num_wandb_img_log,

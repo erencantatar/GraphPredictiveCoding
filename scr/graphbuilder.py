@@ -326,101 +326,14 @@ class GraphBuilder:
 
 
 
-    # def single_hidden_layer(self, no_sens2sens=False, no_sens2supervised=False, bidirectional_hidden=False):
-    #     """Creates a graph with shared internal nodes and layers for discriminative and generative paths."""
-    #     self.edge_index = []
-    #     self.edge_type = []
-
-    #     discriminative_hidden_layers = [700, 200, 100] 
-    #     generative_hidden_layers = [100, 200, 700]
-
-    #     # Create ranges for discriminative and generative layers
-    #     discriminative_layers = [
-    #         range(sum(discriminative_hidden_layers[:i]), sum(discriminative_hidden_layers[:i + 1]))
-    #         for i in range(len(discriminative_hidden_layers))
-    #     ]
-
-    #     generative_layers = [
-    #         range(sum(generative_hidden_layers[:i]) + sum(discriminative_hidden_layers),
-    #               sum(generative_hidden_layers[:i + 1]) + sum(discriminative_hidden_layers))
-    #         for i in range(len(generative_hidden_layers))
-    #     ]
-
-       
-    #     total_hidden_nodes = sum(discriminative_hidden_layers) + sum(generative_hidden_layers)
-    #     num_internal_nodes = self.num_internal_nodes if isinstance(self.num_internal_nodes, int) else sum(self.num_internal_nodes)
-    #     internal_nodes = range(total_hidden_nodes, total_hidden_nodes + num_internal_nodes)
-
-
-    #      # Connect internal_nodes <- discriminative_hidden_layer_last
-    #     for hidden_node in discriminative_layers[-1]:
-    #         for internal_node in internal_nodes:
-    #             self.edge_index.append([hidden_node, internal_node])
-    #             self.edge_type.append("Inter2Inter")
-
-    #     # Connect sensory -> discriminative_hidden_layer_1
-    #     for sensory_node in self.num_sensor_nodes:
-    #         for hidden_node in discriminative_layers[0]:
-    #             self.edge_index.append([sensory_node, hidden_node])
-    #             self.edge_type.append("Sens2Inter")
-
-    #     # Connect discriminative layers sequentially
-    #     for i in range(len(discriminative_layers) - 1):
-    #         for node_from in discriminative_layers[i]:
-    #             for node_to in discriminative_layers[i + 1]:
-    #                 self.edge_index.append([node_from, node_to])
-    #                 self.edge_type.append("Inter2Inter")
-
-    #     # Connect internal_nodes -> generative_hidden_layer_1
-    #     for internal_node in internal_nodes:
-    #         for hidden_node in generative_layers[0]:
-    #             self.edge_index.append([internal_node, hidden_node])
-    #             self.edge_type.append("Inter2Inter")
-
-    #     # Connect generative layers sequentially
-    #     for i in range(len(generative_layers) - 1):
-    #         for node_from in generative_layers[i]:
-    #             for node_to in generative_layers[i + 1]:
-    #                 self.edge_index.append([node_from, node_to])
-    #                 self.edge_type.append("Inter2Inter")
-
-    #     # Connect generative_hidden_layer_last -> sensory
-    #     for hidden_node in generative_layers[-1]:
-    #         for sensory_node in self.num_sensor_nodes:
-    #             self.edge_index.append([hidden_node, sensory_node])
-    #             self.edge_type.append("Inter2Sens")
-
-    #     # Add bidirectional connections within each layer if needed
-    #     if bidirectional_hidden:
-    #         for layer in discriminative_layers + generative_layers:
-    #             for node_from in layer:
-    #                 for node_to in layer:
-    #                     if node_from != node_to and random.random() < 0.1:
-    #                         self.edge_index.append([node_from, node_to])
-    #                         self.edge_type.append("Inter2Inter")
-
-    #     # Add Sens2Sens connections if enabled
-    #     if not no_sens2sens:
-    #         for i in self.num_sensor_nodes:
-    #             for j in self.num_sensor_nodes:
-    #                 if i != j:
-    #                     self.edge_index.append([i, j])
-    #                     self.edge_type.append("Sens2Sens")
-
-    #     # Add Sens2Sup connections if enabled
-    #     if not no_sens2supervised:
-    #         for sensory_node in self.num_sensor_nodes:
-    #             for sup_node in self.supervision_indices:
-    #                 self.edge_index.append([sensory_node, sup_node])
-    #                 self.edge_type.append("Sens2Sup")
-
-    #     print("Custom graph with shared internal nodes and multi-layer paths created.")
-
     def single_hidden_layer(self, discriminative_hidden_layers, generative_hidden_layers,
                                 no_sens2sens=False, no_sens2supervised=False, bidirectional_hidden=False):
         """Creates a graph with shared internal nodes and layers for discriminative and generative paths."""
         # edge_index = []
         # edge_type = []
+
+        # swap 
+        # discriminative_hidden_layers, generative_hidden_layers = generative_hidden_layers, discriminative_hidden_layers
 
         # Sensory nodes
         num_sensor_nodes = range(0, 784)
@@ -455,11 +368,12 @@ class GraphBuilder:
                 self.edge_index.append([hidden_node, sensory_node])  # Direction: hidden -> sensory
                 self.edge_type.append("Inter2Sens")
 
-        # Connect generative layers sequentially
+        # Connect generative layers sequentially (Reverse direction: hidden_n+1 -> hidden_n)
         for i in range(len(generative_layers) - 1):
-            for node_from in generative_layers[i]:
+            for idx, node_from in enumerate(generative_layers[i]):
+                # if idx % 2 == 0:  # Keep half the connections to ensure direction
                 for node_to in generative_layers[i + 1]:
-                    self.edge_index.append([node_to, node_from])  # Direction: hidden_n+1 -> hidden_n
+                    self.edge_index.append([node_to, node_from])
                     self.edge_type.append("Inter2Inter")
 
         # Connect last generative layer -> supervision
@@ -475,12 +389,14 @@ class GraphBuilder:
                 self.edge_index.append([sensory_node, hidden_node])  # Direction: sensory -> hidden
                 self.edge_type.append("Sens2Inter")
 
-        # Connect discriminative layers sequentially
+        # Connect discriminative layers sequentially (Forward direction: hidden_n -> hidden_n+1)
         for i in range(len(discriminative_layers) - 1):
-            for node_from in discriminative_layers[i]:
+            for idx, node_from in enumerate(discriminative_layers[i]):
+                # if idx % 2 == 0:  # Keep half the connections to ensure direction
                 for node_to in discriminative_layers[i + 1]:
-                    self.edge_index.append([node_from, node_to])  # Direction: hidden_n -> hidden_n+1
+                    self.edge_index.append([node_from, node_to])
                     self.edge_type.append("Inter2Inter")
+
 
         # Connect last discriminative layer -> supervision
         for hidden_node in discriminative_layers[-1]:
@@ -779,10 +695,18 @@ class GraphBuilder:
         fully_connect_last_cluster = self.graph_params.get("full_con_last_cluster_w_sup", False)
         # If requested, fully connect the last community with the supervised nodes
         if fully_connect_last_cluster and self.supervised_learning:
-            last_cluster_idx = num_communities - 2  # Last internal community
-            supervision_cluster_idx = num_communities - 1  # Supervised nodes
-            p[last_cluster_idx, supervision_cluster_idx] = 1.0
-            p[supervision_cluster_idx, last_cluster_idx] = 1.0
+
+            # for last 5 cluster make stronger connection
+            for i in range(2,10,1):
+                last_cluster_idx = num_communities - i  # Last internal community
+                supervision_cluster_idx = num_communities - 1  # Supervised nodes
+                p[last_cluster_idx, supervision_cluster_idx] = 0.7
+                p[supervision_cluster_idx, last_cluster_idx] = 0.7
+
+            # last_cluster_idx = num_communities - 2  # Last internal community
+            # supervision_cluster_idx = num_communities - 1  # Supervised nodes
+            # p[last_cluster_idx, supervision_cluster_idx] = 0.7
+            # p[supervision_cluster_idx, last_cluster_idx] = 0.7
 
         print("Got the sizes", sizes)
         G = nx.stochastic_block_model(sizes, p, directed=True, seed=self.seed)
