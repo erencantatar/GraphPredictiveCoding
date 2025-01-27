@@ -314,10 +314,6 @@ def denoise(test_loader, model, test_params, sigma=0.1):
     # model.pc_conv1.nodes_2_update +=  list(model.pc_conv1.supervised_labels)
 
     model.pc_conv1.restart_activity()
-
-
-    model.pc_conv1.T = test_params["T"] 
-
     model.pc_conv1.set_mode("testing", task="reconstruction")
     model.pc_conv1.batchsize = 1
 

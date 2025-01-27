@@ -106,6 +106,14 @@ class IPCGraphConv(PCGraphConv):
                 # aggr_out = self.forward(data)
                 self.t = t 
 
+                # 1. predictions 
+                self.predictions = self.get_predictions(self.data)
+                # 2. errors
+                self.errors = self.values - self.predictions
+
+                self.data.x[:, 1] = self.errors.view(-1, 1)
+                self.data.x[:, 2] = self.predictions.view(-1, 1)
+
                 self.update_values()
                 
                 self.set_phase('weight_update')

@@ -224,6 +224,8 @@ graph_params = {
     "seed": args.seed,   
 }
 
+eval_generation, eval_classification, eval_denoise, eval_occlusion = True, True, 0, 0 
+
 
 # add graph specific info: 
 # print("zzz", args.remove_sens_2_sens, args.remove_sens_2_sup)
@@ -256,7 +258,6 @@ if graph_params["graph_type"]["name"] in ["custom_two_branch","two_branch_graph"
     graph_params["internal_nodes"] = branch1_internal_nodes + branch2_internal_nodes
 
 
-eval_generation, eval_classification, eval_denoise, eval_occlusion = True, True, 0, 0 
 
 if graph_params["graph_type"]["name"] in ["single_hidden_layer"]:
 
@@ -288,7 +289,8 @@ if graph_params["graph_type"]["name"] in ["single_hidden_layer"]:
     if sum(generative_hidden_layers) == 0:
         eval_generation = False
 
-    # eval_generation, eval_classification, eval_denoise, eval_occlusion = True, True, 0, 0 
+    # TODO ; still unsure about which graph does which task
+    eval_generation, eval_classification, eval_denoise, eval_occlusion = True, True, 0, 0 
 
 if graph_params["graph_type"]["name"] not in ["single_hidden_layer"]:
     # Ensure these arguments are not specified for other graph types
@@ -1030,7 +1032,7 @@ for epoch in range(args.epochs):
 
     if accuracy_mean > 0.8:  # Adjust the threshold as needed
         test_params["num_samples"] = 5 * len(custom_dataset_test.numbers_list)  # Increase samples if accuracy is high
-    elif accuracy_mean == 1:
+    elif accuracy_mean > 0.9 and accuracy_mean < 1:
         test_params["num_samples"] = 100  # Moderate increase for mid-range accuracy
         
     elif accuracy_mean > 0.6:
@@ -1058,7 +1060,7 @@ for epoch in range(args.epochs):
         #         param_group['lr'] = model.pc_conv1.lr_values
 
     # if accuracy_mean >= 0.9 or (args.set_abs_small_w_2_zero == True and accuracy_mean > 0.8) or (args.set_abs_small_w_2_zero == True and epoch >= 8):
-    if (args.set_abs_small_w_2_zero == True and accuracy_mean > 0.8) or (args.set_abs_small_w_2_zero == True and epoch >= 8):
+    if (args.set_abs_small_w_2_zero == True and accuracy_mean > 0.8) or (args.set_abs_small_w_2_zero == True and epoch >= 8) or accuracy_mean > 0.95:
 
         #### CUT WEIGHTS ####
         if args.set_abs_small_w_2_zero:
@@ -1159,7 +1161,7 @@ for epoch in range(args.epochs):
         })
 
 
-    if epoch % 5 == 0 and epoch >= 2 and (avg_SSIM_mean >= 0.1 or avg_MSE_max > 0.4):
+    if (epoch % 5 == 0 and epoch >= 2) and ((avg_SSIM_mean >= 0.1 or avg_MSE_max > 0.4) or accuracy_mean > 0.8):
         
         if eval_generation:
             plot_digits_vertically(train_loader_1_batch, model, test_params, custom_dataset_test.numbers_list)
@@ -1341,6 +1343,20 @@ test_params = {
 # model.pc_conv1.lr_values = model_params["lr_params"][0]
 
 MSE_values_denoise_sup = denoise(test_loader, model, test_params)
+
+
+test_params = {
+    "model_dir": model_dir,
+    #"T": 100,
+    "supervised_learning":True, 
+    "num_samples": 5,
+    "num_wandb_img_log": 1,
+}
+
+plot_digits_vertically(train_loader_1_batch, model, test_params, custom_dataset_test.numbers_list)
+progressive_digit_generation(train_loader_1_batch, model, test_params, custom_dataset_test.numbers_list)
+
+
 
 save_path = os.path.join(model_dir, 'parameter_info/weight_matrix_visualization_epoch_End.png')
 plot_model_weights(model, GRAPH_TYPE, model_dir=save_path, save_wandb=True)

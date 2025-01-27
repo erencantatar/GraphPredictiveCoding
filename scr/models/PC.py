@@ -17,7 +17,6 @@ from PIL import Image
 
 import torch.optim.lr_scheduler
 
-
 class PCGraphConv(torch.nn.Module): 
     def __init__(self, num_vertices, sensory_indices, internal_indices, 
                  learning_rate, T, graph_structure,
@@ -44,7 +43,7 @@ class PCGraphConv(torch.nn.Module):
         self.T = T  # Number of iterations for gradient descent
         
         self.T_train = self.T
-        self.T_test = self.T * 5 
+        self.T_test = self.T * 7 
    
         self.debug = debug
         self.edge_index_single_graph = graph_structure  # a geometric graph structure
@@ -301,22 +300,7 @@ class PCGraphConv(torch.nn.Module):
 
         # https://chatgpt.com/c/0f9c0802-c81b-40df-8870-3cea4d2fc9b7
 
-        
-        # single_graph_weights = torch.nn.Parameter(torch.zeros(edge_index.size(1) // self.batchsize,  device=self.device), requires_grad=False)
-        # init.uniform_(single_graph_weights, -k, k)
-        # # Repeat weights across the batch
-        # self.weights = single_graph_weights.repeat(self.batchsize)
-
-        # single_graph_weights = torch.nn.Parameter(torch.zeros(edge_index.size(1) // self.batchsize, device=self.device))
-        # init.uniform_(single_graph_weights, -k, k)
-        # # Repeat weights across the batch
-        # repeated_weights = single_graph_weights.repeat(self.batchsize)
-        # # Convert repeated weights back into a Parameter
-        # self.weights = nn.Parameter(repeated_weights)
-
-        # self.weights = torch.nn.Parameter(torch.ones(self.num_vertices, self.num_vertices))
-        # self.initialize_weights(init_method="uniform")
-
+    
         # graph object is stored as one big graph with one edge_index vector with disconnected sub graphs as batch items 
         self.values_dummy = torch.nn.Parameter(torch.zeros(self.batchsize * self.num_vertices, device=self.device), requires_grad=True) # requires_grad=False)                
         self.values = None
@@ -341,11 +325,7 @@ class PCGraphConv(torch.nn.Module):
             # weight_decay = self.use_optimizers[0]
 
             print(f"------------Using optimizers with weight_decay {weight_decay} ------------")
-            # self.optimizer_weights = torch.optim.Adam([self.weights], lr=self.lr_weights, weight_decay=1e-2) #weight_decay=1e-2)        
-            # self.optimizer_weights = torch.optim.SGD([self.weights], lr=self.lr_weights)
-            # self.optimizer_weights = torch.optim.SGD([self.weights], lr=self.gamma) #weight_decay=1e-2)
-            # self.optimizer_values = torch.optim.SGD([self.values_dummy], lr=self.lr_values)
-
+            
             # paper: 
             # SGD configured as plain gradient descent
 
@@ -631,8 +611,6 @@ class PCGraphConv(torch.nn.Module):
         # norm = torch.sparse_coo_tensor(edge_index, deg_inv_sqrt[row] * deg_inv_sqrt[col], size=(num_nodes, num_nodes)).to(device)
 
         return norm
-
-
     def initialize_weights(self, init_method):
         if init_method == "uniform":
             init.uniform_(self.weights, -0.1, 0.1)
@@ -845,11 +823,22 @@ class PCGraphConv(torch.nn.Module):
 
             weights_batched_graph = self.weights.repeat(1, self.batchsize).to(self.device)
 
-            self.predictions = self.prediction_mp(self.data.x.to(self.device), self.data.edge_index.to(self.device), weights_batched_graph, norm=self.norm.to(self.device))
+            # weights_batched_graph_T = self.weights.T.repeat(1, self.batchsize).to(self.device)
+
+            # self.predictions = self.prediction_mp(self.data.x.to(self.device), self.data.edge_index.to(self.device), weights_batched_graph, norm=self.norm.to(self.device))
             # self.predictions = self.prediction_mp(self.data.x.to(self.device), self.data.edge_index.to(self.device), self.weights)
+            
+            # ------------- TODO NEW ----------------------
+            # print("self.data.x[:, 1].shape", self.data.x[:, 1].shape)
+            # print("self.predictions.shape", self.predictions.shape)
+
+            # self.errors = self.data.x[:, 1].to(self.device) - self.predictions
+            # # write error back 
+            # self.data.x[:, 2] = self.errors
 
             with torch.no_grad():
-
+                
+                # calculate dE/dx 
                 delta_x = self.values_mp(self.data.x.to(self.device), self.data.edge_index.to(self.device), weights_batched_graph, norm=self.norm.to(self.device)).squeeze()
                 # delta_x = delta_x.detach()
 
@@ -875,7 +864,7 @@ class PCGraphConv(torch.nn.Module):
             ### ------------------------------------ NEW ------------------------------------ ###
             e = self.errors.view(self.num_vertices)  # [8, 1094, 1]
             a = self.values.view(self.num_vertices)  # [8, 1094, 1]
-            W = self.weights.T  # N, N
+            W = self.weights  # N, N
             fp_wa = self.f_prime(W @ a)
 
             delta_x = e - torch.matmul(W.T, e) * (fp_wa)
@@ -888,10 +877,9 @@ class PCGraphConv(torch.nn.Module):
             feedback = torch.matmul(self.errors, self.weights.T)
             delta_x = -self.errors + self.f_prime(self.values) * feedback
 
-        #### TODO NEW 
-        if self.delta_w_selection == "internal_only":
-            delta_x[self.sensory_indices_batch] = 0  # Sensory nodes are fixed
-
+        # #### TODO NEW 
+        # if self.delta_w_selection == "internal_only":
+        #     delta_x[self.sensory_indices_batch] = 0  # Sensory nodes are fixed
 
         # self.copy_node_values_to_dummy(self.values)
         self.copy_node_values_to_dummy(self.data.x[:, 0])
@@ -971,8 +959,6 @@ class PCGraphConv(torch.nn.Module):
         # self.effective_learning["v_max"].append(effective_lr.max().item())
         # self.effective_learning["v_min"].append(effective_lr.min().item())
 
-
-
     def get_predictions(self, data):
         self.get_graph()
 
@@ -983,7 +969,6 @@ class PCGraphConv(torch.nn.Module):
 
 
             if self.update_rules == "Salvatori":
-
 
                 self.predictions = self.prediction_mp(self.data.x.to(self.device), self.data.edge_index.to(self.device), weights_batched_graph, norm=self.norm.to(self.device))
                 # self.predictions = self.prediction_mp(self.data.x.to(self.device), self.data.edge_index.to(self.device), self.weights)
@@ -997,7 +982,7 @@ class PCGraphConv(torch.nn.Module):
 
                 a = self.data.x[:, 0].view(self.num_vertices)  # Shape: (N,)
                 # pred = f(wa) where w (NxN) and a (N,)
-                W = self.weights.T    # CHANGED TO W.T
+                W = self.weights    # CHANGED TO W.T
                 self.prediction = self.f(W @ a).to(self.device)
 
             if self.update_rules == "vectorized":
@@ -1323,7 +1308,18 @@ class PCGraphConv(torch.nn.Module):
             self.t = t 
 
             while True:
-                # Update values at each iteration
+
+                # self.e = self.x - self.structure.pred( x=self.x, w=self.w, b=self.b )
+                
+                # 1. predictions 
+                self.predictions = self.get_predictions(self.data)
+                # 2. errors
+                self.errors = self.values - self.predictions
+
+                self.data.x[:, 1] = self.errors.view(-1, 1)
+                self.data.x[:, 2] = self.predictions.view(-1, 1)
+                
+                # 3. Update values 
                 self.update_values()
                 
                 # Recalculate energy
@@ -1844,7 +1840,7 @@ class PCGraphConv(torch.nn.Module):
             # --------------- New code --------------------
             a = self.data.x[:, 0].view(self.num_vertices)   # a_hat 
             e = self.data.x[:, 1].view(self.num_vertices)
-            W = self.weights.T # CHANGED 
+            W = self.weights 
 
             f_prime = self.f_prime(W @ a)  # f'(W * a_hat)
             print("f_prime", f_prime.shape)
