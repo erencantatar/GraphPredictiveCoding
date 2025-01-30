@@ -824,7 +824,8 @@ def classification(test_loader, model, test_params, num_samples=5):
 
 
         # ------------ Alter sensory --------------
-        noisy_batch.x[:, 0][model.pc_conv1.internal_indices] = torch.rand(noisy_batch.x[:, 0][model.pc_conv1.internal_indices].shape).to(model.pc_conv1.device)
+        # noisy_batch.x[:, 0][model.pc_conv1.internal_indices] = torch.rand(noisy_batch.x[:, 0][model.pc_conv1.internal_indices].shape).to(model.pc_conv1.device)
+        
         # ------------ Alter internal --------------
         # ... 
         # ------------ Alter supervision --------------
@@ -901,7 +902,8 @@ def classification(test_loader, model, test_params, num_samples=5):
 
         if sum(labels) == 0:
             print("-----------NO prediction on labels-----------")
-            break 
+            return y_true, y_pred, 0
+            
         else: 
             label_pred = torch.argmax(softmax_labels)
             label_pred = torch.arange(10)[label_pred]

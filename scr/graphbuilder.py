@@ -333,7 +333,7 @@ class GraphBuilder:
         # edge_type = []
 
         # swap 
-        # discriminative_hidden_layers, generative_hidden_layers = generative_hidden_layers, discriminative_hidden_layers
+        discriminative_hidden_layers, generative_hidden_layers = generative_hidden_layers, discriminative_hidden_layers
 
         # Sensory nodes
         num_sensor_nodes = range(0, 784)
