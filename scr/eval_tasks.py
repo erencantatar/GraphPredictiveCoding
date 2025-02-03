@@ -810,7 +810,6 @@ def progressive_digit_generation(test_loader, model, test_params, numbers_list):
 @dynamic_task
 def classification(test_loader, model, test_params, num_samples=5):
     
-
     assert test_params["supervised_learning"] == False
 
     # metrics 
@@ -819,6 +818,7 @@ def classification(test_loader, model, test_params, num_samples=5):
     for idx, (noisy_batch, clean_image) in enumerate(test_loader):
 
         noisy_batch = noisy_batch.to(model.pc_conv1.device)
+
         noisy_image = noisy_batch.x[:, 0][0:784].view(28,28).cpu().detach().numpy()
         clean_image = clean_image.view(28,28).cpu().numpy()  # Adjust shape as necessary
 
@@ -842,10 +842,13 @@ def classification(test_loader, model, test_params, num_samples=5):
         # assert all zeros
         assert torch.all(torch.isclose(noisy_batch.x[:, 0][-10:], torch.zeros_like(noisy_batch.x[:, 0][-10:]), atol=1e-6)), "Last 10 elements are not close to zero!"
 
-      
         # ----------- Inference ---------------
         # output
         values, predictions, labels = model.query(method="pass", data=noisy_batch)  # query_by_conditioning
+
+        # taking first batch item
+        # values, predictions, labels = values[0], predictions[0], labels[0]
+        
         denoised_output = predictions[0:784].view(28,28).cpu().detach().numpy()
 
         

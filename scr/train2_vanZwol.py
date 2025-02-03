@@ -609,27 +609,27 @@ model_dir = path
 # Define the directory path
 print("Saving model, params, graph_structure to :", model_dir)
 
-# Ensure the directory exists
-os.makedirs(model_dir, exist_ok=True)
+# # Ensure the directory exists
+# os.makedirs(model_dir, exist_ok=True)
 
-# For saving, validation, re-creation 
-os.makedirs(os.path.join(model_dir, "checkpoints"), exist_ok=True)
-os.makedirs(os.path.join(model_dir, "parameter_info"), exist_ok=True)
+# # For saving, validation, re-creation 
+# os.makedirs(os.path.join(model_dir, "checkpoints"), exist_ok=True)
+# os.makedirs(os.path.join(model_dir, "parameter_info"), exist_ok=True)
 
-# For testing the model
-os.makedirs(os.path.join(model_dir, "eval"), exist_ok=True)
-os.makedirs(os.path.join(model_dir, "eval/generation"), exist_ok=True)
-# os.makedirs(os.path.join(model_dir, "reconstruction"), exist_ok=True)
-os.makedirs(os.path.join(model_dir, "eval/classification"), exist_ok=True)
-os.makedirs(os.path.join(model_dir, "eval/denoise"), exist_ok=True)
-os.makedirs(os.path.join(model_dir, "eval/occlusion"), exist_ok=True)
+# # For testing the model
+# os.makedirs(os.path.join(model_dir, "eval"), exist_ok=True)
+# os.makedirs(os.path.join(model_dir, "eval/generation"), exist_ok=True)
+# # os.makedirs(os.path.join(model_dir, "reconstruction"), exist_ok=True)
+# os.makedirs(os.path.join(model_dir, "eval/classification"), exist_ok=True)
+# os.makedirs(os.path.join(model_dir, "eval/denoise"), exist_ok=True)
+# os.makedirs(os.path.join(model_dir, "eval/occlusion"), exist_ok=True)
 
-# Monitor during training
-os.makedirs(os.path.join(model_dir, "energy"), exist_ok=True)
+# # Monitor during training
+# os.makedirs(os.path.join(model_dir, "energy"), exist_ok=True)
 
-plot_adj_matrix(single_graph, model_dir, 
-                node_types=(sensory_indices, internal_indices, supervision_indices))
-plot_adj_matrix(full_batch, model_dir, node_types=None)
+# plot_adj_matrix(single_graph, model_dir, 
+#                 node_types=(sensory_indices, internal_indices, supervision_indices))
+# plot_adj_matrix(full_batch, model_dir, node_types=None)
 
 
 config_dict = vars(args)  # Convert argparse Namespace to dictionary
@@ -664,32 +664,32 @@ if save_model_params:
         json.dump(params_dict, file, default=default)
     print('Done')
 
-# Store the exact command-line arguments in a text file
-import sys
-command = ' '.join(sys.argv)
-with open(model_dir +'parameter_info/command_log.txt', 'w') as f:
-    f.write(command)
+    # Store the exact command-line arguments in a text file
+    import sys
+    command = ' '.join(sys.argv)
+    with open(model_dir +'parameter_info/command_log.txt', 'w') as f:
+        f.write(command)
 
-with open('trained_models/current_running.txt', 'w') as f:
-    f.write(model_dir)
+    with open('trained_models/current_running.txt', 'w') as f:
+        f.write(model_dir)
 
-# Save the (small) dictionary to a text file
-params_dict_small = {}
-keys_to_copy = ['supervised_learning', 'numbers_list', 'NUM_INTERNAL_NODES',  
-                'N',  'batch_size','use_learning_optimizer', 'weight_init', 'activation', ]
-# copy value from params_dict to params_dict_small
-for key in keys_to_copy:
-    params_dict_small[key] = params_dict[key]
+    # Save the (small) dictionary to a text file
+    params_dict_small = {}
+    keys_to_copy = ['supervised_learning', 'numbers_list', 'NUM_INTERNAL_NODES',  
+                    'N',  'batch_size','use_learning_optimizer', 'weight_init', 'activation', ]
+    # copy value from params_dict to params_dict_small
+    for key in keys_to_copy:
+        params_dict_small[key] = params_dict[key]
 
-if "dataset_transform" in params_dict:
-    params_dict_small["dataset_transform"] = params_dict["dataset_transform"]
+    if "dataset_transform" in params_dict:
+        params_dict_small["dataset_transform"] = params_dict["dataset_transform"]
 
 
-if save_model_params:
-    # Save the dictionary to a text file
-    with open(model_dir + "parameter_info/params_small.txt", 'w') as file:
-        json.dump(params_dict_small, file, default=default)
-    print('Done')
+    if save_model_params:
+        # Save the dictionary to a text file
+        with open(model_dir + "parameter_info/params_small.txt", 'w') as file:
+            json.dump(params_dict_small, file, default=default)
+        print('Done')
 
 print(f"Using batch size of \t: {train_loader.batch_size}")
 print("Device \t\t\t:",          device)
@@ -722,9 +722,9 @@ wandb.watch(model,
 from helper.plot import plot_model_weights, plot_energy_graphs
 
 
-save_path = os.path.join(model_dir, 'parameter_info/weight_matrix_visualization_beforeTraining.png')
-# plot_model_weights(model, save_path)
-plot_model_weights(model, GRAPH_TYPE, model_dir=save_path, save_wandb=True)
+# save_path = os.path.join(model_dir, 'parameter_info/weight_matrix_visualization_beforeTraining.png')
+# # plot_model_weights(model, save_path)
+# plot_model_weights(model, GRAPH_TYPE, model_dir=save_path, save_wandb=True)
 
 
 
@@ -902,7 +902,6 @@ for epoch in range(args.epochs):
     if earlystop:
         break
     
-
     # close all open plt figures 
     plt.close('all')
     
@@ -919,49 +918,61 @@ for epoch in range(args.epochs):
             training_labels.append(int(label.item()))
 
         try:
-            print("Label:", batch.y, "Input Shape:", batch.x.shape)
+            # print("Label:", batch.y, "Input Shape:", batch.x.shape)
             model.train()
 
             batch = batch.to(device)
             history_epoch = model.learning(batch)
 
-            # Append energy values to history
-            history["internal_energy_per_epoch"].append(history_epoch["internal_energy_mean"])
-            history["sensory_energy_per_epoch"].append(history_epoch["sensory_energy_mean"])
+            # return predictions on supervised nodes
+            x_hat = model.pc_conv1.values.view(model.pc_conv1.batchsize, model.pc_conv1.num_vertices)
+            logits = x_hat[:, -10:]                       # batch_size x 10
+            y_pred = torch.argmax(logits, axis=1)         # batch_size
+            # print("--during training y_pred", y_pred)
+            # print("--during training y_true", batch.y)
 
-            # Log energy values for this batch/epoch to wandb
-            wandb.log({
-                "epoch": epoch,
-                "Training/internal_energy_mean": history_epoch["internal_energy_mean"],
-                "Training/sensory_energy_mean": history_epoch["sensory_energy_mean"],
-                
-            })
+            if history_epoch:
+                # Append energy values to history
+                history["internal_energy_per_epoch"].append(history_epoch["internal_energy_mean"])
+                history["sensory_energy_per_epoch"].append(history_epoch["sensory_energy_mean"])
 
-            model.pc_conv1.restart_activity()
+                # Log energy values for this batch/epoch to wandb
+                wandb.log({
+                    "epoch": epoch,
+                    "Training/internal_energy_mean": history_epoch["internal_energy_mean"],
+                    "Training/sensory_energy_mean": history_epoch["sensory_energy_mean"],
+                    
+                })
 
-            print(f"------------------ Epoch {epoch}: Batch {idx} / {len(train_loader)} ------------------")
+                model.pc_conv1.restart_activity()
 
-            # if internal_energy_mean or sensory_energy_mean is nan or inf, break
-            if not np.isfinite(history_epoch["internal_energy_mean"]) or not np.isfinite(history_epoch["sensory_energy_mean"]):
-                print("Energy is not finite, stopping training")
-                earlystop = True
-                break
+                print(f"------------------ Epoch {epoch}: Batch {idx} / {len(train_loader)} ------------------")
 
-            # Early stopping based on loss change
-            if abs(last_loss - history_epoch["internal_energy_mean"]) < threshold_earlystop:
-                earlystop = True
-                print(f"EARLY STOPPED at epoch {epoch}")
-                print(f"Last Loss: {last_loss}, Current Loss: {history_epoch['internal_energy_mean']}")
-                break
+                # if internal_energy_mean or sensory_energy_mean is nan or inf, break
+                if not np.isfinite(history_epoch["internal_energy_mean"]) or not np.isfinite(history_epoch["sensory_energy_mean"]):
+                    print("Energy is not finite, stopping training")
+                    earlystop = True
+                    break
 
-            # Early stopping based on high energy
-            if history_epoch["internal_energy_mean"] > max_energy_threshold:
-                print("energy :", history_epoch["internal_energy_mean"])
-                print("Energy too high, stopping training")
-                earlystop = True
-                break
+                # Early stopping based on loss change
+                if abs(last_loss - history_epoch["internal_energy_mean"]) < threshold_earlystop:
+                    earlystop = True
+                    print(f"EARLY STOPPED at epoch {epoch}")
+                    print(f"Last Loss: {last_loss}, Current Loss: {history_epoch['internal_energy_mean']}")
+                    break
 
-            if idx > 50:
+                # Early stopping based on high energy
+                if history_epoch["internal_energy_mean"] > max_energy_threshold:
+                    print("energy :", history_epoch["internal_energy_mean"])
+                    print("Energy too high, stopping training")
+                    earlystop = True
+                    break
+
+            # PRINT MEAN OF THE WEIGHTS
+            w = model.pc_conv1.weights.cpu().detach().numpy()
+            print("----------------------Mean of weights: ----=====", np.mean(w))
+
+            if idx > 20:
                 break
 
         except RuntimeError as e:
@@ -975,26 +986,59 @@ for epoch in range(args.epochs):
 
     print(f"Epoch {epoch} / {args.epochs} completed")
     
+    # print mean of weights 
+    w = model.pc_conv1.weights.cpu().detach().numpy()
+
+    print("---Mean of weights: =====", np.mean(w))
+    
+   
+    acc = 0 
+
     # Eval      
     for batch_idx, (batch, clean) in enumerate(test_loader):
         
         print("-----------------------  Eval  -----------------------")      
         
         x_batch, y_batch = batch.x.to(device), batch.y.to(device)
-        y_pred = model.pc_conv1.test_class(x_batch)
 
-        y_pred = torch.argmax(y_pred, axis=1) 
-
+        y_pred = model.pc_conv1.test_class(batch.to(device))
         print(y_batch, y_pred)
 
-        acc = torch.mean(( y_pred == y_batch ).float()).item()
-        wandb.log({
-            "epoch": epoch,
-            "classification_new/y_true": acc/len(test_loader),
-        })
+        a = torch.mean(( y_pred == y_batch ).float()).item()
+        acc += a
 
-        if batch_idx > 50:
+        if batch_idx > 10:
             break
+    
+    wandb.log({
+        "epoch": epoch,
+        "classification_new/y_true": acc,
+    })
+
+    print(y_batch, y_pred)
+    print(f"Accuracy {batch_idx}: ", a)
+    print(f"Accuracy {batch_idx}: ", acc/len(test_loader))
+    print(f"Accuracy {batch_idx}: ", acc/10)
+
+   
+
+        # # log distribution of y_pred and y_true
+        # y_pred = y_pred.cpu().detach().numpy()
+        # y_batch = y_batch.cpu().detach().numpy()
+        # wandb.log({
+        #     "epoch": epoch,
+        #     "classification_new/y_pred": wandb.Histogram(y_pred),
+        #     "classification_new/y_true": wandb.Histogram(y_batch),
+        # })
+        
+      
+
+       
+
+    
+    if epoch % 5 == 0:
+
+        plot_model_weights(model, GRAPH_TYPE, model_dir=None, save_wandb=True)
 
 
 # Append to the appropriate file based on whether the training crashed or completed successfully

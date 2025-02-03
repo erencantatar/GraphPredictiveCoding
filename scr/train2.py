@@ -169,7 +169,6 @@ mnist_trainset = torchvision.datasets.MNIST(root=args.data_dir, train=True, down
 mnist_testset  = torchvision.datasets.MNIST(root=args.data_dir, train=False, download=True, transform=transform)
 
 
-
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
@@ -343,6 +342,16 @@ train_loader = DataLoader(custom_dataset_train,
                           num_workers=1,
                           pin_memory=True,
                           )
+
+# TODO
+# test_loader_1_batch = DataLoader(custom_dataset_train, 
+#                          batch_size=1, 
+#                          shuffle=True, 
+#                          generator=generator_seed,
+#                         # num_workers=1,
+#                         # pin_memory=True,
+#                                     )
+
 
 
 NUM_SENSORY = 28*28  # 10
@@ -789,13 +798,6 @@ custom_dataset_test = CustomGraphDataset(graph_params, **dataset_params_testing,
                                         )
 # dataset_params_testing["batch_size"] = 2
 
-test_loader_1_batch = DataLoader(custom_dataset_test, 
-                         batch_size=1, 
-                         shuffle=True, 
-                         generator=generator_seed,
-                        # num_workers=1,
-                        # pin_memory=True,
-                                    )
 
 test_loader = DataLoader(custom_dataset_test, 
                          batch_size=args.batch_size, 
@@ -805,6 +807,8 @@ test_loader = DataLoader(custom_dataset_test,
                         # pin_memory=True,
                                     )
 
+test_loader_1_batch = test_loader
+
 from helper.eval import get_clean_images_by_label
 
 # want to see how good it can recreate the images it has seen during training
@@ -813,7 +817,7 @@ clean_images = get_clean_images_by_label(mnist_trainset, num_images=20)
 import os
 import logging
 
-from helper.log import write_eval_log
+# from helper.log import write_eval_log
 from helper.plot import plot_graph_with_edge_types, plot_updated_edges
 
 
@@ -1038,7 +1042,7 @@ for epoch in range(args.epochs):
     model.pc_conv1.trace_activity_values = True 
     model.pc_conv1.trace_activity_preds = True 
     model.pc_conv1.batchsize = 1
-
+    model.pc_conv1.restart_activity()
     # Adjust num_samples based on accuracy
     test_params = {
         "model_dir": model_dir,
@@ -1063,7 +1067,7 @@ for epoch in range(args.epochs):
         break
 
     if eval_classification:
-        y_true, y_pred, accuracy_mean = classification(test_loader_1_batch, model, test_params)
+        y_true, y_pred, accuracy_mean = classification(test_loader, model, test_params)
         # Log accuracy_mean grouped under classification
         wandb.log({
             "epoch": epoch,
