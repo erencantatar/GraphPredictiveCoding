@@ -61,7 +61,6 @@ class CustomGraphDataset(Dataset):
         #     num_all_nodes = range(SENSORY_NODES + NUM_INTERNAL_NODES)
 
 
-
         if edge_index is not None:
             self.edge_index = edge_index
             self.edge_index_tensor = self.edge_index
