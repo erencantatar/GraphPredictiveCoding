@@ -39,6 +39,9 @@ class PCGraphDataset(Dataset):
         self.supervised_learning = supervised_learning
         self.supervision_label_val = supervision_label_val 
 
+        self.zero_img_in_graph          = False 
+        self.zero_y_in_graph            = False 
+
         if self.supervised_learning:
             print("Supervised learning")
         else:
@@ -118,7 +121,8 @@ class PCGraphDataset(Dataset):
         ## Assign values to sensory nodes based on image
         image_flattened = image.view(-1, 1)
         for sensory_idx in self.sensory_indices:
-            values[sensory_idx] = image_flattened[sensory_idx]
+            # values[sensory_idx] = image_flattened[sensory_idx]
+            values[sensory_idx] = 0 if self.zero_img_in_graph else image_flattened[sensory_idx]
 
         values[:784] = image.view(-1, 1)
 
@@ -131,6 +135,9 @@ class PCGraphDataset(Dataset):
             label_vector = torch.zeros(10)  # Assuming 10 classes for MNIST
             label_vector[label] = self.supervision_label_val
 
+            # Zero out the labels if zero_y_in_graph is True
+            label_vector = label_vector * (0 if self.zero_y_in_graph else 1)
+                                       
             # Assign values to the supervision nodes
             for i, supervision_idx in enumerate(self.supervision_indices):
                 values[supervision_idx] = label_vector[i]

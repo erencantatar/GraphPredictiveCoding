@@ -255,7 +255,7 @@ class PC_graph_zwol(torch.nn.Module):
         return self.x[:,-10:] 
     
 
-    def update_w(self):
+    def updaupdate_wte_w(self):
 
 
         # self.dw = self.structure.grad_w(x=self.x, e=self.e, w=self.w, b=self.b)

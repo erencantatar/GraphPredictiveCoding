@@ -90,6 +90,7 @@ def plot_adj_matrix(edge_index, model_dir, node_types=None):
             plt.close(fig)
         else:
             plt.show()  
+    return adj_matrix_pyg
 
 
 def plot_connection_strength_dist(W):

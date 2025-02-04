@@ -49,51 +49,7 @@ import torch.nn as nn
 from torch_geometric.nn import MessagePassing
 from torch_scatter import scatter
 
-""" 
-STARTING WITH VANZWOL where PYG data object is shaped as batch_size,num_vertices. 
-Now we introduce MEssagePassing instead of matmul operations, to be more efficient. 
 
-
-"""
-
-class PredictionMessagePassing(MessagePassing):
-    def __init__(self, aggr='add', f=torch.tanh):
-        super(PredictionMessagePassing, self).__init__()  # Aggregate messages using sum
-        self.f = f
-
-    def forward(self, x, edge_index, edge_weight):
-        # Start propagating messages
-        return self.propagate(edge_index, x=x, edge_weight=edge_weight)
-
-    def message(self, x_j, edge_weight):
-        # Compute messages as f(x_j) * w_ij
-        
-        # return self.f(x_j).view(-1, 1) * edge_weight.view(-1, 1)
-        return self.f(x_j) * edge_weight
-
-    def update(self, aggr_out):
-        # Return the aggregated prediction for each node
-        return aggr_out
-
-class DeltaXUpdate(MessagePassing):
-    def __init__(self, aggr='add', dfdx=torch.sigmoid):
-        super().__init__()
-        self.dfdx = dfdx  # Activation derivative
-    def forward(self, x, prediction, edge_index, edge_weight):
-        # Compute prediction errors
-        errors = x - prediction
-        # Propagate errors through the graph
-        return self.propagate(edge_index, x=x, errors=errors, edge_weight=edge_weight)
-
-    def message(self, x_j, errors, edge_weight):
-        # Compute the gradient-based message for delta_x update
-        return edge_weight * errors * self.dfdx(x_j)  # Using gradient relation from Salvatori
-
-    def update(self, aggr_out, x):
-        # Update rule for delta_x: x_new = x - gamma * delta_x
-        delta_x = -aggr_out
-        return delta_x  # Update values
-    
 
 class PC_graph_zwol_PYG(torch.nn.Module): 
 
@@ -107,7 +63,7 @@ class PC_graph_zwol_PYG(torch.nn.Module):
         self.adj = torch.tensor(adj).to(self.device)
         
         self.edge_index = edge_index  # PYG edge_index
-        print("------VERSION WITH MESSAGE PASSING-------")
+
         self.lr_x = lr_x 
         self.T_train = T_train
         self.T_test = T_test
@@ -134,30 +90,22 @@ class PC_graph_zwol_PYG(torch.nn.Module):
 
         self.use_bias = False
 
-        self.prediction_mp = PredictionMessagePassing(f=self.f)
-        self.delta_x_MP    = DeltaXUpdate(dfdx=self.dfdx)
    
     @property
     def params(self):
         return {"w": self.w, "b": self.b, "use_bias": self.use_bias}
-        
+    
     @property
     def grads(self):
         return {"w": self.dw, "b": self.db}
 
     def _reset_params(self):
-        print("settings params")
-        
-        # values = torch.randn(self.edge_index.size(1), device=self.device) * 0.05
-        # self.w = torch.sparse_coo_tensor(self.edge_index, values, (self.num_vertices, self.num_vertices), device=self.device)
-
         self.w = torch.empty( self.num_vertices, self.num_vertices, device=self.device)
         self.b = torch.empty( self.num_vertices, device=self.device)
         nn.init.normal_(self.w, mean=0, std=0.05)  
 
-        # self.w = self.w * self.adj
+        self.w = self.w * self.adj
 
-    
     def _reset_grad(self):
         self.dw, self.db = None, None
 
@@ -206,40 +154,18 @@ class PC_graph_zwol_PYG(torch.nn.Module):
 
         # reshape to (batch_size, num_vertices)
         if reshape:
-            values      = values.view(self.batch_size * self.num_vertices, 1)
-            errors      = errors.view(self.batch_size * self.num_vertices, 1)
+            values      = values.view(self.batch_size, self.num_vertices)
+            errors      = errors.view(self.batch_size, self.num_vertices)
             # predictions = predictions.view(self.batch_size, self.num_vertices)
 
         return values, errors, predictions
 
-    def get_sparse_weight(self):
-        # Extract edge_index for a single graph
-        single_graph_edge_index = self.edge_index[:, :self.edge_index.size(1) // self.batch_size]
+    def get_prediction(self, values):
+        
+        bias = 0
+        prediction = torch.matmul(self.f(values), self.w.T) + bias
 
-        # Get sparse weights for a single graph
-        sparse_weights = self.w[single_graph_edge_index[0], single_graph_edge_index[1]]
-
-        # Expand weights correctly by repeating for batch size
-        return sparse_weights.repeat(self.batch_size)
-
-    def get_prediction(self):
-        # Reshape node features
-        self.values = self.values.view(self.batch_size * self.num_vertices, -1)
-
-        # Get batched edge weights (now correctly sized)
-        edge_weights_batched = self.get_sparse_weight()
-
-        print("---get_prediction---")
-        print("values", self.values.shape)
-        print("edge_weights_batched", edge_weights_batched.shape)
-        print("self.edge_index", self.edge_index.shape)
-
-        # Perform message passing
-        prediction = self.prediction_mp(self.values, self.edge_index, edge_weights_batched)
         return prediction
-
-
-
 
 
     def grad_x(self):
@@ -254,7 +180,7 @@ class PC_graph_zwol_PYG(torch.nn.Module):
         return gradx
 
 
-    def update_xs(self, train=True):
+    def update_xs(self, edge_index, train=True):
         T = self.T_train if train else self.T_test
 
         # Move all relevant tensors to self.device
@@ -266,16 +192,8 @@ class PC_graph_zwol_PYG(torch.nn.Module):
         # print("update_mask shape", self.update_mask.shape)
 
         for t in range(T):
-            self.prediction = self.get_prediction().to(self.device)
-            
-            # 
-            # torch empty 
-            import gc
-            torch.cuda.empty_cache()
-            gc.collect()
-            
-            print("get_prediction", self.prediction.shape)
-            break 
+            self.prediction = self.get_prediction(self.values).to(self.device)
+      
             self.errors = self.values - self.prediction  # Update errors
             self.e = self.errors 
 
@@ -303,7 +221,13 @@ class PC_graph_zwol_PYG(torch.nn.Module):
 
 
     def update_w(self):
-   
+        # self.dw = -torch.matmul(errors.T, self.f(values))
+        # self.dw = self.structure.grad_w(x=self.x, e=self.e, w=self.w, b=self.b)
+        # self.errors = self.errors.view(self.batch_size, self.num_vertices)
+        # self.values = self.values.view(self.batch_size, self.num_vertices)
+
+        # print("errors mean", self.errors.mean())
+        # print("values mean", self.values.mean())
 
         out = -torch.matmul(self.errors.T, self.f(self.values)).to(self.device)
         
@@ -312,50 +236,48 @@ class PC_graph_zwol_PYG(torch.nn.Module):
         if self.adj is not None:
             out *= self.adj
         self.dw = out
+        # print("dw mean 2:", self.dw.mean().item(), "dw max:", self.dw.max().item(), "dw min:", self.dw.min().item())
 
         # print("self.dw shape", out.shape)
 
     def train_supervised(self, data):
-        self.edge_index = data.edge_index.to(self.device)
+        edge_index = data.edge_index.to(self.device)
 
         self.data_ptr = data.ptr
         self.batch_size = data.x.shape[0] // self.num_vertices
 
         self.values, self.errors, self.predictions = self.unpack_features(data.x, reshape=True)
         
-        print("self.values 1 shape", self.values.shape)
-        print("edge_index 1 shape", self.edge_index.shape)
-        print("-----------------------------")
-        self.update_xs(train=True)
+        self.update_xs(edge_index, train=True)
         self.update_w()
 
         if not self.incremental:
             self.optimizer.step(self.params, self.grads, batch_size=self.batch_size)
 
+        # print("w mean", self.w.mean())
 
+    def test_iterative(self, data, remove_label=True):
+        edge_index = data.edge_index
 
+        # remove one_hot
+        if remove_label:
+            for i in range(len(data)):
+                sub_graph = data[i]  # Access the subgraph
+                sub_graph.x[sub_graph.supervision_indices, 0] = torch.zeros_like(sub_graph.x[sub_graph.supervision_indices, 0])  # Check all feature dimensions
 
-
-    # def test_iterative(self, data, remove_label=True):
-    #     edge_index = data.edge_index
-
-    #     # remove one_hot
-    #     if remove_label:
-    #         for i in range(len(data)):
-    #             sub_graph = data[i]  # Access the subgraph
-    #             sub_graph.x[sub_graph.supervision_indices, 0] = torch.zeros_like(sub_graph.x[sub_graph.supervision_indices, 0])  # Check all feature dimensions
-
-    #     self.values, self.errors, self.predictions = self.unpack_features(data.x, reshape=True)
+        self.values, self.errors, self.predictions = self.unpack_features(data.x, reshape=True)
         
-    #     self.update_xs(train=False)
-    #     # logits = self.values[:, data.supervision_indices[0]]
-    #     logits = self.values[:, -10:]
+        # print("0", self.values[:, -10:].shape, self.values[:, -10:])
 
-    #     y_pred = torch.argmax(logits, axis=1).squeeze()
-    #     return y_pred.cpu().detach()
+        self.update_xs(edge_index, train=False)
+        # logits = self.values[:, data.supervision_indices[0]]
+        logits = self.values[:, -10:]
+
+        y_pred = torch.argmax(logits, axis=1).squeeze()
+        return y_pred.cpu().detach()
     
-    # def get_energy(self):
-    #     return torch.sum(self.errors**2).item()
+    def get_energy(self):
+        return torch.sum(self.errors**2).item()
 
-    # def get_errors(self):
-    #     return self.e.clone()
+    def get_errors(self):
+        return self.e.clone()

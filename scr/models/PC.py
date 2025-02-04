@@ -1084,7 +1084,6 @@ class PCGraphConv(torch.nn.Module):
 
         if self.update_rules == "Salvatori":
             
-
             # self.predictions = self.prediction_mp(self.data.x.to(self.device), self.data.edge_index.to(self.device), weights_batched_graph, norm=self.norm.to(self.device))
             self.predictions = self.prediction_mp(self.values.view(-1, 1), 
                                                     self.data.edge_index.to(self.device), weights_batched_graph, norm=self.norm.to(self.device))
