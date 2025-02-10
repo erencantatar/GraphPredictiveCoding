@@ -10,6 +10,15 @@ and 784 sensory vertices
 ## Changelog
 - Major logic bug; weight_update is now only updating the internal nodes instead of the weights of all nodes.
 
+## Training loop
+1. Create graph topology by creating a 2d mask (Fully_connected, generative, discriminative, SBM, other (see `scr/graphbuilder.py`) )
+2. Initialize the weights of the graph using the mask (either 2d matrix or 1d for sparse weights (MessagePassing))
+3. Create dataloader with batched graphs 
+4. Init the model, params, grads, optimizer
+5. Training using clamped img (X) and img_label (Y)
+   Test on val_set by removing either img for generation eval or remove img_label for classification task, depedining on the task and topology (FC can do both, hierachical (VanZwol only either one))
+6. Eval on eval_set
+
 
 
 ## Installation
