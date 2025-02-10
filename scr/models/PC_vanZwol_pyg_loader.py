@@ -180,7 +180,7 @@ class PC_graph_zwol_PYG(torch.nn.Module):
         return gradx
 
 
-    def update_xs(self, edge_index, train=True):
+    def update_xs(self, train=True):
         T = self.T_train if train else self.T_test
 
         # Move all relevant tensors to self.device
@@ -241,14 +241,14 @@ class PC_graph_zwol_PYG(torch.nn.Module):
         # print("self.dw shape", out.shape)
 
     def train_supervised(self, data):
-        edge_index = data.edge_index.to(self.device)
+        # edge_index = data.edge_index.to(self.device)
 
         self.data_ptr = data.ptr
         self.batch_size = data.x.shape[0] // self.num_vertices
 
         self.values, self.errors, self.predictions = self.unpack_features(data.x, reshape=True)
         
-        self.update_xs(edge_index, train=True)
+        self.update_xs(train=True)
         self.update_w()
 
         if not self.incremental:
@@ -257,7 +257,7 @@ class PC_graph_zwol_PYG(torch.nn.Module):
         # print("w mean", self.w.mean())
 
     def test_iterative(self, data, remove_label=True):
-        edge_index = data.edge_index
+        # edge_index = data.edge_index
 
         # remove one_hot
         if remove_label:
@@ -269,7 +269,7 @@ class PC_graph_zwol_PYG(torch.nn.Module):
         
         # print("0", self.values[:, -10:].shape, self.values[:, -10:])
 
-        self.update_xs(edge_index, train=False)
+        self.update_xs(train=False)
         # logits = self.values[:, data.supervision_indices[0]]
         logits = self.values[:, -10:]
 

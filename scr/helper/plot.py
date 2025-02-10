@@ -14,7 +14,7 @@ import torch
 from torch_geometric.utils import to_dense_adj
 import wandb
 
-def plot_adj_matrix(edge_index, model_dir, node_types=None):
+def plot_adj_matrix(edge_index, model_dir=None, node_types=None):
     """
     Function to plot the adjacency matrix or node types (sensory, internal, supervision) as colored pixels.
     
