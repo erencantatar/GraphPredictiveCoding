@@ -265,8 +265,8 @@ class PredictiveCodingLayer(MessagePassing):
         reversed_edge_index = edge_index.flip(0)  # Transpose the edges for W^T
 
         # Step 1: Compute predictions μ using W (forward pass)
-        # mu = self.propagate(reversed_edge_index, x=x, weight=weight, message=self.message_mu)
-        mu = self.propagate(edge_index, x=x, weight=weight, message=self.message_mu)
+        mu = self.propagate(reversed_edge_index, x=x, weight=weight, message=self.message_mu)
+        # mu = self.propagate(edge_index, x=x, weight=weight, message=self.message_mu)
         
         # Step 2: Compute prediction error ε = x - μ
         epsilon = x - mu
@@ -876,17 +876,17 @@ class PCgraph(PCmodel):
 
         # import matplotlib.pyplot as plt
 
-        # # save png the weights 
-        # plt.imshow(dense_matrix.cpu().numpy())
-        # # save
-        # plt.savefig("weights.png")
+        # save png the weights 
+        plt.imshow(dense_matrix.cpu().numpy())
+        # save
+        plt.savefig("weights.png")
 
-        # # also save the adj_dense
-        # plt.imshow(self.adj.cpu().numpy())
-        # plt.savefig("adj.png")
+        # also save the adj_dense
+        plt.imshow(self.adj.cpu().numpy())
+        plt.savefig("adj.png")
 
-        # # close the plots 
-        # plt.close()
+        # close the plots 
+        plt.close()
 
 
 
@@ -960,35 +960,35 @@ class PCgraph(PCmodel):
             # print("t", t)
             self.weights_1d = self.w_to_sparse(self.w)
 
-            # num_features = 1
+            num_features = 1
 
-            # # self.x [batch_size, num_nodes]
+            # self.x [batch_size, num_nodes]
 
-            # values = self.x.view(-1, num_features) # Ensure shape [num_nodes * batch_size, features=1]
+            values = self.x.view(-1, num_features) # Ensure shape [num_nodes * batch_size, features=1]
 
-            # # weight = self.get_dense_weight()
+            # weight = self.get_dense_weight()
             
-            # # Convert weights (1D) and edge_index to batch-compatible
-            # batch_size = self.x.size(0)  # Number of graphs
-            # num_nodes = self.structure.N  # Nodes per graph
+            # Convert weights (1D) and edge_index to batch-compatible
+            batch_size = self.x.size(0)  # Number of graphs
+            num_nodes = self.structure.N  # Nodes per graph
 
-            # # Offset edge_index for batched graphs
-            # batched_edge_index = torch.cat(
-            #     [self.edge_index + i * num_nodes for i in range(batch_size)], dim=1
-            # )  # Concatenate and offset indices
+            # Offset edge_index for batched graphs
+            batched_edge_index = torch.cat(
+                [self.edge_index + i * num_nodes for i in range(batch_size)], dim=1
+            )  # Concatenate and offset indices
 
-            # # Expand edge weights for each graph
-            # batched_weights = self.weights_1d.repeat(batch_size)
+            # Expand edge weights for each graph
+            batched_weights = self.weights_1d.repeat(batch_size)
 
-            # # Perform message passing
-            # epsilon, mu_mp, delta_x = self.MP.forward(
-            #     values, batched_edge_index.to(DEVICE), batched_weights.to(DEVICE)
-            # )
+            # Perform message passing
+            epsilon, mu_mp, delta_x = self.MP.forward(
+                values, batched_edge_index.to(DEVICE), batched_weights.to(DEVICE)
+            )
 
-            # # values, self.edge_index, self.weights_1d = values.to(DEVICE), self.edge_index.to(DEVICE), self.weights_1d.to(DEVICE)
-            # # epsilon, mu_mp, delta_x = self.MP.forward(values, self.edge_index, self.weights_1d)
-            # # print("shape epsilon, mu, delta_x", epsilon.shape, mu.shape, delta_x.shape)
-            # self.e = epsilon.view(-1, self.structure.N)
+            # values, self.edge_index, self.weights_1d = values.to(DEVICE), self.edge_index.to(DEVICE), self.weights_1d.to(DEVICE)
+            # epsilon, mu_mp, delta_x = self.MP.forward(values, self.edge_index, self.weights_1d)
+            # print("shape epsilon, mu, delta_x", epsilon.shape, mu.shape, delta_x.shape)
+            self.e = epsilon.view(-1, self.structure.N)
             # Optionally convert to dense form for further computations if needed
 
             self.w = self.w_to_dense(self.weights_1d)
@@ -1003,11 +1003,22 @@ class PCgraph(PCmodel):
             #     self.w = self.w_to_dense(self.w)
             
             mu = self.structure.pred(x=self.x, w=self.w, b=self.b)
-
+            
             # print("mu mean", torch.mean(mu))
             # print("mu_mp mean", torch.mean(mu_mp))
 
-            self.e = self.x - mu 
+            mu_mp = mu_mp.view(-1,self.structure.N)
+            print("epsilon.shape", epsilon.shape)
+            print("shape mu, mu_mp", mu.shape, mu_mp.shape)
+
+            print("mean", torch.mean(mu), torch.mean(mu_mp))
+            print("mu", mu)
+            print("mu_mp", mu_mp)
+
+            # assert mu == mu_mp, "mu and mu_mp are not equal"
+
+            self.e = self.x - mu_mp 
+            # self.e = self.x - mu 
         
             # print("e1", torch.mean(self.e))
             if not self.use_input_error:
@@ -1115,6 +1126,14 @@ use_bias = False
 # use_bias = False # errie set to False 
 shape = [784, 48, 10] # input, hidden, output
 mask = get_mask_hierarchical([784,32,16,10])
+
+# plot mask 
+from matplotlib import pyplot as plt
+plt.imshow(mask.cpu().numpy())
+# save 
+plt.savefig("mask1.png")
+
+
 
 # mask = torch.ones_like(mask)
 
@@ -1341,6 +1360,15 @@ single_graph = graph.edge_index
 
 adj_matrix_pyg = plot_adj_matrix(single_graph, model_dir=None, node_types=None)
 
+print("adj_matrix_pyg", adj_matrix_pyg.shape)
+print("adj_matrix_pyg", mask.shape)
+print(adj_matrix_pyg.mean(), mask.mean())
+assert np.allclose(adj_matrix_pyg, mask.cpu().numpy()) 
+
+# plt.imshow(adj_matrix_pyg.cpu().numpy())
+# plt.savefig("adj_matrix_pyg.png")
+# plt.imshow(mask.cpu().numpy())
+# plt.savefig("mask0.png")
 
 PCG = PCgraph(structure=structure,
             lr_x=lr_x, 
