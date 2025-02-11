@@ -89,7 +89,8 @@ def plot_adj_matrix(edge_index, model_dir, node_types=None):
             # Close the figure after saving
             plt.close(fig)
         else:
-            plt.show()  
+            # plt.show()  
+            pass 
     return adj_matrix_pyg
 
 

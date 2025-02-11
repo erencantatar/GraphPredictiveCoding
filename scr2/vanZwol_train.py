@@ -118,28 +118,24 @@ from graphbuilder import graph_type_options
 
 
 args = {
-    # "model_type": "IPC",
-    "model_type": "PC",
-    "update_rules": "Salvatori",  # Van_Zwol Update rules for learning
+    "model_type": "IPC",
+    # "graph_type": "fully_connected",  # Type of graph
+    "update_rules": "Van_Zwol",  # Update rules for learning
 
-    "graph_type": "fully_connected",  # Type of graph
-    "discriminative_hidden_layers": None,  # Hidden layers for discriminative model
-    "generative_hidden_layers": None,  # Hidden layers for generative model
-
-    # "graph_type": "single_hidden_layer",  # Type of graph
-    # "discriminative_hidden_layers": [32, 16],  # Hidden layers for discriminative model
+    "graph_type": "single_hidden_layer",  # Type of graph
+    "discriminative_hidden_layers": [32, 16],  # Hidden layers for discriminative model
     # "discriminative_hidden_layers": [100, 50],  # Hidden layers for discriminative model
-    # "generative_hidden_layers": [],  # Hidden layers for generative model
+    "generative_hidden_layers": [0],  # Hidden layers for generative model
 
-    "delta_w_selection": "internal_only",  # Selection strategy for weight updates
-    "weight_init": "fixed 0.001 0.001",  # Weight initialization method
+    "delta_w_selection": "all",  # Selection strategy for weight updates
+    "weight_init": "normal 0 0.001",  # Weight initialization method
     "use_grokfast": False,  # Whether to use GrokFast
     "optimizer": False,  # Optimizer setting
-    "remove_sens_2_sens": False,  # Remove sensory-to-sensory connections
-    "remove_sens_2_sup": False,  # Remove sensory-to-supervised connections
+    "remove_sens_2_sens": True,  # Remove sensory-to-sensory connections
+    "remove_sens_2_sup": True,  # Remove sensory-to-supervised connections
     "set_abs_small_w_2_zero": False,  # Set small absolute weights to zero
     "mode": "experimenting",  # Mode of operation (training/experimenting)
-    "use_wandb": "online",  # WandB logging mode
+    "use_wandb": "offline",  # WandB logging mode
     "tags": "PC_vs_IPC",  # Tags for logging
     "use_bias": False,  # Whether to use bias
     "normalize_msg": False,  # Normalize message passing
@@ -148,13 +144,12 @@ args = {
     "N": "all",  # Number of samples per class
     "supervision_label_val": 1,  # Value assigned for supervision
     "num_internal_nodes": 1000,  # Number of internal nodes in the network
-    "T": 10,  # Number of inference iterations
-    "T_test": 20, 
+    "T": 5,  # Number of inference iterations
     "lr_values": 0.01,  # Learning rate for value updates
     "lr_weights": 0.00001,  # Learning rate for weight updates
     "activation_func": "swish",  # Activation function
     "epochs": 10,  # Number of training epochs
-    "batch_size": 2,  # Batch size for training
+    "batch_size": 20,  # Batch size for training
     "seed": 2,  # Random seed
 }
 
@@ -182,20 +177,6 @@ args.grokfast = args.use_grokfast == 'True'
 
 tags_list = args.tags.split(",") if args.tags else []
 
-if isinstance(args.optimizer, (float, int)) and args.optimizer >= 0:
-    # Optimizer enabled with explicit weight decay
-    use_learning_optimizer = [args.optimizer]
-    weight_decay = args.optimizer
-    print(f"Optimizer enabled with weight decay: {weight_decay}")
-elif args.optimizer is False:
-    # Optimizer disabled
-    use_learning_optimizer = False
-    weight_decay = None
-    print("Optimizer disabled (False).")
-else:
-    # Catch invalid or improperly parsed True cases
-    raise ValueError(f"Invalid value for optimizer: {args.optimizer}. Expected False or a float value.")
-
 
 
 # Using argparse values
@@ -221,21 +202,6 @@ args.grokfast = args.use_grokfast == 'True'
 
 tags_list = args.tags.split(",") if args.tags else []
 
-# Checkpoints:
-# - validate args
-# - create graph topology
-# - create dataloader
-# - init model
-# - training loop with train_set and val_set
-# - full eval_set 
-
-
-
-
-
-
-
-
 import torchvision.transforms as transforms
 import numpy as np
 
@@ -256,6 +222,10 @@ if args.dataset_transform:
     if "random_rotation" in args.dataset_transform:
         transform_list.append(transforms.RandomRotation(degrees=20))
     
+
+
+
+
 # # Create the transform
 print("TODO ADD COMPASE TRANSFORMS")
 # transform = transforms.Compose(transform_list)
@@ -393,22 +363,6 @@ if graph_params["graph_type"]["name"] not in ["single_hidden_layer"]:
     assert args.generative_hidden_layers is None, \
         "The argument --generative_hidden_layers can only be used if graph_type is 'single_hidden_layer'."
 
-# if graph_params["graph_type"]["name"] in ["custom_two_branch", "two_branch_graph"]:
-#     # Configure internal nodes for two_branch_graph
-#     # This assumes two branches with specified configurations
-#     branch1_config = graph_params["graph_type"]["params"]["branch1_config"]
-#     branch2_config = graph_params["graph_type"]["params"]["branch2_config"]
-    
-#     # Calculate total internal nodes for both branches
-#     # Sum up the total internal nodes for Branch 1
-#     branch1_internal_nodes = sum([clusters * nodes_per_cluster for clusters, nodes_per_cluster in branch1_config])
-    
-#     # Sum up the total internal nodes for Branch 2 (Reversed order if required)
-#     branch2_internal_nodes = sum([clusters * nodes_per_cluster for clusters, nodes_per_cluster in branch2_config])
-    
-#     # The total number of internal nodes will be the sum of both branches
-#     graph_params["internal_nodes"] = branch1_internal_nodes + branch2_internal_nodes
-
 
 
 
@@ -419,10 +373,6 @@ from helper.plot import plot_adj_matrix
 
 print("graph_params", graph_params)
 graph = GraphBuilder(**graph_params)
-
-# self.edge_type = 
-# self.edge_index = loader.edge_index
-# self.edge_index_tensor = self.edge_index
 
 
 single_graph = graph.edge_index
@@ -485,12 +435,12 @@ train_indices = train_subset_indices(train_set, 10, no_per_class=0)  # Set `no_p
 # Initialize CustomGraphDataset for train, validation, and test sets
 train_graph_dataset = PCGraphDataset(graph, train_set, supervised_learning=True, numbers_list=list(range(10)))
 val_graph_dataset = PCGraphDataset(graph, val_set, supervised_learning=True, numbers_list=list(range(10)))
-# test_graph_dataset = PCGraphDataset(graph, test_set, supervised_learning=True, numbers_list=list(range(10)))
+test_graph_dataset = PCGraphDataset(graph, test_set, supervised_learning=True, numbers_list=list(range(10)))
 
 # PYG DataLoaders
 train_loader = GeoDataLoader(train_graph_dataset, batch_size=batch_size, collate_fn=custom_collate_fn, shuffle=True, drop_last=True)
 val_loader = GeoDataLoader(val_graph_dataset, batch_size=batch_size, collate_fn=custom_collate_fn, shuffle=False, drop_last=True)
-# test_loader = GeoDataLoader(test_graph_dataset, batch_size=batch_size, collate_fn=custom_collate_fn, shuffle=False, drop_last=True)
+test_loader = GeoDataLoader(test_graph_dataset, batch_size=batch_size, collate_fn=custom_collate_fn, shuffle=False, drop_last=True)
 
 
 
@@ -528,16 +478,15 @@ for batch in train_loader:
     
     print("Supervision tensor after zeroing:")
     print(sup_tensor)
-    
-    batch_example = batch 
+
     # Display the image
     # plt.imshow(image_tensor, cmap='gray')
     # plt.title(f"Sensory Node Image Representation (Label set to {sub_graph.y})")
 
     print("---------------------")
-    # print("Batched sensory indices:", batch.sensory_indices)
-    # print("Batched internal indices:", batch.internal_indices)
-    # print("Batched supervision indices:", batch.supervision_indices)
+    print("Batched sensory indices:", batch.sensory_indices)
+    print("Batched internal indices:", batch.internal_indices)
+    print("Batched supervision indices:", batch.supervision_indices)
 
     print("-------Edge_index (single) vs (batched) ---------")
 
@@ -554,294 +503,13 @@ for batch in train_loader:
 
 
 
-# PCG = PC_graph_zwol_PYG(f,
-#         device=device,
-#         num_vertices=graph.num_vertices,
-#         num_internal=sum(graph.internal_indices),
-#         adj=adj_matrix_pyg,
-#         edge_index=graph.edge_index,
-#         batch_size=batch_size,
-#         # mask=mask,
-#         lr_x=lr_x, 
-#         T_train=T_train,
-#         T_test=T_test,
-#         incremental=incremental, 
-#         use_input_error=use_input_error,
-#         )
-
-
-model_params = {
-    
-    'num_vertices': graph.num_vertices,
-    'sensory_indices': (sensory_indices), 
-    'internal_indices': (graph.internal_indices), 
-    "supervised_learning": (None),
-
-    "update_rules": args.update_rules,  # "Van_Zwol" or "salvatori", "vectorized"
-    "incremental_learning": True if args.model_type == "IPC" else False, 
-
-
-    "delta_w_selection": args.delta_w_selection,  # "all" or "internal_only"
-
-    "use_bias": args.use_bias,
-
-    "normalize_msg": args.normalize_msg,
-
-    "lr_params": (args.lr_values, args.lr_weights),
-    #   (args.lr_gamma, args.lr_alpha), 
-    "T": (args.T, args.T_test),  # Number of iterations for gradient descent. (T_train, T_test)
-    "graph_structure": graph.edge_index, 
-    "batch_size": train_loader.batch_size, 
-    "edge_type":  graph.edge_type,
-
-    "use_learning_optimizer": use_learning_optimizer,    # False or [0], [(weight_decay=)]
-    "use_grokfast": args.grokfast,  # False or True
-    
-    # "weight_init": "uniform",   # xavier, 'uniform', 'based_on_f', 'zero', 'kaiming'
-    "weight_init": args.weight_init,   # xavier, 'uniform', 'based_on_f', 'zero', 'kaiming'
-    "activation": args.activation_func,  
-    "clamping": None , # (0, torch.inf) or 'None' 
-
- }
-
-
-import wandb
-
-run = wandb.init(
-    mode=args.use_wandb,
-    # entity="Erencan Tatar", 
-    project=f"PredCod",
-    # name=f"T_{args.T}_lr_value_{args.lr_values}_lr_weights_{args.lr_weights}_",
-    # name=f"{model_params_short}_{date_hour}",
-    # id=f"{model_params_short}_{date_hour}",
-    tags=tags_list,  # Add tags list here
-
-    # dir=model_dir,
-    # tags=["param_search", str(model_params["weight_init"]), model_params["activation"],  *learning_params['dataset_transform']], 
-    # Track hyperparameters and run metadata
-    # config=config_dict,  # Pass the updated config dictionary to wandb.init
-)
-from models.PC_graph import PCGNN
-
-
-model = PCGNN(**model_params,   
-    log_tensorboard=False,
-    wandb_logger=run if args.use_wandb in ['online', 'run'] else None,
-    debug=False, device=device)
-
-
-print("Init model PC")
-
-model.graph_type = args.graph_type
-model.init_modes(batch_example=batch_example)
-model.set_mode("training")
-
-
-
-from tqdm import tqdm
-train_energy, train_loss, train_acc = [], [], []
-val_loss, val_acc, val_acc2 = [], [], []
-num_epochs = 10
-
-from datetime import datetime
-from tqdm import tqdm
-import torch
-
-epochs = 100
-start_time = datetime.now()
-
-train_energy, train_loss, train_acc = [], [], []
-val_loss, val_acc, val_acc2 = [], [], []
-num_epochs = 10
-
-
-break_num = 15
-
-energy_vals = []
-
-with torch.no_grad():
-
-    for epochs in tqdm(range(num_epochs)):
-        model.train()
-
-        total_loss = 0
-        energy = 0
-        print("-----train_supervised-----")
-
-        for batch_no, batch in enumerate(train_loader):
-
-            # batch = Batch.from_data_list(batch)
-
-            # batch_graph, batch_label, batch_edge_index = batch.x.to(model.device), batch.y.to(model.device), batch.edge_index.to(model.device)
-            print(f"------------epochs/batch_nr---{epochs}/{batch_no}--------------")
-
-            batch = batch.to(model.device)
-            # Train model on the batch
-            history = model.learning(batch)
-
-            # for values in history:
-            #   energy_vals.append(values)
-
-            if batch_no >= 10:
-                break
-            # Compute loss (using last layer as prediction)
-            # predictions = model.x[:, -10:]  # Supervision output (assumes 10 classes)
-            # loss = criterion(predictions, batch_y)
-
-            # energy += PCG.get_energy()
-
-            # train_energy.append(energy/len(train_loader))
-
-        loss, acc = 0, 0
-        print("----test_iterative-----")
-        model.test()
-        cntr = 0
-        for batch_no, batch in enumerate(val_loader):
-            # y_pred = PCG.test_supervised(X_batch)
-            y_batch = batch.y.clone()
-
-            for i in range(len(batch)):
-              sub_graph = batch[i]  # Access the subgraph
-              sub_graph.x[sub_graph.supervision_indices, 0] = torch.ones_like(sub_graph.x[sub_graph.supervision_indices, 0])  # Check all feature dimensions
-
-              # random
-                # self.x[:,-do:] = torch.normal(0.5, self.node_init_std, size=(do,), device=DEVICE)
-
-              sub_graph.x[sub_graph.supervision_indices, 0] = torch.torch.normal(0.5, 0.001, size=( sub_graph.x[sub_graph.supervision_indices, 0].shape))
-
-
-            y_pred = model.test_class(batch)
-            # loss += MSE(y_pred, onehot(y_batch, N=10) ).item()
-            # print("y_pred", y_pred)
-            a = y_pred == y_batch
-            correct = torch.mean((a).float()).item()
-            # print("correct", corret)
-            acc += correct
-
-            if batch_no >= 5:
-                break
-            cntr += 1
-
-        val_acc.append(acc/len(val_loader))
-        val_acc2.append(acc/cntr)
-        val_loss.append(loss)
-        print("val_acc", val_acc)
-        print("val_acc2", val_acc2)
-        print("val_acc2", val_acc2[-1])
-
-        # print(f"\nEPOCH {epochs}/{num_epochs} \n #####################")
-        # print(f"VAL acc:   {val_acc[i]:.3f}, VAL MSE:   {val_loss[i]:.3f}, TRAIN ENERGY:   {train_energy[i]:.3f}")
-
-        # if early_stopper.early_stop(val_loss[i]):
-        #     print(f"\nEarly stopping at epoch {i+1}")
-        #     break
-
-torch.cuda.empty_cache()
-
-
-exit() 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-#########################################################################################################
-
-
-
-
-
-
-
-
-
-
-
 # from models.PC_vanZwol import PC_graph_zwol 
 
 # """ WITH MESSAGE_PASSING """
 # from models.PC_vanZwolPYG import PC_graph_zwol_PYG
 
 """ WITHOUT MESSAGE_PASSING """
-# from models.PC_vanZwol_pyg_loader import PC_graph_zwol_PYG
+from models.PC_vanZwol_pyg_loader import PC_graph_zwol_PYG
 
 from helper.vanZwol_optim import *
 
@@ -891,7 +559,6 @@ PCG.set_optimizer(optimizer)
 
 PCG.init_modes(batch_example=batch)
 
-
 model = PCG
 
 
@@ -926,7 +593,7 @@ val_loss, val_acc, val_acc2 = [], [], []
 num_epochs = 10
 model = PCG  # Assuming PCG is defined elsewhere
 
-break_num = 15
+break_num = 200
 
 with torch.no_grad():
     for epoch in tqdm(range(num_epochs), desc="Epoch Progress"):
@@ -946,12 +613,11 @@ with torch.no_grad():
         model.test()
         cntr = 0
 
-        break_num_eval = 2
+        break_num_eval = 50
         print("\n----test_iterative-----")
         for batch_no, batch in enumerate(tqdm(val_loader, total=min(break_num_eval, len(val_loader)), desc=f"Epoch {epoch+1} - Validation", leave=False)):
-            batch = batch.to(model.device)
             y_batch = batch.y.clone()
-            y_pred = model.test_class(batch)
+            y_pred = PCG.test_iterative(batch)
             correct = torch.mean((y_pred == y_batch).float()).item()
             acc += correct
 
@@ -964,8 +630,8 @@ with torch.no_grad():
         val_acc2.append(acc / cntr)
         val_loss.append(loss)
 
-        print("Last prediction:", y_pred)
-        print("Last y_batch:", y_batch)
+        print("prediction:", y_pred)
+        print("y_batch:", y_batch)
 
         print(f"\nEpoch {epoch+1}/{num_epochs} Completed")
         print(f"  Validation Accuracy: {val_acc[-1]:.3f}")

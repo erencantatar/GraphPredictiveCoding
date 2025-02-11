@@ -50,3 +50,12 @@ jobs/best_model_s2s_s2l_impact.job
 jobs/PC_uniform.job
 jobs/Exp2_uniform.job
 jobs/Exp2_uniform.job
+scr2/wandb/debug-cli.etatar.log
+scr2/**/debug-cli.etatar.log
+scr2/*/*.log
+scr2/wandb/*
+
+scr2/graphs/fully_connected/_normal/2/edge_index.pt
+scr2/graphs/single_hidden_layer/_no_sens2sens_no_sens2sup/2/edge_index.pt
+scr2/graphs/**//**//**/edge_index.pt
+scr2/graphs/

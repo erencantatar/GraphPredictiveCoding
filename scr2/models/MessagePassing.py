@@ -55,6 +55,20 @@ STARTING WITH VANZWOL where PYG data object is shaped as batch_size,num_vertices
 Now we introduce MEssagePassing instead of matmul operations, to be more efficient. 
 """
 
+"""
+Salvatori:
+    mu = W * f(x)
+    dEdx = (-e + f_prime(x) * (W^T * e))
+
+
+VanZwol:
+- AMB convention:
+    mu  =  torch.matmul(self.f(x), w.T) 
+    dEdx = e - f_prime(x) * torch.matmul(e, w.T[lower:upper,:].T)
+    # e[:,lower:upper] - self.dfdx(x[:,lower:upper]) * torch.matmul(e, w.T[lower:upper,:].T)
+
+""" 
+
 
 class PredictionMessagePassing(MessagePassing):
     def __init__(self, aggr='add', f=torch.tanh):
@@ -83,7 +97,7 @@ class DeltaXUpdate(MessagePassing):
         super(DeltaXUpdate, self).__init__(aggr=aggr)
         self.dfdx = dfdx  # Activation derivative
 
-    def forward(self, x, errors, edge_index, edge_weight, use_w_ji=True):
+    def forward(self, x, errors, edge_index, edge_weight):
         # Store errors to access in the message method
 
         # Perform message passing to compute the sum term

@@ -418,8 +418,6 @@ class PCGNN(torch.nn.Module):
         self.set_phase('initialize') # or 'weight_update'
          
       
-        self.t = ""
-
         # Find edges between sensory nodes (sensory-to-sensory)
         # self.s2s_mask = (self.edge_index_single_graph[0].isin(self.sensory_indices)) & (self.edge_index_single_graph[1].isin(self.sensory_indices))
 
@@ -892,20 +890,26 @@ class PCGNN(torch.nn.Module):
                 # delta_x = delta_x.view(self.batchsize, self.num_vertices)
 
 
+        # self.x[:,di:upper] -= self.lr_x*dEdx 
+        print("update value (0)")
+        print(self.values.shape)
+        print(delta_x.shape)
+        print(self.nodes_2_update.shape)
+        self.values[self.nodes_2_update] -= self.lr_values *  delta_x[self.nodes_2_update]
+        
 
+        # # Use the gradient descent update for updating values
+        # self.gradient_descent_update(
+        #     grad_type="values",
+        #     parameter=self.values_dummy,  # Assuming values are in self.data.x[:, 0]
+        #     delta=delta_x,
+        #     learning_rate=self.lr_values,
+        #     nodes_or_edge2_update=self.nodes_2_update,  # Mandatory, only updating hidden nodes (not sensory)
 
-        # Use the gradient descent update for updating values
-        self.gradient_descent_update(
-            grad_type="values",
-            parameter=self.values_dummy,  # Assuming values are in self.data.x[:, 0]
-            delta=delta_x,
-            learning_rate=self.lr_values,
-            nodes_or_edge2_update=self.nodes_2_update,  # Mandatory, only updating hidden nodes (not sensory)
-
-            error=self.errors if self.optimizer_values else None,
-            optimizer=self.optimizer_values if self.use_optimizers else None,
-            use_optimizer=self.use_optimizers
-        )
+        #     error=self.errors if self.optimizer_values else None,
+        #     optimizer=self.optimizer_values if self.use_optimizers else None,
+        #     use_optimizer=self.use_optimizers
+        # )
 
         # self.copy_dummy_to_node_values()
         # self.data.x[self.nodes_2_update, 0] = self.values_dummy.data[self.nodes_2_update].unsqueeze(-1).detach()  # Detach to avoid retaining the computation graph
@@ -1192,6 +1196,9 @@ class PCGNN(torch.nn.Module):
 
             # print("energy['internal_energy']", energy['internal_energy'])
             print("errors mean", self.errors.mean())
+            # log to wandb 
+            if self.wandb_logger:
+                wandb.log({"Training/energy_total_mean": energy["energy_total"]})
                         
             if self.mode == "training":
 
@@ -1362,7 +1369,7 @@ class PCGNN(torch.nn.Module):
         t_bar = tqdm(range(self.T), leave=False)
 
         # t_bar.set_description(f"Total energy at time 0 {energy} Per avg. vertex {energy['internal_energy'] / len(self.internal_indices)}")
-        t_bar.set_description(f"Total energy at time 0 {energy}")
+        # t_bar.set_description(f"Total energy at time 0 {energy}")
         # print(f"Total energy at time 0", energy, "Per avg. vertex", energy["internal_energy"] / len(self.internal_indices))
 
         # for t in t_bar:
@@ -1381,56 +1388,59 @@ class PCGNN(torch.nn.Module):
         #             break
 
         # Initialize progress bar with unknown total length if convergence monitor is used
-        total_iterations = self.T if not self.use_convergence_monitor else 5000
+        # total_iterations = self.T if not self.use_convergence_monitor else 5000
         t = 0
-        with tqdm(total=total_iterations, leave=False) as t_bar:
-            t_bar.set_description(f"Initial energy: {energy}")
-            self.t = t 
+        # with tqdm(total=total_iterations, leave=False) as t_bar:
+        #     t_bar.set_description(f"Initial energy: {energy}")
+        self.t = t 
 
-            while True:
-                
-                # 1. predictions 
-                self.predictions = self.get_predictions(self.data)
+        while True:
+            
+            # 1. predictions 
+            self.predictions = self.get_predictions(self.data)
 
-                # 2. errors
-                self.errors = self.values - self.predictions
+            # 2. errors
+            self.errors = self.values - self.predictions
 
-                # self.data.x[:, 1] = self.errors.view(-1, 1)
-                # self.data.x[:, 2] = self.predictions.view(-1, 1)
+            # self.data.x[:, 1] = self.errors.view(-1, 1)
+            # self.data.x[:, 2] = self.predictions.view(-1, 1)
 
-                # if not self.use_input_error:
+            # if not self.use_input_error:
 
-                
-                # 3. Update values 
-                self.update_values()
+            
+            # 3. Update values 
+            self.update_values()
 
-                if self.incremental_learning and self.mode == "training": #and self.delta_w is not None:
-                    self.set_phase('weight_update')
-                    self.weight_update()
-                    self.set_phase('weight_update done')
-                
-                # Recalculate energy
-                if self.update_rules == "Salvatori":
-                    # energy = self.energy()
-                    energy = self.errors
-                
-                    # Break conditions
-                    if self.use_convergence_monitor:
-                        # Check for convergence
-                        if self.convergence_tracker.update(energy['internal_energy'], None) or t >= self.T_MAX:
-                        # if self.convergence_tracker.update(energy['internal_energy'], self.gradients_log) or t >= 300:
-                            print(f"Convergence reached at iteration {t}")
-                            break
-                
-                # Stop after T iterations if not monitoring convergence
-                if t >= self.T - 1:
-                    break
+            if self.incremental_learning and self.mode == "training": #and self.delta_w is not None:
+                self.set_phase('weight_update')
+                self.weight_update()
+                self.set_phase('weight_update done')
+            
+            # Recalculate energy
+            if self.update_rules == "Salvatori":
+                # energy = self.energy()
+                energy = self.errors
+                print("energy at", self.t, "of", self.T, self.errors.mean())
+            
+                # Break conditions
+                # if self.use_convergence_monitor:
+                #     # Check for convergence
+                #     if self.convergence_tracker.update(energy['internal_energy'], None) or t >= self.T_MAX:
+                #     # if self.convergence_tracker.update(energy['internal_energy'], self.gradients_log) or t >= 300:
+                #         print(f"Convergence reached at iteration {t}")
+                #         break
+            
+            t += 1
 
-                # Update progress bar
-                t_bar.set_description(f"Iteration {t+1}, Energy: {energy}")
-                t_bar.update(1)
+            # Stop after T iterations if not monitoring convergence
+            if t >= self.T - 1:
+                print("breaknig here ")
+                break
 
-                t += 1
+            # Update progress bar
+            # t_bar.set_description(f"Iteration {t+1}, Energy: {energy}")
+            # t_bar.update(1)
+
 
         # if self.update_rules == "Salvatori":
             
@@ -1638,7 +1648,6 @@ class PCGNN(torch.nn.Module):
 
         self.data = data    
 
-
         self.edge_index = data.edge_index.to(self.device)
 
         self.data_ptr = data.ptr
@@ -1692,186 +1701,10 @@ class PCGNN(torch.nn.Module):
         #     self.wandb_logger.log({"Training/lr_values": current_lr_values, "lr_weights": current_lr_weights})
         
         # self.helper_GPU(self.print_GPU)
-
-    def log_delta_w(self, delta_w):
-         
-        # self.w_log.append(delta_w.detach().cpu())
-
-        # Extract the first batch from delta_w and edge_index
-        first_batch_delta_w = delta_w[:self.edge_index_single_graph.size(1)]  # Assuming edge_index_single_graph represents a single graph's edges
-
-        # Find sensory-to-sensory connections in the first batch
-        sensory_indices_set = set(self.sensory_indices_single_graph)
-        s2s_mask = [(src in sensory_indices_set and tgt in sensory_indices_set) 
-                    for src, tgt in zip(self.edge_index_single_graph[0], self.edge_index_single_graph[1])]
-
-        # Convert mask to tensor (if needed)
-        s2s_mask = torch.tensor(s2s_mask, dtype=torch.bool, device=self.device)
-
-        # Find the rest (edges that are not sensory-to-sensory) in the first batch
-        rest_mask = ~s2s_mask
-
-        # Apply the mask to delta_w for sensory-to-sensory and rest
-        delta_w_s2s = first_batch_delta_w[s2s_mask]
-        delta_w_rest = first_batch_delta_w[rest_mask]
-
-        # Check if delta_w_s2s is non-empty before calculating max and mean
-        delta_w_s2s_mean = delta_w_s2s.mean().item() if delta_w_s2s.numel() > 0 else 0
-        delta_w_s2s_max = delta_w_s2s.max().item() if delta_w_s2s.numel() > 0 else 0
-
-        # Check if delta_w_rest is non-empty before calculating max and mean
-        delta_w_rest_mean = delta_w_rest.mean().item() if delta_w_rest.numel() > 0 else 0
-        delta_w_rest_max = delta_w_rest.max().item() if delta_w_rest.numel() > 0 else 0
-
-        # Log the delta_w values for the first batch
-        self.wandb_logger.log({
-            "delta_w_s2s_mean_first_batch": delta_w_s2s_mean,
-            "delta_w_s2s_max_first_batch": delta_w_s2s_max,
-            "delta_w_rest_mean_first_batch": delta_w_rest_mean,
-            "delta_w_rest_max_first_batch": delta_w_rest_max
-        })
+        return True
+        # return history
 
 
-    def log_delta_w(self, print_log=False):
-        """
-        Log delta_w values separately for each edge connection category type defined by self.edge_type.
-        Create a combined histogram plot of all edge types using matplotlib and log it to WandB.
-        Parameters:
-        - print_log: Whether to print log information for debugging.
-        """
-        import matplotlib.pyplot as plt
-
-        delta_w = self.gradients_log  # Assuming `gradients_log` holds the delta weights
-        edge_type = self.edge_type  # Using self.edge_type for the connection types
-
-        if self.update_rules == "Van_Zwol":
-            # Ensure delta_w is flattened for size comparison
-            if delta_w.dim() > 1:
-                delta_w = delta_w.view(-1)
-
-            # Use edge indices to gather the corresponding delta_w elements
-            if delta_w.dim() == 2:  # Ensure 2D weights
-                delta_w_edges = delta_w[self.edge_index[0], self.edge_index[1]]
-            else:
-                delta_w_edges = delta_w
-
-        # Check if the sizes of delta_w and edge_type match
-        if delta_w.size(0) != edge_type.size(0):
-            raise ValueError(
-                f"Size mismatch: delta_w has size {delta_w.size(0)}, "
-                f"but edge_type has size {edge_type.size(0)}"
-            )
-
-
-      
-
-        # Ensure sizes match
-        if delta_w_edges.size(0) != edge_type.size(0):
-            raise ValueError(
-                f"Size mismatch: delta_w_edges has size {delta_w_edges.size(0)}, "
-                f"but edge_type has size {edge_type.size(0)}"
-            )
-
-
-        # Mapping of edge types
-        edge_type_map = {
-            "Sens2Sens": 0, "Sens2Inter": 1, "Sens2Sup": 2,
-            "Inter2Sens": 3, "Inter2Inter": 4, "Inter2Sup": 5,
-            "Sup2Sens": 6, "Sup2Inter": 7, "Sup2Sup": 8
-        }
-        reverse_edge_type_map = {v: k for k, v in edge_type_map.items()}
-
-        # Prepare a dictionary to store histograms for WandB
-        histograms = {}
-
-        # Initialize a figure for the combined histogram plot
-        plt.figure(figsize=(10, 7))
-
-        num_bins = 25
-        # Iterate through each connection category type in edge_type_map
-        for etype, etype_name in reverse_edge_type_map.items():
-            # Mask to select delta_w values corresponding to the current edge type
-            mask = (edge_type == etype)
-            
-            # Select delta_w values for this edge type
-            delta_w_etype = delta_w[mask]
-            
-            if delta_w_etype.numel() > 0:  # Plot and log only if there are elements
-                # Compute statistics
-                # delta_mean = delta_w_etype.mean().item()
-                # delta_max = delta_w_etype.max().item()
-
-                # Log histograms and stats to WandB
-                # if self.wandb_logger:
-                #     histograms[f"delta_w/{etype_name}_mean"] = delta_mean
-                #     histograms[f"delta_w/{etype_name}_max"] = delta_max
-
-                # Plot histogram for this edge type
-                plt.hist(
-                    delta_w_etype.cpu().numpy(), 
-                    # bins='auto',  # Automatic bin size based on data distribution
-                    bins=num_bins,  # Automatic bin size based on data distribution
-                    alpha=0.5,    # Transparency to overlay histograms
-                    label=etype_name
-                )
-
-                # Print log for debugging if required
-                # if print_log:
-                #     print(f"delta_w_{etype_name}: mean={delta_mean}, max={delta_max}")
-            else:
-                # Log NaN if no values for this edge type
-                if self.wandb_logger:
-                    histograms[f"delta_w/{etype_name}_mean"] = float('nan')
-                    histograms[f"delta_w/{etype_name}_max"] = float('nan')
-
-        # Compute the 5th and 95th percentiles of delta_w values
-        delta_min = np.percentile(delta_w.cpu().numpy(), 1)
-        delta_max = np.percentile(delta_w.cpu().numpy(), 99)
-
-
-        # Extend the range by 20% on both sides for broader visualization
-        range_extension = 0.7 * (delta_max - delta_min)
-        x_min = delta_min - range_extension
-        x_max = delta_max + range_extension
-
-        # Cap the x-axis with the broader range
-        plt.xlim(x_min, x_max)
-
-        # Add title, labels, and legend to the combined histogram plot
-        plt.title("Delta Weight Distribution by Edge Type")
-        plt.xlabel("Delta Weight")
-        plt.ylabel("Frequency")
-        plt.legend()
-        
-        # Save the figure
-        # combined_hist_path = "combined_delta_w_histogram.png"
-        # plt.savefig(combined_hist_path)
-
-        # Save the figure to a BytesIO buffer instead of saving locally
-        # Save the figure to a BytesIO buffer
-        buffer = io.BytesIO()
-        plt.savefig(buffer, format='png')
-        buffer.seek(0)
-
-        # Convert the BytesIO object to a PIL Image for WandB
-        image = Image.open(buffer)
-
-        # Log the histogram image to WandB
-        if self.wandb_logger:
-            self.wandb_logger.log({"delta_w/combined_histogram_plot": wandb.Image(image)})
-
-        # Close the plot to free resources
-        plt.close()
-        buffer.close()
-        # 
-        # Log all histograms at once to WandB
-        # if self.wandb_logger:
-        #     self.wandb_logger.log(histograms)
-
-        # Clear the plot to free memory
-        plt.clf()
-        
-        print("delta_w distributions for each edge type and combined histogram plot logged.")
 
 
     def weight_update(self):
@@ -1922,110 +1755,110 @@ class PCGNN(torch.nn.Module):
                 delta_w = delta_w.mean(0)
 
 
-        if self.update_rules == "Van_Zwol":
+        # if self.update_rules == "Van_Zwol":
 
-            # --------------------  old code --------------------
-            # bias = self.biases if self.use_bias else 0
+        #     # --------------------  old code --------------------
+        #     # bias = self.biases if self.use_bias else 0
 
-            # # Ensure correct dimensions
-            # batch_size = self.batchsize
-            # num_nodes = self.num_vertices
-            # x = self.data.x[:, 0].view(batch_size, num_nodes, 1)  # [8, 944, 1]
-            # self.errors = self.errors.view(batch_size, num_nodes, 1)  # [8, 944, 1]
+        #     # # Ensure correct dimensions
+        #     # batch_size = self.batchsize
+        #     # num_nodes = self.num_vertices
+        #     # x = self.data.x[:, 0].view(batch_size, num_nodes, 1)  # [8, 944, 1]
+        #     # self.errors = self.errors.view(batch_size, num_nodes, 1)  # [8, 944, 1]
             
-            # # Reshape weights for batched computation
-            # batch_weights = self.weights.view(batch_size, num_nodes, num_nodes)  # [8, 944, 944]
-            # bias = self.biases.view(batch_size, num_nodes, 1) if self.use_bias else 0  # [8, 944, 1]
+        #     # # Reshape weights for batched computation
+        #     # batch_weights = self.weights.view(batch_size, num_nodes, num_nodes)  # [8, 944, 944]
+        #     # bias = self.biases.view(batch_size, num_nodes, 1) if self.use_bias else 0  # [8, 944, 1]
 
-            # # Compute weighted input and `temp`
-            # weighted_input = torch.bmm(batch_weights, x)  # [8, 944, 1]
-            # temp = self.errors * self.f_prime(weighted_input + bias)  # [8, 944, 1]
+        #     # # Compute weighted input and `temp`
+        #     # weighted_input = torch.bmm(batch_weights, x)  # [8, 944, 1]
+        #     # temp = self.errors * self.f_prime(weighted_input + bias)  # [8, 944, 1]
 
-            # # Compute delta weights for each batch
-            # delta_w_batch = -torch.bmm(temp, x.transpose(1, 2))  # [8, 944, 944]
+        #     # # Compute delta weights for each batch
+        #     # delta_w_batch = -torch.bmm(temp, x.transpose(1, 2))  # [8, 944, 944]
 
-            # # Aggregate across batches (mean or sum)
-            # delta_w = delta_w_batch.mean(dim=0)  # [944, 944]
+        #     # # Aggregate across batches (mean or sum)
+        #     # delta_w = delta_w_batch.mean(dim=0)  # [944, 944]
 
-            # # Correct shape of delta_w after computation
-            # if delta_w.dim() == 1 or delta_w.shape != self.weights.shape:
-            #     delta_w = delta_w.view(self.weights.shape)
+        #     # # Correct shape of delta_w after computation
+        #     # if delta_w.dim() == 1 or delta_w.shape != self.weights.shape:
+        #     #     delta_w = delta_w.view(self.weights.shape)
 
-            # # TODO ???
-            # delta_w = delta_w_batch.view(self.weights.shape)  # Correct the shape before the update
+        #     # # TODO ???
+        #     # delta_w = delta_w_batch.view(self.weights.shape)  # Correct the shape before the update
 
-            # --------------- New code --------------------
-            # a = self.data.x[:, 0].view(self.num_vertices)   # a_hat 
-            # e = self.data.x[:, 1].view(self.num_vertices)
-            # # W = self.weights 
+        #     # --------------- New code --------------------
+        #     # a = self.data.x[:, 0].view(self.num_vertices)   # a_hat 
+        #     # e = self.data.x[:, 1].view(self.num_vertices)
+        #     # # W = self.weights 
 
-            # e = e.view(-1, 1)  # Shape [994, 1]
-            # f_a = self.f(a).view(1, -1)  # Shape [1, 994]
+        #     # e = e.view(-1, 1)  # Shape [994, 1]
+        #     # f_a = self.f(a).view(1, -1)  # Shape [1, 994]
 
-            # # Outer product: [994, 1] @ [1, 994] = [994, 994]
-            # delta_w = -torch.matmul(e, f_a)
+        #     # # Outer product: [994, 1] @ [1, 994] = [994, 994]
+        #     # delta_w = -torch.matmul(e, f_a)
 
 
-            # a = self.data.x[:, 0].view(self.batchsize, self.num_vertices)   # a_hat 
-            # e = self.data.x[:, 1].view(self.batchsize, self.num_vertices)
-            a = self.values.view(self.batchsize, self.num_vertices)   # a_hat 
-            e = self.errors.view(self.batchsize, self.num_vertices)
+        #     # a = self.data.x[:, 0].view(self.batchsize, self.num_vertices)   # a_hat 
+        #     # e = self.data.x[:, 1].view(self.batchsize, self.num_vertices)
+        #     a = self.values.view(self.batchsize, self.num_vertices)   # a_hat 
+        #     e = self.errors.view(self.batchsize, self.num_vertices)
 
-            # Outer product: [994, 1] @ [1, 994] = [994, 994]
-            self.delta_w = -torch.matmul(e.T, self.f(a))
+        #     # Outer product: [994, 1] @ [1, 994] = [994, 994]
+        #     self.delta_w = -torch.matmul(e.T, self.f(a))
 
-            # print("delta_w", delta_w.shape)  # Should be [
+        #     # print("delta_w", delta_w.shape)  # Should be [
 
-            print("delta_w", self.delta_w.shape)  # Should be [994, 994]
-            print("a", a.shape)  # [994]
-            print("e", e.shape)  # [994, 1]
+        #     print("delta_w", self.delta_w.shape)  # Should be [994, 994]
+        #     print("a", a.shape)  # [994]
+        #     print("e", e.shape)  # [994, 1]
             
-            # delta_w.data *= self.adj
-            assert self.delta_w.shape == self.weights.shape
+        #     # delta_w.data *= self.adj
+        #     assert self.delta_w.shape == self.weights.shape
             
-            self.params = {"w": self.weights, 
-                           "b": self.b, 
-                           "use_bias": False}
+        #     self.params = {"w": self.weights, 
+        #                    "b": self.b, 
+        #                    "use_bias": False}
 
-            self.grads = {"w": self.delta_w, "b": None}
+        #     self.grads = {"w": self.delta_w, "b": None}
 
-            print("before mean of the gradients", self.delta_w.mean())
-            # print mean of the new weights
-            print("before mean of the new weights", self.weights.mean())
+        #     print("before mean of the gradients", self.delta_w.mean())
+        #     # print mean of the new weights
+        #     print("before mean of the new weights", self.weights.mean())
             
 
-            self.van_zwol_optimizer_weights.step(self.params, self.grads,  batch_size=self.batchsize)
+        #     self.van_zwol_optimizer_weights.step(self.params, self.grads,  batch_size=self.batchsize)
 
-            # print mean of the gradients
-            print("mean of the gradients", self.delta_w.mean())
-            # print mean of the new weights
-            print("mean of the new weights", self.weights.mean())
+        #     # print mean of the gradients
+        #     print("mean of the gradients", self.delta_w.mean())
+        #     # print mean of the new weights
+        #     print("mean of the new weights", self.weights.mean())
             
-            return True
+        #     return True
 
-            # self.weights.data -= delta_w
-            # self.weights.data *= self.adj
+        #     # self.weights.data -= delta_w
+        #     # self.weights.data *= self.adj
 
-            # f_prime = self.f_prime(W @ a)  # f'(W * a_hat)
-            # print("f_prime", f_prime.shape)
-            # print("e", e.shape)
-            # print("a", a.shape)
-            # print("W", W.shape)
-            # print("e.view(-1, 1)", e.view(-1, 1).shape)
-            # print("f_prime.view(-1, 1)", f_prime.view(-1, 1).shape)
-            # print("a.view(1, -1)", a.view(1, -1).shape)
+        #     # f_prime = self.f_prime(W @ a)  # f'(W * a_hat)
+        #     # print("f_prime", f_prime.shape)
+        #     # print("e", e.shape)
+        #     # print("a", a.shape)
+        #     # print("W", W.shape)
+        #     # print("e.view(-1, 1)", e.view(-1, 1).shape)
+        #     # print("f_prime.view(-1, 1)", f_prime.view(-1, 1).shape)
+        #     # print("a.view(1, -1)", a.view(1, -1).shape)
 
-            # delta_w = (e.view(-1, 1) * f_prime.view(-1, 1)) @ a.view(1, -1)
-            # delta_w = -delta_w
-            # print("delta_w", delta_w.shape)
-
-
+        #     # delta_w = (e.view(-1, 1) * f_prime.view(-1, 1)) @ a.view(1, -1)
+        #     # delta_w = -delta_w
+        #     # print("delta_w", delta_w.shape)
 
 
-            # bias = b if self.use_bias else 0
-            # temp = e*self.dfdx( torch.matmul(x, w.T) + bias )
-            # out = -torch.matmul( temp.T,  x ) # matmul takes care of batch sum
-            # out *= self.mask if self.mask is not None else 1
+
+
+        #     # bias = b if self.use_bias else 0
+        #     # temp = e*self.dfdx( torch.matmul(x, w.T) + bias )
+        #     # out = -torch.matmul( temp.T,  x ) # matmul takes care of batch sum
+        #     # out *= self.mask if self.mask is not None else 1
 
           
 
