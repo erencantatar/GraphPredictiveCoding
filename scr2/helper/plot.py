@@ -25,7 +25,7 @@ def plot_adj_matrix(edge_index, model_dir, node_types=None):
                         If None, just plots the adjacency matrix.
     """
     # Convert edge_index to adjacency matrix
-    adj_matrix_pyg = to_dense_adj(edge_index)[0].numpy()
+    adj_matrix_pyg = to_dense_adj(edge_index)[0]
     adj_matrix_size = adj_matrix_pyg.shape[0]
 
     if node_types:
@@ -72,7 +72,7 @@ def plot_adj_matrix(edge_index, model_dir, node_types=None):
         fig, ax = plt.subplots(figsize=(30, 18))
 
         # Plot the adjacency matrix with top-left origin
-        cax = ax.imshow(adj_matrix_pyg, cmap='viridis', origin='upper')
+        cax = ax.imshow(adj_matrix_pyg.numpy(), cmap='viridis', origin='upper')
         ax.set_title("Adjacency Matrix")
         fig.colorbar(cax, ax=ax)
 

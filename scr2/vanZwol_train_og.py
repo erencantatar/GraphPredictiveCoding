@@ -230,8 +230,9 @@ import torch.nn.functional as F
 
 class PredictiveCodingLayer(MessagePassing):
     def __init__(self, f, f_prime):
-        super().__init__(aggr='add')  # Sum aggregation
-        
+        # super().__init__(aggr='add')  # Sum aggregation
+        super().__init__(aggr='add', flow="target_to_source")  # Sum aggregation
+
         self.f, self.f_prime = f, f_prime
         
     def message_mu(self, x_j, weight):
@@ -241,8 +242,9 @@ class PredictiveCodingLayer(MessagePassing):
         - W: Weights associated with edges
         """
         # return self.f(x_j) * weight
-        # return weight.unsqueeze(-1) * self.f(x_j)  
-        return weight * self.f(x_j) 
+        # return self.f(x_j) * weight.unsqueeze(-1)   
+        return self.f(x_j) * weight  
+        # return weight * self.f(x_j) 
     
 
     def message_delta_x(self, epsilon_j, x_j, weight):
@@ -265,8 +267,8 @@ class PredictiveCodingLayer(MessagePassing):
         reversed_edge_index = edge_index.flip(0)  # Transpose the edges for W^T
 
         # Step 1: Compute predictions μ using W (forward pass)
-        mu = self.propagate(reversed_edge_index, x=x, weight=weight, message=self.message_mu)
-        # mu = self.propagate(edge_index, x=x, weight=weight, message=self.message_mu)
+        # mu = self.propagate(reversed_edge_index, x=x, weight=weight, message=self.message_mu)
+        mu = self.propagate(edge_index, x=x, weight=weight, message=self.message_mu)
         
         # Step 2: Compute prediction error ε = x - μ
         epsilon = x - mu
@@ -279,6 +281,27 @@ class PredictiveCodingLayer(MessagePassing):
         return epsilon, mu, delta_x
 
 
+
+
+# Message passing layer
+class PredictionMessagePassing(MessagePassing):
+    def __init__(self):
+        super().__init__(aggr='add', flow="target_to_source")  # Sum aggregation
+        # super().__init__(aggr='add', flow="source_to_target")  # Sum aggregation
+        self.f = torch.tanh
+
+    def forward(self, x, edge_index, weight):
+        # Start message passing
+        return self.propagate(edge_index, x=x, weight=weight)
+    
+    def message(self, x_j, weight):
+        # Apply activation to the source node's feature
+        return self.f(x_j) * weight.unsqueeze(-1)
+        # return self.f(x_j) 
+    
+    def update(self, aggr_out):
+        # No bias or additional transformation; return the aggregated messages directly
+        return aggr_out
 
 class Optimizer(object):
     def __init__(self, params, optim_type, learning_rate, batch_scale=False, grad_clip=None, weight_decay=None):
@@ -776,8 +799,18 @@ class PCgraph(PCmodel):
         self.node_init_std = node_init_std
 
         self.edge_index = edge_index
+
+        import torch_geometric 
+        self.edge_index = torch_geometric.utils.dense_to_sparse(adj)[0]
+        # print("edge_index: ", edge_index)
+        # print("self.edge_index: ", self.edge_index)
+        # assert self.edge_index == edge_index        
+        
+        # assert torch.all(self.edge_index == edge_index)
+
         self.adj = torch.tensor(adj).to(DEVICE)
         self.mask = self.adj
+
 
         self._reset_grad()
         self._reset_params()
@@ -785,6 +818,7 @@ class PCgraph(PCmodel):
         self.MP = PredictiveCodingLayer(f=self.structure.f, 
                                         f_prime=self.structure.dfdx)
 
+        self.MP_mu = PredictionMessagePassing()
 
         if self.structure.mask is not None:
             self.w = self.structure.mask * self.w 
@@ -842,8 +876,8 @@ class PCgraph(PCmodel):
 
 
     def _reset_params(self):
-        # self.w = torch.empty( self.structure.N, self.structure.N, device=DEVICE)
-        # self.weight_init(self.w)
+        self.w = torch.empty( self.structure.N, self.structure.N, device=DEVICE)
+        self.weight_init(self.w)
         ## -------------------------------------------------
 
         # import scipy sparse coo
@@ -855,38 +889,38 @@ class PCgraph(PCmodel):
 
         # Initialize edge weights as a torch.nn.Parameter
         # edge_weights = torch.nn.Parameter(torch.empty(edge_index.size(1)))
-        num_edges = self.edge_index.size(1)
-        weights_1d = torch.empty(num_edges, device=DEVICE)
-        nn.init.normal_(weights_1d, mean=0.01, std=0.05)
+        # num_edges = self.edge_index.size(1)
+        # weights_1d = torch.empty(num_edges, device=DEVICE)
+        # nn.init.normal_(weights_1d, mean=0.01, std=0.05)
 
-        N = self.structure.N
+        # N = self.structure.N
                 
-        # Create the sparse matrix using PyTorch sparse functionality
-        self.w = torch.sparse_coo_tensor(self.edge_index, weights_1d, size=(N, N), device=DEVICE)
-        # Convert to a dense (N, N) matrix if needed
-        dense_matrix = self.w.to_dense()
+        # # Create the sparse matrix using PyTorch sparse functionality
+        # self.w = torch.sparse_coo_tensor(self.edge_index, weights_1d, size=(N, N), device=DEVICE)
+        # # Convert to a dense (N, N) matrix if needed
+        # dense_matrix = self.w.to_dense()
 
-        print("Initialized 1D Weights:\n", weights_1d.shape)
-        print("\nDense (N, N) Matrix:\n", dense_matrix.shape)
+        # print("Initialized 1D Weights:\n", weights_1d.shape)
+        # print("\nDense (N, N) Matrix:\n", dense_matrix.shape)
 
-        # Extract weights corresponding to the original edge index
-        reconstructed_weights_1d = dense_matrix[self.edge_index[0], self.edge_index[1]]
+        # # Extract weights corresponding to the original edge index
+        # reconstructed_weights_1d = dense_matrix[self.edge_index[0], self.edge_index[1]]
 
-        print("Reconstructed 1D Weights:", reconstructed_weights_1d.shape)
+        # print("Reconstructed 1D Weights:", reconstructed_weights_1d.shape)
 
-        # import matplotlib.pyplot as plt
+        # # import matplotlib.pyplot as plt
 
-        # save png the weights 
-        plt.imshow(dense_matrix.cpu().numpy())
-        # save
-        plt.savefig("weights.png")
+        # # save png the weights 
+        # plt.imshow(dense_matrix.cpu().numpy())
+        # # save
+        # plt.savefig("weights.png")
 
-        # also save the adj_dense
-        plt.imshow(self.adj.cpu().numpy())
-        plt.savefig("adj.png")
+        # # also save the adj_dense
+        # plt.imshow(self.adj.cpu().numpy())
+        # plt.savefig("adj.png")
 
-        # close the plots 
-        plt.close()
+        # # close the plots 
+        # plt.close()
 
 
 
@@ -948,6 +982,8 @@ class PCgraph(PCmodel):
         self.optimizer = optimizer
 
     def update_xs(self, train=True):
+
+
         if self.early_stop:
             early_stopper = EarlyStopper(patience=0, min_delta=self.min_delta)
 
@@ -958,8 +994,10 @@ class PCgraph(PCmodel):
         
         for t in range(T): 
             # print("t", t)
-            self.weights_1d = self.w_to_sparse(self.w)
 
+            self.w = self.adj * self.w 
+
+            # self.weights_1d = self.w_to_sparse(self.w)
             num_features = 1
 
             # self.x [batch_size, num_nodes]
@@ -977,21 +1015,30 @@ class PCgraph(PCmodel):
                 [self.edge_index + i * num_nodes for i in range(batch_size)], dim=1
             )  # Concatenate and offset indices
 
+            # Gather 1D weights corresponding to connected edges
+            weights_1d = self.w[self.edge_index[0], self.edge_index[1]]  # Extract relevant weights from W
+            # weights_1d = self.w.T[self.edge_index[0], self.edge_index[1]]  # Extract relevant weights from W
+
             # Expand edge weights for each graph
-            batched_weights = self.weights_1d.repeat(batch_size)
+            batched_weights = weights_1d.repeat(batch_size)
 
             # Perform message passing
             epsilon, mu_mp, delta_x = self.MP.forward(
                 values, batched_edge_index.to(DEVICE), batched_weights.to(DEVICE)
             )
 
+            predicted_mpU = self.MP_mu(self.x.view(-1,1).to(DEVICE),
+                                    batched_edge_index.to(DEVICE), batched_weights.to(DEVICE))
+
+            predicted_mpU = predicted_mpU.view(batch_size, self.structure.N)
+
             # values, self.edge_index, self.weights_1d = values.to(DEVICE), self.edge_index.to(DEVICE), self.weights_1d.to(DEVICE)
             # epsilon, mu_mp, delta_x = self.MP.forward(values, self.edge_index, self.weights_1d)
             # print("shape epsilon, mu, delta_x", epsilon.shape, mu.shape, delta_x.shape)
-            self.e = epsilon.view(-1, self.structure.N)
+            # self.e = epsilon.view(batch_size, self.structure.N)
             # Optionally convert to dense form for further computations if needed
 
-            self.w = self.w_to_dense(self.weights_1d)
+            # self.w = self.w_to_dense(self.weights_1d)
             # assert self.w.shape == (self.structure.N, self.structure.N)
 
             # torch.matmul(self.structure.f(self.x), self.w.T) + self.b
@@ -1002,23 +1049,31 @@ class PCgraph(PCmodel):
             # if self.w.shape != (self.structure.N, self.structure.N):
             #     self.w = self.w_to_dense(self.w)
             
-            mu = self.structure.pred(x=self.x, w=self.w, b=self.b)
+            # # mu = self.structure.pred(x=self.x, w=self.w, b=self.b)
+            # mu = torch.matmul(f(self.x), self.w.T)
             
-            # print("mu mean", torch.mean(mu))
-            # print("mu_mp mean", torch.mean(mu_mp))
+            # # print("mu mean", torch.mean(mu))
+            # # print("mu_mp mean", torch.mean(mu_mp))
 
-            mu_mp = mu_mp.view(-1,self.structure.N)
-            print("epsilon.shape", epsilon.shape)
-            print("shape mu, mu_mp", mu.shape, mu_mp.shape)
+            # mu_mp = mu_mp.view(batch_size,self.structure.N)
+            # # print("epsilon.shape", epsilon.shape)
 
-            print("mean", torch.mean(mu), torch.mean(mu_mp))
-            print("mu", mu)
-            print("mu_mp", mu_mp)
+            # print("shape mu, mu_mp", mu.shape, mu_mp.shape)
+            # # print("self.structure.N", self.structure.N)
+            # print("mean", torch.mean(mu), torch.mean(mu_mp))
+            # print("mu", mu)
+            # print("mu_mp", mu_mp)
+            # print("predicted_mpU", predicted_mpU)
+
+            # print(torch.allclose(mu_mp, mu, atol=1))  # Should be True
+            # print(torch.allclose(predicted_mpU, mu, atol=1))  # Should be True
+            
+            
 
             # assert mu == mu_mp, "mu and mu_mp are not equal"
 
-            self.e = self.x - mu_mp 
-            # self.e = self.x - mu 
+            # self.e = self.x - mu_mp 
+            self.e = self.x - predicted_mpU
         
             # print("e1", torch.mean(self.e))
             if not self.use_input_error:
