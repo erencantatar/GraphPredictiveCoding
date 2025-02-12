@@ -285,10 +285,11 @@ class PredictiveCodingLayer(MessagePassing):
 
 # Message passing layer
 class PredictionMessagePassing(MessagePassing):
-    def __init__(self):
+    def __init__(self, f):
         super().__init__(aggr='add', flow="target_to_source")  # Sum aggregation
         # super().__init__(aggr='add', flow="source_to_target")  # Sum aggregation
-        self.f = torch.tanh
+        # self.f = torch.tanh
+        self.f = f
 
     def forward(self, x, edge_index, weight):
         # Start message passing
@@ -302,6 +303,42 @@ class PredictionMessagePassing(MessagePassing):
     def update(self, aggr_out):
         # No bias or additional transformation; return the aggregated messages directly
         return aggr_out
+    
+
+
+class GradientMessagePassing(MessagePassing):
+    def __init__(self, dfdx):
+        # super().__init__(aggr='add', flow="target_to_source")  # Reverse flow for backward pass
+        super().__init__(aggr='add', flow="source_to_target")  # Reverse flow for backward pass
+
+        self.dfdx = dfdx  # Activation derivative
+
+    def forward(self, x, edge_index, error, weight):
+        # Propagate messages backward using edge_index and node data
+        return self.propagate(edge_index, x=x, error=error, weight=weight)
+
+    def message(self, error_j, x_i, weight):
+        # Compute the propagated error using the activation derivative and weight
+
+        error_j = error_j.view(-1, 1)  # Ensure shape consistency
+        x_i = x_i.view(-1, 1)  # Ensure shape consistency
+        weight = weight.view(-1, 1)  # Ensure shape consistency
+
+        return self.dfdx(x_i) * error_j * weight
+
+    def update(self, aggr_out, error):
+        # Align with: e - dfdx(x) * torch.matmul(e, w.T)
+        return error - aggr_out
+
+
+    # def grad_x(self, x, e, w, b, train):
+    #     lower = self.shape[0]
+    #     upper = -self.shape[2] if train else sum(self.shape)
+    #     return e[:,lower:upper] - self.dfdx(x[:,lower:upper]) * torch.matmul(e, w.T[lower:upper,:].T)
+
+
+
+# --------------------------------------------------
 
 class Optimizer(object):
     def __init__(self, params, optim_type, learning_rate, batch_scale=False, grad_clip=None, weight_decay=None):
@@ -498,6 +535,7 @@ class EarlyStopper:
 # from PRECO.structure import *
 from torch import nn
 from scipy.ndimage import label, find_objects
+import torch
 
 class PCStructure:
     """
@@ -810,15 +848,15 @@ class PCgraph(PCmodel):
 
         self.adj = torch.tensor(adj).to(DEVICE)
         self.mask = self.adj
-
-
+        
         self._reset_grad()
         self._reset_params()
 
-        self.MP = PredictiveCodingLayer(f=self.structure.f, 
-                                        f_prime=self.structure.dfdx)
+        # self.MP = PredictiveCodingLayer(f=self.structure.f, 
+        #                                 f_prime=self.structure.dfdx)
 
-        self.MP_mu = PredictionMessagePassing()
+        self.pred_mu_MP = PredictionMessagePassing(self.structure.f)
+        self.grad_x_MP = GradientMessagePassing(self.structure.dfdx)
 
         if self.structure.mask is not None:
             self.w = self.structure.mask * self.w 
@@ -998,11 +1036,10 @@ class PCgraph(PCmodel):
             self.w = self.adj * self.w 
 
             # self.weights_1d = self.w_to_sparse(self.w)
-            num_features = 1
 
             # self.x [batch_size, num_nodes]
-
-            values = self.x.view(-1, num_features) # Ensure shape [num_nodes * batch_size, features=1]
+            # num_features = 1
+            # values = self.x.view(-1, num_features) # Ensure shape [num_nodes * batch_size, features=1]
 
             # weight = self.get_dense_weight()
             
@@ -1022,13 +1059,14 @@ class PCgraph(PCmodel):
             # Expand edge weights for each graph
             batched_weights = weights_1d.repeat(batch_size)
 
-            # Perform message passing
-            epsilon, mu_mp, delta_x = self.MP.forward(
-                values, batched_edge_index.to(DEVICE), batched_weights.to(DEVICE)
-            )
+            # # Perform message passing
+            # epsilon, mu_mp, delta_x = self.MP.forward(
+            #     values, batched_edge_index.to(DEVICE), batched_weights.to(DEVICE)
+            # )
 
-            predicted_mpU = self.MP_mu(self.x.view(-1,1).to(DEVICE),
-                                    batched_edge_index.to(DEVICE), batched_weights.to(DEVICE))
+            predicted_mpU = self.pred_mu_MP(self.x.view(-1,1).to(DEVICE),
+                                    batched_edge_index.to(DEVICE), 
+                                    batched_weights.to(DEVICE))
 
             predicted_mpU = predicted_mpU.view(batch_size, self.structure.N)
 
@@ -1068,8 +1106,6 @@ class PCgraph(PCmodel):
             # print(torch.allclose(mu_mp, mu, atol=1))  # Should be True
             # print(torch.allclose(predicted_mpU, mu, atol=1))  # Should be True
             
-            
-
             # assert mu == mu_mp, "mu and mu_mp are not equal"
 
             # self.e = self.x - mu_mp 
@@ -1078,11 +1114,46 @@ class PCgraph(PCmodel):
             # print("e1", torch.mean(self.e))
             if not self.use_input_error:
                 self.e[:,:di] = 0 
-            
-            dEdx = self.structure.grad_x(self.x.to(DEVICE), self.e.to(DEVICE), self.w.to(DEVICE), self.b.to(DEVICE),train=train) # only hidden nodes
+
+            # print("dx----0")
+
+            # AMB convention 
+            # lower = self.shape[0]
+            # upper = -self.shape[2] if train else sum(self.shape)
+            # return e[:,lower:upper] - self.dfdx(x[:,lower:upper]) * torch.matmul(e, w.T[lower:upper,:].T)
+            # dEdx = self.structure.grad_x(self.x.to(DEVICE), self.e.to(DEVICE), self.w.to(DEVICE), self.b.to(DEVICE),train=train) # only hidden nodes
+
+            torch.cuda.empty_cache()
+
+            # print(self.x.view(-1,1).shape)
+            # print(batched_edge_index.shape)
+            # print(self.e.view(-1,1).shape)
+            # print(batched_weights.shape)
+
+            # x = self.x.T.contiguous().view(-1, 1).to(DEVICE)  # Shape: [num_nodes, batch_size]
+            # error = self.e.T.contiguous().view(-1, 1).to(DEVICE)  # Shape: [num_nodes, batch_size]
+
+            dEdx_ = self.grad_x_MP.forward( 
+                    x=self.x.view(-1,1),
+                    edge_index=batched_edge_index.to(DEVICE),  
+                    error=self.e.view(-1,1), 
+                    weight=batched_weights.to(DEVICE),
+            )
+
+            dEdx_ = dEdx_.view(batch_size, self.structure.N)
+            dEdx_ = dEdx_[:,di:upper]
+            # print(dEdx_.shape)
+            # print(dEdx.shape)
+            # print("dEdx match", torch.allclose(dEdx_, dEdx, atol=1e-5))  # Should be True
+            # print(dEdx_)
+            # print(dEdx)
+            # print("0")
+            # print(dEdx_.shape)
+
             # self.x[:,di:upper] -= self.lr_x*dEdx 
             #
             # norm_dEdx = torch.norm(dEdx)
+            dEdx = dEdx_ 
 
             clipped_dEdx = torch.clamp(dEdx, -1, 1)
 
@@ -1216,7 +1287,9 @@ use_input_error = False     # whether to use errors in the input layer or not
 
 # Learning
 lr_w = 0.00001              # learning rate
-batch_size = 200
+# batch_size = 200
+# batch_size = 50
+batch_size = 100
 weight_decay = 0             
 grad_clip = 1
 batch_scale = False
@@ -1448,11 +1521,12 @@ PCG.set_optimizer(optimizer)
 train_set, val_set = random_split(train_dataset, [50000, 10000])
 train_indices = train_subset_indices(train_set, 10, no_per_class=0) # if a certain number of samples per class is required, set no_per_class to that number. 0 means all samples are used.
 
-train_loader = preprocess( DataLoader(train_set, batch_size=batch_size, sampler=SubsetRandomSampler( train_indices ), drop_last=False) ) # subsetrandomsampler shuffles the data.
-val_loader = preprocess( DataLoader(val_set, batch_size=len(val_set), shuffle=False, drop_last=False) )
-test_loader = preprocess( DataLoader(test_set, batch_size=len(test_set), shuffle=False, drop_last=False) )
+train_loader = preprocess( DataLoader(train_set, batch_size=batch_size, sampler=SubsetRandomSampler( train_indices ), drop_last=True,  num_workers=4) ) # subsetrandomsampler shuffles the data.
+val_loader = preprocess( DataLoader(val_set, batch_size=len(val_set), shuffle=False, drop_last=True,  num_workers=4) )
+test_loader = preprocess( DataLoader(test_set, batch_size=len(test_set), shuffle=False, drop_last=True,  num_workers=4) )
 
 
+# train_loader = DataLoader(train_set, batch_size=batch_size, sampler=SubsetRandomSampler(train_indices), drop_last=False, num_workers=4, pin_memory=True)
 MSE = torch.nn.MSELoss()
 
 train_energy, train_loss, train_acc = [], [], []
