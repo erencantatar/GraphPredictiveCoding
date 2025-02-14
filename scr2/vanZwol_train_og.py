@@ -320,8 +320,8 @@ class GradientMessagePassing(MessagePassing):
     def message(self, error_j, x_i, weight):
         # Compute the propagated error using the activation derivative and weight
 
-        error_j = error_j.view(-1, 1)  # Ensure shape consistency
-        x_i = x_i.view(-1, 1)  # Ensure shape consistency
+        # error_j = error_j.view(-1, 1)  # Ensure shape consistency
+        # x_i = x_i.view(-1, 1)  # Ensure shape consistency
         # weight = weight.view(-1, 1)  # Ensure shape consistency
 
         return self.dfdx(x_i) * error_j * weight[:, None]
@@ -329,7 +329,6 @@ class GradientMessagePassing(MessagePassing):
     def update(self, aggr_out, error):
         # Align with: e - dfdx(x) * torch.matmul(e, w.T)
         return error - aggr_out
-
 
     # def grad_x(self, x, e, w, b, train):
     #     lower = self.shape[0]
@@ -808,17 +807,22 @@ class PCgraph(PCmodel):
         # assert torch.all(self.edge_index == edge_index)
 
         # batch_size = batch_size
-        # num_nodes = self.structure.N  # Nodes per graph
+        self.num_nodes = self.structure.N  # Nodes per graph
+        self.N = self.num_nodes
+
 
         # # Offset edge_index for batched graphs
         # self.batched_edge_index = torch.cat(
         #     [self.edge_index + i * num_nodes for i in range(batch_size)], dim=1
         # )  # Concatenate and offset indices
 
-
-
         self.adj = torch.tensor(adj).to(DEVICE)
-        self.mask = self.adj
+        # self.mask = self.adj
+        # self.N = self.adj.shape[0]
+
+        self.mask = self.structure.mask 
+
+        # self.structure.N = self.N
         
         self._reset_grad()
         self._reset_params()
@@ -830,12 +834,12 @@ class PCgraph(PCmodel):
         self.grad_x_MP = GradientMessagePassing(self.structure.dfdx)
 
         print("self.structure.mask", self.structure.mask.shape, type(self.structure.mask))
-        print("self.self.adj", self.adj.shape, type(self.adj))
-        print(torch.allclose(self.structure.mask, self.adj))
+        print("self.adj", self.adj.shape, type(self.adj))
+        # print(torch.allclose(self.structure.mask, self.adj))
 
         if self.structure.mask is not None:
             self.w = self.structure.mask * self.w 
-            self.w = self.adj * self.w 
+            # self.w = self.adj * self.w 
             # self.mask_density = torch.count_nonzero(self.w)/self.structure.N**2   
             # hierarchical structure
             if self.structure.num_layers is not None:
@@ -889,7 +893,8 @@ class PCgraph(PCmodel):
 
 
     def _reset_params(self):
-        self.w = torch.empty( self.structure.N, self.structure.N, device=DEVICE)
+        self.w = torch.empty(self.structure.N, self.structure.N, device=DEVICE)
+        # self.w = torch.empty(self.N, self.N, device=DEVICE)
         self.weight_init(self.w)
         ## -------------------------------------------------
 
@@ -1008,6 +1013,7 @@ class PCgraph(PCmodel):
 
     def update_xs(self, train=True):
 
+        # print("---update_xs----")
         if self.early_stop:
             early_stopper = EarlyStopper(patience=0, min_delta=self.min_delta)
 
@@ -1016,12 +1022,13 @@ class PCgraph(PCmodel):
 
         T = self.T_train if train else self.T_test
         
-        use_MP = False
-        # use_MP = True 
+        # use_MP = False
+        use_MP = True 
 
 
         # batch_size = batch_size
         batch_size = self.x.shape[0]
+        # num_nodes = self.structure.N  # Nodes per graph
         num_nodes = self.structure.N  # Nodes per graph
 
         # Offset edge_index for batched graphs
@@ -1034,6 +1041,8 @@ class PCgraph(PCmodel):
 
         for t in range(T): 
             # print("t", t)
+
+            # print("---t---", t)
 
             self.w = self.adj * self.w 
 
@@ -1112,6 +1121,7 @@ class PCgraph(PCmodel):
 
         
             # print("e1", torch.mean(self.e))
+            # TODO
             if not self.use_input_error:
                 self.e[:,:di] = 0 
 
@@ -1122,8 +1132,6 @@ class PCgraph(PCmodel):
             # upper = -self.shape[2] if train else sum(self.shape)
             # return e[:,lower:upper] - self.dfdx(x[:,lower:upper]) * torch.matmul(e, w.T[lower:upper,:].T)
             
-            torch.cuda.empty_cache()
-
             if use_MP:
             # x = self.x.T.contiguous().view(-1, 1).to(DEVICE)  # Shape: [num_nodes, batch_size]
             # error = self.e.T.contiguous().view(-1, 1).to(DEVICE)  # Shape: [num_nodes, batch_size]
@@ -1135,18 +1143,18 @@ class PCgraph(PCmodel):
                         weight=batched_weights.to(DEVICE),
                 )
 
-                dEdx_ = dEdx_.view(batch_size, self.structure.N)
+                dEdx_ = dEdx_.view(batch_size, self.N)
                 dEdx_ = dEdx_[:,di:upper]
                 dEdx = dEdx_ 
 
             else:
                 dEdx = self.structure.grad_x(self.x.to(DEVICE), self.e.to(DEVICE), self.w.to(DEVICE), self.b.to(DEVICE),train=train) # only hidden nodes
 
-
             clipped_dEdx = torch.clamp(dEdx, -1, 1)
 
             self.x[:,di:upper] -= self.lr_x*clipped_dEdx
-            
+            # self.x[:,:] -= self.lr_x*clipped_dEdx
+   
             # self.update_w()
             
             if self.incremental and self.dw is not None:
@@ -1163,11 +1171,15 @@ class PCgraph(PCmodel):
 
                 if self.optimizer.m_w.is_sparse:
                     self.optimizer.m_w = self.optimizer.m_w.to_dense()
-                
+
+                # self.update_w()   # added myself
                 self.optimizer.step(self.params, self.grads, batch_size=self.x.shape[0])
             if self.early_stop:
                 if early_stopper.early_stop( self.get_energy() ):
-                    break            
+                    break
+
+            torch.cuda.empty_cache()
+            
 
     def train_supervised(self, X_batch, y_batch): 
         X_batch = to_vector(X_batch)                  # makes e.g. 28*28 -> 784
@@ -1184,7 +1196,7 @@ class PCgraph(PCmodel):
 
         if not self.incremental:
             # self.update_w()
-            print("optimizer step end ")
+            # print("optimizer step end ")
             self.optimizer.step(self.params, self.grads, batch_size=X_batch.shape[0])
 
 
@@ -1239,6 +1251,7 @@ use_bias = False
 # use_bias = False # errie set to False 
 shape = [784, 48, 10] # input, hidden, output
 mask = get_mask_hierarchical([784,32,16,10])
+# mask = get_mask_hierarchical([784,500,200,100,10])
 
 # plot mask 
 from matplotlib import pyplot as plt
@@ -1268,6 +1281,7 @@ lr_x = 0.5                  # inference rate
 T_train = 5                 # inference time scale
 T_test = 10                 # unused for hierarchical model
 incremental = True          # whether to use incremental EM or not
+# incremental = False          # whether to use incremental EM or not
 use_input_error = False     # whether to use errors in the input layer or not
 # use_input_error = True     # whether to use errors in the input layer or not
 
@@ -1275,7 +1289,7 @@ use_input_error = False     # whether to use errors in the input layer or not
 lr_w = 0.00001              # learning rate
 # batch_size = 200
 # batch_size = 50
-batch_size = 32
+batch_size = 200
 weight_decay = 0             
 grad_clip = 1
 batch_scale = False
@@ -1287,8 +1301,8 @@ args = {
     "update_rules": "Van_Zwol",  # Update rules for learning
 
     "graph_type": "single_hidden_layer",  # Type of graph
+    # "discriminative_hidden_layers": [500, 200,100],  # Hidden layers for discriminative model
     "discriminative_hidden_layers": [32, 16],  # Hidden layers for discriminative model
-    # "discriminative_hidden_layers": [100, 50],  # Hidden layers for discriminative model
     "generative_hidden_layers": [0],  # Hidden layers for generative model
 
     "delta_w_selection": "all",  # Selection strategy for weight updates
@@ -1459,8 +1473,6 @@ if graph_params["graph_type"]["name"] not in ["single_hidden_layer"]:
         "The argument --generative_hidden_layers can only be used if graph_type is 'single_hidden_layer'."
 
 
-
-
 print("graph_params 1 :", graph_params)
 
 from graphbuilder import GraphBuilder
@@ -1505,6 +1517,9 @@ optimizer = Adam(
     batch_scale=batch_scale,
     weight_decay=weight_decay,
 )
+
+
+# PCG.structure.shape = [784] + args.discriminative_hidden_layers + [10]  # Adjust if layers change
 
 PCG.set_optimizer(optimizer)
 
