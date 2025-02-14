@@ -59,3 +59,6 @@ scr2/graphs/fully_connected/_normal/2/edge_index.pt
 scr2/graphs/single_hidden_layer/_no_sens2sens_no_sens2sup/2/edge_index.pt
 scr2/graphs/**//**//**/edge_index.pt
 scr2/graphs/
+scr2/graphs/single_hidden_layer/_no_sens2sens_no_sens2sup/2/graph_type.json
+scr2/graphs/single_hidden_layer/_no_sens2sens_no_sens2sup/2/edge_index.pt
+scr2/graphs/single_hidden_layer/_no_sens2sens_no_sens2sup/2/edge_type.pt

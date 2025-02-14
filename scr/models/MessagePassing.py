@@ -23,6 +23,8 @@ from helper.activation_func import set_activation
 class PredictionMessagePassing(MessagePassing):
     def __init__(self, activation):
         super(PredictionMessagePassing, self).__init__(aggr="add", flow="source_to_target")
+        # super(PredictionMessagePassing, self).__init__(aggr="add", flow="target_to_source")
+
         self.f, self.activation_derivative = set_activation(activation)
 
     def forward(self, values, edge_index, weight_matrix, norm=None):
@@ -64,11 +66,12 @@ class ValueMessagePassing(MessagePassing):
         # ε_{k,t} θ_{k,i}
         return weight_matrix.view(-1, 1) * errors_j.view(-1, 1) * norm.view(-1, 1)
 
-    def update(self, aggr_out, values):
+    def update(self, aggr_out, values, errors):
         # Compute the derivative of the activation function applied to the values
         f_prime_values = self.f_prime(values).view(-1, 1)
 
         # Compute change in values using Δx_{i,t} = γ (-ε_{i,t} + f'(x_{i,t}) ∑_k ε_{k,t} θ_{k,i})
-        delta_x = -values.view(-1, 1) + f_prime_values * aggr_out
+        # delta_x = -values.view(-1, 1) + f_prime_values * aggr_out
+        delta_x = -errors.view(-1, 1) + f_prime_values * aggr_out
 
         return delta_x.view(-1, 1)

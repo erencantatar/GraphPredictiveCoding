@@ -297,7 +297,7 @@ class PredictionMessagePassing(MessagePassing):
     
     def message(self, x_j, weight):
         # Apply activation to the source node's feature
-        return self.f(x_j) * weight.unsqueeze(-1)
+        return self.f(x_j) * weight[:, None]
         # return self.f(x_j) 
     
     def update(self, aggr_out):
@@ -322,9 +322,9 @@ class GradientMessagePassing(MessagePassing):
 
         error_j = error_j.view(-1, 1)  # Ensure shape consistency
         x_i = x_i.view(-1, 1)  # Ensure shape consistency
-        weight = weight.view(-1, 1)  # Ensure shape consistency
+        # weight = weight.view(-1, 1)  # Ensure shape consistency
 
-        return self.dfdx(x_i) * error_j * weight
+        return self.dfdx(x_i) * error_j * weight[:, None]
 
     def update(self, aggr_out, error):
         # Align with: e - dfdx(x) * torch.matmul(e, w.T)
@@ -765,46 +765,6 @@ class PCN_AMB(PCNStructure):
         k = l + 1 if self.upward else l - 1
         return -e[k]
 
-
-class PCN_MBA(PCNStructure):
-    """
-    PCNStructure class with convention mu = f(xw+b).
-    """
-    def pred(self, l, x, w, b):
-        k = l - 1 if self.upward else l + 1
-        bias = b[k] if self.use_bias else 0
-        out = torch.matmul(x[k], w[k])
-        return self.fl(out + bias, l)
-
-    def grad_x(self, l, x, e, w, b, train):
-        k = l + 1 if self.upward else l + 1
-        bias = b[l] if self.use_bias else 0
-
-        if l != self.L:
-            temp = torch.matmul(x[l], w[l]) + bias
-            grad = e[l] - torch.matmul(e[k] * self.dfldx(temp, k), w[l].T)
-        else:
-            if train:
-                grad = 0
-            else:
-                if self.upward:
-                    grad = e[l]
-                else:
-                    temp = torch.matmul(x[l], w[l]) + bias
-                    grad = -torch.matmul(e[k] * self.dfldx(temp, k), w[l].T)
-        return grad
-
-    def grad_w(self, l, x, e, w, b):
-        k = l + 1 if self.upward else l - 1
-        bias = b[l] if self.use_bias else 0
-        temp = e[k] * self.dfldx(torch.matmul(x[l], w[l]) + bias, k)
-        return -torch.matmul(x[l].T, temp)
-
-    def grad_b(self, l, x, e, w, b):
-        k = l + 1 if self.upward else l - 1
-        bias = b[l] if self.use_bias else 0
-        return -e[k] * self.dfldx(torch.matmul(x[l], w[l]) + bias, k)  # same calc as grad_w so could make more efficient
-
 # -------------------------------------------------------- 
 # from PRECO.optim import *
 # from PRECO.structure import *
@@ -828,7 +788,8 @@ class PCgraph(PCmodel):
                  min_delta: float = 0, early_stop: bool = False,
                  use_input_error: bool = True, 
                  adj: any = None,
-                 edge_index: any = None):
+                 edge_index: any = None,
+                 batch_size=1):
          
         super().__init__(structure=structure, lr_x=lr_x, T_train=T_train, incremental=incremental, min_delta=min_delta, early_stop=early_stop)
         self.T_test = T_test
@@ -846,6 +807,16 @@ class PCgraph(PCmodel):
         
         # assert torch.all(self.edge_index == edge_index)
 
+        # batch_size = batch_size
+        # num_nodes = self.structure.N  # Nodes per graph
+
+        # # Offset edge_index for batched graphs
+        # self.batched_edge_index = torch.cat(
+        #     [self.edge_index + i * num_nodes for i in range(batch_size)], dim=1
+        # )  # Concatenate and offset indices
+
+
+
         self.adj = torch.tensor(adj).to(DEVICE)
         self.mask = self.adj
         
@@ -857,6 +828,10 @@ class PCgraph(PCmodel):
 
         self.pred_mu_MP = PredictionMessagePassing(self.structure.f)
         self.grad_x_MP = GradientMessagePassing(self.structure.dfdx)
+
+        print("self.structure.mask", self.structure.mask.shape, type(self.structure.mask))
+        print("self.self.adj", self.adj.shape, type(self.adj))
+        print(torch.allclose(self.structure.mask, self.adj))
 
         if self.structure.mask is not None:
             self.w = self.structure.mask * self.w 
@@ -920,6 +895,9 @@ class PCgraph(PCmodel):
 
         # import scipy sparse coo
         from scipy.sparse import coo_matrix
+
+
+       
 
         # matrix of N, N
         # self.w_sparse = coo_matrix((self.structure.N, self.structure.N))
@@ -1030,7 +1008,6 @@ class PCgraph(PCmodel):
 
     def update_xs(self, train=True):
 
-
         if self.early_stop:
             early_stopper = EarlyStopper(patience=0, min_delta=self.min_delta)
 
@@ -1039,6 +1016,22 @@ class PCgraph(PCmodel):
 
         T = self.T_train if train else self.T_test
         
+        use_MP = False
+        # use_MP = True 
+
+
+        # batch_size = batch_size
+        batch_size = self.x.shape[0]
+        num_nodes = self.structure.N  # Nodes per graph
+
+        # Offset edge_index for batched graphs
+        self.batched_edge_index = torch.cat(
+            [self.edge_index + i * num_nodes for i in range(batch_size)], dim=1
+        )  # Concatenate and offset indices
+
+
+
+
         for t in range(T): 
             # print("t", t)
 
@@ -1053,31 +1046,33 @@ class PCgraph(PCmodel):
             # weight = self.get_dense_weight()
             
             # Convert weights (1D) and edge_index to batch-compatible
-            batch_size = self.x.size(0)  # Number of graphs
-            num_nodes = self.structure.N  # Nodes per graph
+            if use_MP:
+               
+                # Gather 1D weights corresponding to connected edges
+                weights_1d = self.w[self.edge_index[0], self.edge_index[1]]  # Extract relevant weights from W
+                # weights_1d = self.w.T[self.edge_index[0], self.edge_index[1]]  # Extract relevant weights from W
 
-            # Offset edge_index for batched graphs
-            batched_edge_index = torch.cat(
-                [self.edge_index + i * num_nodes for i in range(batch_size)], dim=1
-            )  # Concatenate and offset indices
+                # Expand edge weights for each graph
+                batched_weights = weights_1d.repeat(batch_size)
 
-            # Gather 1D weights corresponding to connected edges
-            weights_1d = self.w[self.edge_index[0], self.edge_index[1]]  # Extract relevant weights from W
-            # weights_1d = self.w.T[self.edge_index[0], self.edge_index[1]]  # Extract relevant weights from W
+                # # Perform message passing
+                # epsilon, mu_mp, delta_x = self.MP.forward(
+                #     values, batched_edge_index.to(DEVICE), batched_weights.to(DEVICE)
+                # )
 
-            # Expand edge weights for each graph
-            batched_weights = weights_1d.repeat(batch_size)
+            #     predicted_mpU = self.pred_mu_MP(self.x.view(-1,1).to(DEVICE),
+            #                             self.batched_edge_index.to(DEVICE), 
+            #                             batched_weights.to(DEVICE))
 
-            # # Perform message passing
-            # epsilon, mu_mp, delta_x = self.MP.forward(
-            #     values, batched_edge_index.to(DEVICE), batched_weights.to(DEVICE)
-            # )
+            #     predicted_mpU = predicted_mpU.view(batch_size, self.structure.N)
+            #     self.e = self.x - predicted_mpU
 
-            predicted_mpU = self.pred_mu_MP(self.x.view(-1,1).to(DEVICE),
-                                    batched_edge_index.to(DEVICE), 
-                                    batched_weights.to(DEVICE))
+            # else:
+            #     mu = torch.matmul(f(self.x), self.w.T)
+            #     self.e = self.x - mu 
 
-            predicted_mpU = predicted_mpU.view(batch_size, self.structure.N)
+            mu = torch.matmul(f(self.x), self.w.T)
+            self.e = self.x - mu 
 
             # values, self.edge_index, self.weights_1d = values.to(DEVICE), self.edge_index.to(DEVICE), self.weights_1d.to(DEVICE)
             # epsilon, mu_mp, delta_x = self.MP.forward(values, self.edge_index, self.weights_1d)
@@ -1097,12 +1092,10 @@ class PCgraph(PCmodel):
             #     self.w = self.w_to_dense(self.w)
             
             # # mu = self.structure.pred(x=self.x, w=self.w, b=self.b)
-            # mu = torch.matmul(f(self.x), self.w.T)
             
             # # print("mu mean", torch.mean(mu))
             # # print("mu_mp mean", torch.mean(mu_mp))
 
-            # mu_mp = mu_mp.view(batch_size,self.structure.N)
             # # print("epsilon.shape", epsilon.shape)
 
             # print("shape mu, mu_mp", mu.shape, mu_mp.shape)
@@ -1112,13 +1105,11 @@ class PCgraph(PCmodel):
             # print("mu_mp", mu_mp)
             # print("predicted_mpU", predicted_mpU)
 
-            # print(torch.allclose(mu_mp, mu, atol=1))  # Should be True
+            # print("mu check", torch.allclose(predicted_mpU, mu, atol=1))  # Should be True
             # print(torch.allclose(predicted_mpU, mu, atol=1))  # Should be True
             
             # assert mu == mu_mp, "mu and mu_mp are not equal"
 
-            # self.e = self.x - mu_mp 
-            self.e = self.x - predicted_mpU
         
             # print("e1", torch.mean(self.e))
             if not self.use_input_error:
@@ -1130,39 +1121,27 @@ class PCgraph(PCmodel):
             # lower = self.shape[0]
             # upper = -self.shape[2] if train else sum(self.shape)
             # return e[:,lower:upper] - self.dfdx(x[:,lower:upper]) * torch.matmul(e, w.T[lower:upper,:].T)
-            # dEdx = self.structure.grad_x(self.x.to(DEVICE), self.e.to(DEVICE), self.w.to(DEVICE), self.b.to(DEVICE),train=train) # only hidden nodes
-
+            
             torch.cuda.empty_cache()
 
-            # print(self.x.view(-1,1).shape)
-            # print(batched_edge_index.shape)
-            # print(self.e.view(-1,1).shape)
-            # print(batched_weights.shape)
-
+            if use_MP:
             # x = self.x.T.contiguous().view(-1, 1).to(DEVICE)  # Shape: [num_nodes, batch_size]
             # error = self.e.T.contiguous().view(-1, 1).to(DEVICE)  # Shape: [num_nodes, batch_size]
 
-            dEdx_ = self.grad_x_MP.forward( 
-                    x=self.x.view(-1,1),
-                    edge_index=batched_edge_index.to(DEVICE),  
-                    error=self.e.view(-1,1), 
-                    weight=batched_weights.to(DEVICE),
-            )
+                dEdx_ = self.grad_x_MP.forward( 
+                        x=self.x.view(-1,1),
+                        edge_index=self.batched_edge_index.to(DEVICE),  
+                        error=self.e.view(-1,1), 
+                        weight=batched_weights.to(DEVICE),
+                )
 
-            dEdx_ = dEdx_.view(batch_size, self.structure.N)
-            dEdx_ = dEdx_[:,di:upper]
-            # print(dEdx_.shape)
-            # print(dEdx.shape)
-            # print("dEdx match", torch.allclose(dEdx_, dEdx, atol=1e-5))  # Should be True
-            # print(dEdx_)
-            # print(dEdx)
-            # print("0")
-            # print(dEdx_.shape)
+                dEdx_ = dEdx_.view(batch_size, self.structure.N)
+                dEdx_ = dEdx_[:,di:upper]
+                dEdx = dEdx_ 
 
-            # self.x[:,di:upper] -= self.lr_x*dEdx 
-            #
-            # norm_dEdx = torch.norm(dEdx)
-            dEdx = dEdx_ 
+            else:
+                dEdx = self.structure.grad_x(self.x.to(DEVICE), self.e.to(DEVICE), self.w.to(DEVICE), self.b.to(DEVICE),train=train) # only hidden nodes
+
 
             clipped_dEdx = torch.clamp(dEdx, -1, 1)
 
@@ -1173,7 +1152,6 @@ class PCgraph(PCmodel):
             if self.incremental and self.dw is not None:
 
                 # print("optimizer step")
-        
                 if self.w.is_sparse:
                     self.w = self.w.to_dense()
                 if self.dw.is_sparse:
@@ -1297,7 +1275,7 @@ use_input_error = False     # whether to use errors in the input layer or not
 lr_w = 0.00001              # learning rate
 # batch_size = 200
 # batch_size = 50
-batch_size = 150
+batch_size = 32
 weight_decay = 0             
 grad_clip = 1
 batch_scale = False
@@ -1335,7 +1313,7 @@ args = {
     "lr_weights": 0.00001,  # Learning rate for weight updates
     "activation_func": "swish",  # Activation function
     "epochs": 10,  # Number of training epochs
-    "batch_size": 20,  # Batch size for training
+    "batch_size": 250,  # Batch size for training
     "seed": 2,  # Random seed
 }
 
@@ -1499,7 +1477,9 @@ adj_matrix_pyg = plot_adj_matrix(single_graph, model_dir=None, node_types=None)
 print("adj_matrix_pyg", adj_matrix_pyg.shape)
 print("adj_matrix_pyg", mask.shape)
 print(adj_matrix_pyg.mean(), mask.mean())
-assert np.allclose(adj_matrix_pyg, mask.cpu().numpy()) 
+
+# only if mask is hierachiercal without sens2sens and sens2sup
+# assert np.allclose(adj_matrix_pyg, mask.cpu().numpy()) 
 
 # plt.imshow(adj_matrix_pyg.cpu().numpy())
 # plt.savefig("adj_matrix_pyg.png")
@@ -1514,7 +1494,9 @@ PCG = PCgraph(structure=structure,
             use_input_error=use_input_error,
             adj=adj_matrix_pyg,    # added 
             edge_index=graph.edge_index,  # added 
+            batch_size=batch_size,
             )
+
 
 optimizer = Adam(
     PCG.params,
@@ -1556,18 +1538,27 @@ with torch.no_grad():
         for batch_no, (X_batch, y_batch) in enumerate(train_loader):
             PCG.train_supervised(X_batch, y_batch)
             energy += PCG.get_energy()
+
+            if batch_no >= 400:
+                break 
         train_energy.append(energy/len(train_loader))
 
         loss, acc = 0, 0
-        for X_batch, y_batch in val_loader:
+        break_num = 100
+        accs = []
+        for batch_no, (X_batch, y_batch) in enumerate(val_loader):
+
             y_pred = PCG.test_supervised(X_batch) 
 
             loss += MSE(y_pred, onehot(y_batch, N=10) ).item()
             acc += torch.mean(( torch.argmax(y_pred, axis=1) == y_batch ).float()).item()
+            accs.append(acc)
 
         val_acc.append(acc/len(val_loader))
+        # val_acc.append(acc/break_num)
         val_loss.append(loss)
-
+        print(val_acc)
+        print("accs", accs)
         print(f"\nEPOCH {i+1}/{epochs} \n #####################")   
         print(f"VAL acc:   {val_acc[i]:.3f}, VAL MSE:   {val_loss[i]:.3f}, TRAIN ENERGY:   {train_energy[i]:.3f}")
 
@@ -1591,6 +1582,8 @@ test_acc = acc/len(test_loader)
 test_loss = loss/len(test_loader)
 
 print("pred", pred)
+print("y_batch", y_batch)
+print(torch.argmax(y_pred, axis=1) - y_batch)
 print(f"\nTEST acc:   {test_acc:.3f}, TEST MSE:   {test_loss:.3f}")
 print("Training & testing finished in %s" % str((datetime.now() - start_time)).split('.')[0])
 

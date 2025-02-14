@@ -143,11 +143,12 @@ class PCGraphDataset(Dataset):
                 values[supervision_idx] = label_vector[i]
 
         # Node features: value, prediction, and error for each node
-        errors = torch.zeros_like(values)
-        predictions = torch.zeros_like(values)
+        # errors = torch.zeros_like(values)
+        # predictions = torch.zeros_like(values)
 
         # Combine attributes into a feature matrix
-        features = torch.stack((values, errors, predictions), dim=1)
+        # features = torch.stack((values, errors, predictions), dim=1)
+        features = values
 
         # Data.x [784, internal, supervision]
 

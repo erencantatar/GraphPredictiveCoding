@@ -122,14 +122,14 @@ args = {
     "model_type": "PC",
     "update_rules": "Salvatori",  # Van_Zwol Update rules for learning
 
-    "graph_type": "fully_connected",  # Type of graph
+    # "graph_type": "fully_connected",  # Type of graph
     "discriminative_hidden_layers": None,  # Hidden layers for discriminative model
     "generative_hidden_layers": None,  # Hidden layers for generative model
 
-    # "graph_type": "single_hidden_layer",  # Type of graph
-    # "discriminative_hidden_layers": [32, 16],  # Hidden layers for discriminative model
-    # "discriminative_hidden_layers": [100, 50],  # Hidden layers for discriminative model
-    # "generative_hidden_layers": [],  # Hidden layers for generative model
+    "graph_type": "single_hidden_layer",  # Type of graph
+    "discriminative_hidden_layers": [32, 16],  # Hidden layers for discriminative model
+    "discriminative_hidden_layers": [100, 50],  # Hidden layers for discriminative model
+    "generative_hidden_layers": [],  # Hidden layers for generative model
 
     "delta_w_selection": "internal_only",  # Selection strategy for weight updates
     "weight_init": "fixed 0.001 0.001",  # Weight initialization method

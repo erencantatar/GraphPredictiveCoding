@@ -800,7 +800,8 @@ custom_dataset_test = CustomGraphDataset(graph_params, **dataset_params_testing,
 
 
 test_loader = DataLoader(custom_dataset_test, 
-                         batch_size=args.batch_size, 
+                        #  batch_size=args.batch_size, 
+                         batch_size=1, 
                          shuffle=True, 
                          generator=generator_seed,
                         # num_workers=1,
@@ -939,19 +940,21 @@ for epoch in range(args.epochs):
             batch = batch.to(device)
             history_epoch = model.learning(batch)
 
-            # Append energy values to history
-            history["internal_energy_per_epoch"].append(history_epoch["internal_energy_mean"])
-            history["sensory_energy_per_epoch"].append(history_epoch["sensory_energy_mean"])
+            if history_epoch:
 
-            # Log energy values for this batch/epoch to wandb
-            wandb.log({
-                "epoch": epoch,
-                "Training/internal_energy_mean": history_epoch["internal_energy_mean"],
-                "Training/sensory_energy_mean": history_epoch["sensory_energy_mean"],
-                
-            })
+                # Append energy values to history
+                history["internal_energy_per_epoch"].append(history_epoch["internal_energy_mean"])
+                history["sensory_energy_per_epoch"].append(history_epoch["sensory_energy_mean"])
 
-     
+                # Log energy values for this batch/epoch to wandb
+                wandb.log({
+                    "epoch": epoch,
+                    "Training/internal_energy_mean": history_epoch["internal_energy_mean"],
+                    "Training/sensory_energy_mean": history_epoch["sensory_energy_mean"],
+                    
+                })
+
+        
                 
 
             model.pc_conv1.restart_activity()
@@ -991,7 +994,7 @@ for epoch in range(args.epochs):
                     from helper.plot import plot_energy_during_training
 
                     plot_energy_during_training(model.pc_conv1.energy_vals["internal_energy"][:], 
-                                                model.pc_conv1.energy_vals["sensory_energy"][:],
+                                                model.pc_conv1["sensory_energy"][:],
                                                 history, 
                                                 model_dir=model_dir,
                                                 epoch=epoch)
