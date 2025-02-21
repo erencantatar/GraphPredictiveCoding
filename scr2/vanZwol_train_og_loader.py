@@ -837,6 +837,7 @@ class PCgraph(torch.nn.Module):
         self.f = f
         self.dfdx = get_derivative(f)
         self.use_input_error = use_input_error
+        self.trace = False 
 
         # self.w = nn.Parameter(torch.empty(num_vertices, num_vertices, device=self.device))
         # self.b = nn.Parameter(torch.empty(num_vertices, device=self.device))
@@ -907,14 +908,13 @@ class PCgraph(torch.nn.Module):
         # self.w = torch.empty( self.num_vertices, self.num_vertices, device=DEVICE)
         # nn.init.normal_(self.w, mean=0, std=0.05)  
         # 
+        # self.w.data.fill_(0.001)
         self.w.data.fill_(0.001)
-
 
         # noise_std = 0.005  # Standard deviation of the noise
         # noise_std = 0  # Standard deviation of the noise
 
         # Fill with fixed value
-        # self.weights.data.fill_(value)
 
         # Add small random noise
         noise = torch.randn_like(self.w) * 0.0001
@@ -1163,7 +1163,7 @@ class PCgraph(torch.nn.Module):
     #     pass
         
 
-    def update_xs(self, train=True):
+    def update_xs(self, train=True, trace=False):
 
         if self.early_stop:
             early_stopper = EarlyStopper(patience=0, min_delta=self.min_delta)
@@ -1177,14 +1177,22 @@ class PCgraph(torch.nn.Module):
 
         # batch_size = batch_size
         # batch_size = self.x.shape[0]
-      
+    
+
         for t in range(T): 
             # print("t", t)
+
+
+
 
             # self.w = self.adj * self.w 
             # Perform the operation and reassign self.w as a Parameter
             with torch.no_grad():
                 self.w.copy_(self.adj * self.w)
+
+                # make weights[0:784, -10:] /= 2
+                # self.w[0:784, -10:] /= 2 
+                # self.w[-10:, 0:784] /= 2 
                 
 
             # self.weights_1d = self.w_to_sparse(self.w)
@@ -1201,6 +1209,27 @@ class PCgraph(torch.nn.Module):
 
             # self.errors = self.errors.view(self.batch_size, self.num_vertices)
             self.x = self.values.view(self.batch_size, self.num_vertices)
+            if self.trace:
+                
+                # print(self.x.shape)
+                x_slice = self.x[0:1, 0:784]
+                # print("x_slice shape", x_slice.shape)
+
+                if not isinstance(x_slice, torch.Tensor):
+                    x_slice = torch.tensor(x_slice, device=self.device)
+
+                if x_slice.numel() == 0:
+                    print("Warning: x_slice is empty")
+                    return
+
+                x_slice = x_slice.contiguous().cpu().numpy()
+
+                if not isinstance(x_slice, np.ndarray):
+                    print("Error: Converted x_slice is not a NumPy array")
+                    return
+                
+                self.trace_data.append(x_slice.reshape(28, 28))
+            
             mu = torch.matmul(f(self.x), self.w.T)
             mu = mu.view(-1, 1)
             # print(torch.allclose(mu_mp, mu, atol=1))  # Should be True
@@ -1220,7 +1249,16 @@ class PCgraph(torch.nn.Module):
                     self.errors[self.sensory_indices_batch] = 0
                 elif self.task in ["generation", "reconstruction", "denoising", "occlusion"]:
                     self.errors[self.supervised_labels_batch] = 0
+                    # self.errors[self.sensory_indices_batch] = 0
 
+            # total_mean_error = self.errors.mean()
+            # total_mean_error = torch.sum(self.errors**2).mean()
+
+            # total_internal_error = self.errors[self.internal_indices_batch].mean()
+            # self.history.append(total_mean_error.cpu().numpy())
+            
+            total_internal_error = (self.errors[self.internal_indices_batch]**2).mean()
+            self.history.append(total_internal_error.cpu().numpy())
                 # self.e[:,:di] = 0 
 
             # print("mean error", torch.mean(self.errors))
@@ -1257,8 +1295,12 @@ class PCgraph(torch.nn.Module):
             # print("update_mask", update_mask.shape)
 
             clipped_dEdx = torch.clamp(dEdx, -1, 1)
+            # clipped_dEdx = dEdx
+
+          
 
 
+                    
             self.values[update_mask] -= self.lr_x * clipped_dEdx
 
             # dEdx_ = dEdx_.view(self.batch_size, self.num_vertices)
@@ -1282,6 +1324,8 @@ class PCgraph(torch.nn.Module):
                 # if self.optimizer.m_w.is_sparse:
                 #     self.optimizer.m_w = self.optimizer.m_w.to_dense()
                 
+                # self.dw = torch.clamp(self.dw, -1, 1)
+
                 self.w.grad = self.dw
                 self.optimizer_w.step()
                 # self.optimizer.step(self.params, self.grads, batch_size=self.batch_size)
@@ -1329,6 +1373,7 @@ class PCgraph(torch.nn.Module):
 
     def train_supervised(self, data):
         # edge_index = data.edge_index.to(self.device)
+        self.history = []
 
         self.optimizer_w.zero_grad()
         # self.data_ptr = data.ptr
@@ -1345,6 +1390,8 @@ class PCgraph(torch.nn.Module):
             # self.optimizer.step(self.params, self.grads, batch_size=self.batch_size)
 
         # print("w mean", self.w.mean())
+
+        return self.history
 
     def test_classifications(self, data, remove_label=True):
             
@@ -1402,24 +1449,46 @@ class PCgraph(torch.nn.Module):
         # logits = logits.view(self.batch_size, len(self.base_supervised_labels))   # batch,10
         # OR 
 
+
         generated_imgs = self.values[self.sensory_indices_batch]   # batch,10
-       
         generated_imgs = generated_imgs.view(self.batch_size, 28, 28)   # batch,10
+
+        # generated_imgs = self.values.view(self.batch_size, self.num_vertices)   # batch,10
+        # generated_imgs = generated_imgs[self.batch_size, :784] # batch,10
+        # generated_imgs = generated_imgs.view(self.batch_size, 28, 28)   # batch,10
 
         # save img inside 1 big plt imshow plot; take first 10 images
         import matplotlib.pyplot as plt
 
+        # random_offset between 0 and batch_size
+        random_offset = np.random.randint(0, self.batch_size-10)
+
         fig, axs = plt.subplots(1, 10, figsize=(20, 2))
         for i in range(10):
-            axs[i].imshow(generated_imgs[i].cpu().detach().numpy())
+
+            axs[i].imshow(generated_imgs[i+random_offset].cpu().detach().numpy())
             axs[i].axis("off")
             # use label from data.y
-            axs[i].set_title(data.y[i].item())
+            axs[i].set_title(data.y[i+random_offset].item())
 
         # plt.show()
         # save 
         plt.savefig(f"trained_models/{self.task}/generated_imgs_{self.epoch}.png")
         plt.close()
+
+        # plot self.trace_data
+        if self.trace:
+            fig, axs = plt.subplots(1, self.T_test, figsize=(20, 2))
+            for i in range(self.T_test):
+                axs[i].imshow(self.trace_data[i])
+                axs[i].axis("off")
+                axs[i].set_title(data.y[0].item())
+
+            # plt.show()
+            # save 
+            plt.savefig(f"trained_models/{self.task}/trace_data_{self.epoch}.png")
+            plt.close()
+            
        
         return 0
     
@@ -1430,13 +1499,22 @@ class PCgraph(torch.nn.Module):
 
         self.batch_size = data.x.shape[0] // self.num_vertices
 
+    
 
         # eval_type = ["classification", "generative", "..."]
 
         if "classification" in eval_types:
+            self.set_task("classification")   # not update the sensory nodes, only supervised nodes
+
             return self.test_classifications(data.clone().to(self.device), 
                                       remove_label=remove_label)
-        elif "generation" in eval_types:
+                                      
+        if "generation" in eval_types:
+            self.set_task("generation")       # not update the supervised nodes, only sensory nodes
+
+            self.trace_data = []
+            self.trace = True 
+
             self.test_generative(data.clone().to(self.device), 
                                  remove_label=remove_label)
             
@@ -1494,20 +1572,24 @@ args = {
     # "graph_type": "fully_connected",  # Type of graph
     "update_rules": "Van_Zwol",  # Update rules for learning
 
-    "graph_type": "single_hidden_layer",  # Type of graph
+
+
+    "graph_type": "fully_connected",  # Type of graph
+
+    # "graph_type": "single_hidden_layer",  # Type of graph
     # "discriminative_hidden_layers": [32, 16],  # Hidden layers for discriminative model
     # "generative_hidden_layers": [0],  # Hidden layers for generative model
 
-    "discriminative_hidden_layers": [0],  # Hidden layers for discriminative model
-    "generative_hidden_layers": [100, 200, 100, 200],  # Hidden layers for generative model
+    # "discriminative_hidden_layers": [0],  # Hidden layers for discriminative model
+    # "generative_hidden_layers": [100,50],  # Hidden layers for generative model
 
 
     "delta_w_selection": "all",  # Selection strategy for weight updates
     "weight_init": "fixed 0.001 0.001",  # Weight initialization method
     "use_grokfast": True,  # Whether to use GrokFast
     "optimizer": 1.0,  # Optimizer setting
-    "remove_sens_2_sens": True,  # Remove sensory-to-sensory connections
-    "remove_sens_2_sup": True,  # Remove sensory-to-supervised connections
+    "remove_sens_2_sens": False,  # Remove sensory-to-sensory connections
+    "remove_sens_2_sup": False,  # Remove sensory-to-supervised connections
     "set_abs_small_w_2_zero": False,  # Set small absolute weights to zero
     "mode": "experimenting",  # Mode of operation (training/experimenting)
     "use_wandb": "offline",  # WandB logging mode
@@ -1524,7 +1606,8 @@ args = {
     "lr_weights": 0.00001,  # Learning rate for weight updates
     "activation_func": "swish",  # Activation function
     "epochs": 10,  # Number of training epochs
-    "batch_size": 50,  # Batch size for training
+    # "batch_size": 50,  # Batch size for training; fine for discriminative
+    "batch_size": 20,  # Batch size for training
     # "batch_size": 200,  # Batch size for training
     "seed": 2,  # Random seed
 }
@@ -1735,12 +1818,13 @@ if graph_params["graph_type"]["name"] in ["single_hidden_layer"]:
     # TODO ; still unsure about which graph does which task
     eval_generation, eval_classification, eval_denoise, eval_occlusion = True, True, 0, 0 
 
-if graph_params["graph_type"]["name"] not in ["single_hidden_layer"]:
-    # Ensure these arguments are not specified for other graph types
-    assert args.discriminative_hidden_layers is None, \
-        "The argument --discriminative_hidden_layers can only be used if graph_type is 'single_hidden_layer'."
-    assert args.generative_hidden_layers is None, \
-        "The argument --generative_hidden_layers can only be used if graph_type is 'single_hidden_layer'."
+# if graph_params["graph_type"]["name"] not in ["single_hidden_layer"]:
+#     # Ensure these arguments are not specified for other graph types
+#     if "discriminative_hidden_layers" in args:
+#         assert args.discriminative_hidden_layers is None, \
+#             "The argument --discriminative_hidden_layers can only be used if graph_type is 'single_hidden_layer'."
+#         assert args.generative_hidden_layers is None, \
+#             "The argument --generative_hidden_layers can only be used if graph_type is 'single_hidden_layer'."
 
 # if graph_params["graph_type"]["name"] in ["custom_two_branch", "two_branch_graph"]:
 #     # Configure internal nodes for two_branch_graph
@@ -1759,12 +1843,15 @@ if graph_params["graph_type"]["name"] not in ["single_hidden_layer"]:
 #     graph_params["internal_nodes"] = branch1_internal_nodes + branch2_internal_nodes
 
 
-
-if sum(args.discriminative_hidden_layers) > 0:
-    TASK = "classification"
+TASK = []
+if args.graph_type == "fully_connected":
+    TASK = ["classification", "generation"]
 else:
-    TASK = "generation"
-    
+    if sum(args.discriminative_hidden_layers) > 0:
+        TASK += "classification"
+    else:
+        TASK += "generation"
+        
 
 
 print("graph_params 1 :", graph_params)
@@ -1778,7 +1865,7 @@ graph = GraphBuilder(**graph_params)
 
 single_graph = graph.edge_index
 
-adj_matrix_pyg = plot_adj_matrix(single_graph, model_dir=f"trained_models/{TASK}/", node_types=None)
+adj_matrix_pyg = plot_adj_matrix(single_graph, model_dir=f"trained_models/{args.graph_type}", node_types=None)
 
 
 
@@ -1914,18 +2001,42 @@ for batch in train_loader:
 
 from helper.vanZwol_optim import *
 
+################################# discriminative model lr         ##########################################
+################################# generative model lr         ##########################################
+
 # Inference
-# f = tanh
-f = relu
+f = tanh
+# f = relu
 lr_x = 0.5                  # inference rate                   # inference rate 
-T_train = 5                 # inference time scale
-T_train = 10                 # inference time scale
-T_test = 10              # unused for hierarchical model
+# lr_x = 1                 # inference rate                   # inference rate 
+T_train = 15                 # inference time scale
+# T_train = 50                 # inference time scale
+T_test = 15              # unused for hierarchical model
 incremental = True          # whether to use incremental EM or not
 use_input_error = False     # whether to use errors in the input layer or not
 
 # Learning
-lr_w = 0.00001              # learning rate
+lr_w = 0.00001      
+# Learning
+lr_w = 0.00001              # learning rate hierarchial model
+lr_w = 0.000001              # learning rate generative model
+
+
+
+################################# fully connected model lr         ##########################################
+
+# GOOD FOR CLASSIFCATION
+lr_x = 0.01                  # inference rate                   # inference rate 
+lr_w = 0.00001              # learning rate hierarchial model
+
+# # OKAY FOR GENRATION
+# lr_x = 0.5                  # inference rate                   # inference rate 
+# lr_w = 0.000001              # learning rate hierarchial model
+
+# lr_x = 0.01                  # inference rate                   # inference rate 
+# lr_w = 0.000001              # learning rate hierarchial model
+
+
 weight_decay = 0             
 grad_clip = 1
 batch_scale = False
@@ -1962,11 +2073,12 @@ PCG.set_optimizer(optimizer)
 
 PCG.init_modes(batch_example=batch)
 
-PCG.set_task(TASK)
+# PCG.set_task(TASK)
 
 model = PCG
-model = torch.compile(model) 
+model = torch.compile(model, disable=True) 
 
+model.task = ""   # classification or generation, or both 
 
 from datetime import datetime
 from tqdm import tqdm
@@ -1978,7 +2090,6 @@ start_time = datetime.now()
 train_energy, train_loss, train_acc = [], [], []
 val_loss, val_acc, val_acc2 = [], [], []
 num_epochs = 40
-model = PCG  # Assuming PCG is defined elsewhere
 
 # break_num = 150 
 # break_num = 250 
@@ -1987,72 +2098,87 @@ model = PCG  # Assuming PCG is defined elsewhere
 
 break_num = 200
 break_num = 100
-# break_num = 50
-# break_num = 5
+break_num = 30
+break_num = 3
 
 with torch.no_grad():
+
+    epoch_history = []
+
     for epoch in tqdm(range(num_epochs), desc="Epoch Progress"):
         model.train()
         model.epoch = epoch
         total_loss = 0
         energy = 0
+
+
         print("\n-----train_supervised-----")
         print(len(train_loader))
+
         for batch_no, batch in enumerate(tqdm(train_loader, total=min(break_num, len(train_loader)), desc=f"Epoch {epoch+1} - Training", leave=False)):
             batch = batch.to(model.device)
-            model.train_supervised(batch)
+            history = model.train_supervised(batch)  # history is [..., ...]
+            # append all items in history to epoch_history
+            for item in history:
+                epoch_history.append(item)
 
             if batch_no >= break_num:
                 break
-        
-
+    
         #### 
         loss, acc = 0, 0
         model.test()
         cntr = 0
 
-        break_num_eval = 20
-        if TASK == "generation":
-            break_num_eval = 1
+        # break_num_eval = 20
+        # if TASK == "generation":
+        break_num_eval = 1
             
         print("\n----test_iterative-----")
         accs = []
+        TASK_copy = TASK.copy()
 
         # for batch_no, batch in enumerate(tqdm(val_loader, total=min(len(val_loader)), desc=f"Epoch {epoch+1} - Validation", leave=False)):
         for batch_no, batch in enumerate(tqdm(val_loader, total=len(val_loader), desc=f"Epoch {epoch+1} - Validation | {TASK}", leave=False)):
             y_batch = batch.y.clone()
             batch = batch.to(model.device)
-            y_pred = PCG.test_iterative(batch, eval_types=[TASK], remove_label=True)
+            # y_pred = PCG.test_iterative(batch, eval_types=TASK_copy, remove_label=True)
+
+            for task in TASK_copy:
+                y_pred = PCG.test_iterative(batch, eval_types=[task], remove_label=True)
+
+            # do generation once
+            if "generation" in TASK_copy:
+                TASK_copy = ["classification"]
 
             # print("y_pred", y_pred.shape)
             # print("y_pred", y_batch.shape)
-            if TASK == "classification":
+            if "classification" in TASK_copy:
                 correct = torch.mean((y_pred == y_batch).float()).item()
                 acc += correct
                 accs.append(correct)
 
-
+            cntr += 1
             if batch_no >= break_num_eval:
                 break
-            cntr += 1
 
 
         # save model weights plt.imshow to "trained_models/{TASK}/weights/model_{epoch}.png"
         # make folder if not exist
         import os 
-        if not os.path.exists(f"trained_models/{TASK}/weights/"):
-            os.makedirs(f"trained_models/{TASK}/weights/")
+        if not os.path.exists(f"trained_models/{args.graph_type}/weights/"):
+            os.makedirs(f"trained_models/{args.graph_type}/weights/")
         
         # save weights
         w = PCG.w.detach().cpu().numpy()
         plt.imshow(w)
         plt.colorbar()
-        plt.savefig(f"trained_models/{TASK}/weights/model_{epoch}.png")
+        plt.savefig(f"trained_models/{args.graph_type}/weights/model_{epoch}.png")
         plt.close()
 
 
 
-        if TASK == "classification":
+        if "classification" in TASK:
             
             # Corrected validation accuracy calculations
             val_acc.append(acc / len(val_loader))
@@ -2071,7 +2197,13 @@ with torch.no_grad():
             print(f"  Validation Accuracy (limited): {val_acc2[-1]:.3f}")
 
 
+        # plot history of energy
+        import matplotlib.pyplot as plt
+        print("epoch_history", len(epoch_history))
+        plt.plot(epoch_history)
 
+        plt.savefig(f"trained_models/{args.graph_type}/energy_history.png")
+        plt.close()
 
 
 

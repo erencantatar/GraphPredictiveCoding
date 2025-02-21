@@ -85,7 +85,6 @@ class PCGraphDataset(Dataset):
         # if indices:
         #     self.num_vertices, self.sensory_indices, self.internal_indices, self.supervision_indices = indices
         # else:
-        graph 
         self.num_vertices = graph.num_vertices
         self.sensory_indices = graph.sensory_indices
         self.internal_indices = graph.internal_indices
