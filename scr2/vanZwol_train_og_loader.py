@@ -831,6 +831,7 @@ class PCgraph(torch.nn.Module):
         self.min_delta = min_delta
         self.early_stop = early_stop
 
+        self.epoch = 0 
         self.batch_size = batch_size  # Number of graphs in the batch
 
         self.f = f
@@ -904,7 +905,21 @@ class PCgraph(torch.nn.Module):
 
         self.w = torch.nn.Parameter(torch.empty(self.num_vertices, self.num_vertices, device=DEVICE))
         # self.w = torch.empty( self.num_vertices, self.num_vertices, device=DEVICE)
-        nn.init.normal_(self.w, mean=0, std=0.05)   
+        # nn.init.normal_(self.w, mean=0, std=0.05)  
+        # 
+        self.w.data.fill_(0.001)
+
+
+        # noise_std = 0.005  # Standard deviation of the noise
+        # noise_std = 0  # Standard deviation of the noise
+
+        # Fill with fixed value
+        # self.weights.data.fill_(value)
+
+        # Add small random noise
+        noise = torch.randn_like(self.w) * 0.0001
+        self.w.data.add_(noise)
+        
 
         # Perform the operation and reassign self.w as a Parameter
         with torch.no_grad():
@@ -1096,7 +1111,7 @@ class PCgraph(torch.nn.Module):
 
 
     def set_task(self, task):
-
+        self.task = task 
         if task == "classification":
             # Update both the internal and supervised nodes during classification
             self.update_mask_test = torch.tensor(sorted(self.internal_indices_batch + self.supervised_labels_batch), device=self.device)
@@ -1199,8 +1214,13 @@ class PCgraph(torch.nn.Module):
         
             # print("e1", torch.mean(self.e))
             # TODO
+
             if not self.use_input_error:
-                self.errors[self.sensory_indices_batch] = 0
+                if self.task == "classification":
+                    self.errors[self.sensory_indices_batch] = 0
+                elif self.task in ["generation", "reconstruction", "denoising", "occlusion"]:
+                    self.errors[self.supervised_labels_batch] = 0
+
                 # self.e[:,:di] = 0 
 
             # print("mean error", torch.mean(self.errors))
@@ -1289,7 +1309,7 @@ class PCgraph(torch.nn.Module):
     #         self.optimizer.step(self.params, self.grads, batch_size=X_batch.shape[0])
 
     
-    def unpack_features(self, batch, reshape=True):
+    def unpack_features(self, batch, reshape=False):
         """Unpack values, errors, and predictions from the batched graph."""
         # values, errors, predictions = batch[:, 0, :].to(self.device), batch[:, 1, :].to(self.device),  None
         # # print("unpacked featreus")
@@ -1367,7 +1387,7 @@ class PCgraph(torch.nn.Module):
                 # set sensory indices to zero / random noise
                 # sub_graph.x[sub_graph.sensory_indices, 0] = torch.zeros_like(sub_graph.x[sub_graph.sensory_indices, 0])  # Check all feature dimensions
                 # random noise
-                sub_graph.x[sub_graph.sensory_indices, 0] = torch.normal(0.5, self.node_init_std, size=(len(sub_graph.sensory_indices),), device=DEVICE)
+                sub_graph.x[sub_graph.sensory_indices, 0] = torch.randn_like(sub_graph.x[sub_graph.sensory_indices, 0])  # Check all feature dimensions
 
         self.values, _ , _ = self.unpack_features(data.x, reshape=False)
         
@@ -1382,7 +1402,7 @@ class PCgraph(torch.nn.Module):
         # logits = logits.view(self.batch_size, len(self.base_supervised_labels))   # batch,10
         # OR 
 
-        generated_imgs = self.values[self.base_sensory_indices]   # batch,10
+        generated_imgs = self.values[self.sensory_indices_batch]   # batch,10
        
         generated_imgs = generated_imgs.view(self.batch_size, 28, 28)   # batch,10
 
@@ -1393,18 +1413,23 @@ class PCgraph(torch.nn.Module):
         for i in range(10):
             axs[i].imshow(generated_imgs[i].cpu().detach().numpy())
             axs[i].axis("off")
-        
-        plt.show()
-        # save 
-        plt.savefig("generated_imgs.png")
-       
-        return y_pred.cpu().detach()
-    
+            # use label from data.y
+            axs[i].set_title(data.y[i].item())
 
+        # plt.show()
+        # save 
+        plt.savefig(f"trained_models/{self.task}/generated_imgs_{self.epoch}.png")
+        plt.close()
+       
+        return 0
+    
 
 
     def test_iterative(self, data, eval_types=None, remove_label=True):
         # edge_index = data.edge_index
+
+        self.batch_size = data.x.shape[0] // self.num_vertices
+
 
         # eval_type = ["classification", "generative", "..."]
 
@@ -1470,9 +1495,12 @@ args = {
     "update_rules": "Van_Zwol",  # Update rules for learning
 
     "graph_type": "single_hidden_layer",  # Type of graph
-    "discriminative_hidden_layers": [32, 16],  # Hidden layers for discriminative model
-    # "discriminative_hidden_layers": [100, 50],  # Hidden layers for discriminative model
-    "generative_hidden_layers": [0],  # Hidden layers for generative model
+    # "discriminative_hidden_layers": [32, 16],  # Hidden layers for discriminative model
+    # "generative_hidden_layers": [0],  # Hidden layers for generative model
+
+    "discriminative_hidden_layers": [0],  # Hidden layers for discriminative model
+    "generative_hidden_layers": [100, 200, 100, 200],  # Hidden layers for generative model
+
 
     "delta_w_selection": "all",  # Selection strategy for weight updates
     "weight_init": "fixed 0.001 0.001",  # Weight initialization method
@@ -1732,6 +1760,12 @@ if graph_params["graph_type"]["name"] not in ["single_hidden_layer"]:
 
 
 
+if sum(args.discriminative_hidden_layers) > 0:
+    TASK = "classification"
+else:
+    TASK = "generation"
+    
+
 
 print("graph_params 1 :", graph_params)
 
@@ -1744,7 +1778,9 @@ graph = GraphBuilder(**graph_params)
 
 single_graph = graph.edge_index
 
-adj_matrix_pyg = plot_adj_matrix(single_graph, model_dir=None, node_types=None)
+adj_matrix_pyg = plot_adj_matrix(single_graph, model_dir=f"trained_models/{TASK}/", node_types=None)
+
+
 
 
 from dataset_vanZwol import PCGraphDataset, train_subset_indices
@@ -1879,10 +1915,12 @@ for batch in train_loader:
 from helper.vanZwol_optim import *
 
 # Inference
-f = tanh
-lr_x = 0.5                  # inference rate 
+# f = tanh
+f = relu
+lr_x = 0.5                  # inference rate                   # inference rate 
 T_train = 5                 # inference time scale
-T_test = 10                 # unused for hierarchical model
+T_train = 10                 # inference time scale
+T_test = 10              # unused for hierarchical model
 incremental = True          # whether to use incremental EM or not
 use_input_error = False     # whether to use errors in the input layer or not
 
@@ -1924,11 +1962,6 @@ PCG.set_optimizer(optimizer)
 
 PCG.init_modes(batch_example=batch)
 
-if sum(args.discriminative_hidden_layers) > 0:
-    TASK = "classification"
-else:
-    TASK = "generation"
-    
 PCG.set_task(TASK)
 
 model = PCG
@@ -1953,12 +1986,14 @@ model = PCG  # Assuming PCG is defined elsewhere
 # break_num = 100
 
 break_num = 200
-# break_num = 100
+break_num = 100
+# break_num = 50
 # break_num = 5
 
 with torch.no_grad():
     for epoch in tqdm(range(num_epochs), desc="Epoch Progress"):
         model.train()
+        model.epoch = epoch
         total_loss = 0
         energy = 0
         print("\n-----train_supervised-----")
@@ -1977,6 +2012,9 @@ with torch.no_grad():
         cntr = 0
 
         break_num_eval = 20
+        if TASK == "generation":
+            break_num_eval = 1
+            
         print("\n----test_iterative-----")
         accs = []
 
@@ -1988,29 +2026,49 @@ with torch.no_grad():
 
             # print("y_pred", y_pred.shape)
             # print("y_pred", y_batch.shape)
-            correct = torch.mean((y_pred == y_batch).float()).item()
-            acc += correct
+            if TASK == "classification":
+                correct = torch.mean((y_pred == y_batch).float()).item()
+                acc += correct
+                accs.append(correct)
+
 
             if batch_no >= break_num_eval:
                 break
             cntr += 1
-            accs.append(correct)
 
-        # Corrected validation accuracy calculations
-        val_acc.append(acc / len(val_loader))
-        val_acc2.append(acc / cntr)
-        val_loss.append(loss)
 
-    
-        print("val_acc2", val_acc2)
-        print("Last prediction:", y_pred)
-        print("Last y_batch:", y_batch)
-        print("accs", accs)
-        print("accs", sum(accs) / len(accs))
+        # save model weights plt.imshow to "trained_models/{TASK}/weights/model_{epoch}.png"
+        # make folder if not exist
+        import os 
+        if not os.path.exists(f"trained_models/{TASK}/weights/"):
+            os.makedirs(f"trained_models/{TASK}/weights/")
+        
+        # save weights
+        w = PCG.w.detach().cpu().numpy()
+        plt.imshow(w)
+        plt.colorbar()
+        plt.savefig(f"trained_models/{TASK}/weights/model_{epoch}.png")
+        plt.close()
 
-        print(f"\nEpoch {epoch+1}/{num_epochs} Completed")
-        print(f"  Validation Accuracy: {val_acc[-1]:.3f}")
-        print(f"  Validation Accuracy (limited): {val_acc2[-1]:.3f}")
+
+
+        if TASK == "classification":
+            
+            # Corrected validation accuracy calculations
+            val_acc.append(acc / len(val_loader))
+            val_acc2.append(acc / cntr)
+            val_loss.append(loss)
+
+        
+            print("val_acc2", val_acc2)
+            print("Last prediction:", y_pred)
+            print("Last y_batch:", y_batch)
+            print("accs", accs)
+            print("accs", sum(accs) / len(accs))
+
+            print(f"\nEpoch {epoch+1}/{num_epochs} Completed")
+            print(f"  Validation Accuracy: {val_acc[-1]:.3f}")
+            print(f"  Validation Accuracy (limited): {val_acc2[-1]:.3f}")
 
 
 
