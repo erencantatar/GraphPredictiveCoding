@@ -594,8 +594,6 @@ class PCGStructure(PCStructure):
         self.shape = shape
         self.mask = mask
 
-
-
         if self.mask is not None:
             # Move the mask to the CPU before using NumPy
             if np.all(np.triu(self.mask.cpu().numpy(), k=1) == 0):
@@ -904,10 +902,15 @@ class PCgraph(torch.nn.Module):
         
     def _reset_params(self):
 
-        self.w = torch.empty( self.num_vertices, self.num_vertices, device=DEVICE)
+        self.w = torch.nn.Parameter(torch.empty(self.num_vertices, self.num_vertices, device=DEVICE))
+        # self.w = torch.empty( self.num_vertices, self.num_vertices, device=DEVICE)
         nn.init.normal_(self.w, mean=0, std=0.05)   
 
-        self.w = self.adj * self.w 
+        # Perform the operation and reassign self.w as a Parameter
+        with torch.no_grad():
+            self.w.copy_(self.adj * self.w)
+
+        # self.w = self.adj * self.w 
 
 
         ## -------------------------------------------------
@@ -954,21 +957,16 @@ class PCgraph(torch.nn.Module):
         # # close the plots 
         # plt.close()
 
-
-
-
         ## -------------------------------------------------
         self.b = torch.empty( self.num_vertices, device=DEVICE)
         # if self.structure.use_bias:
         #     self.bias_init(self.b)
 
     def get_dense_weight(self):
-        
         w = torch.tensor(self.w_sparse.toarray(), device=DEVICE)
         # w = self.w_sparse.toarray()
         assert w.shape == (self.num_vertices, self.num_vertices)
         return w
-
 
     def _reset_grad(self):
         self.dw, self.db = None, None
@@ -1010,8 +1008,8 @@ class PCgraph(torch.nn.Module):
         self.errors = self.errors.view(self.batch_size, self.num_vertices)
         self.x = self.values.view(self.batch_size, self.num_vertices)
 
-        # out = -torch.matmul(self.errors.T, self.f(self.x))
-        out = -torch.sparse.mm(self.errors.T, self.f(self.x))
+        out = -torch.matmul(self.errors.T, self.f(self.x))
+        # out = -torch.sparse.mm(self.errors.T, self.f(self.x))
 
         if self.mask is not None:
             out *= self.mask
@@ -1022,7 +1020,12 @@ class PCgraph(torch.nn.Module):
         #     self.db = self.structure.grad_b(x=self.x, e=self.e, w=self.w, b=self.b)
             
     def set_optimizer(self, optimizer):
-        self.optimizer = optimizer
+
+        # self.optimizer = optimizer
+
+        self.optimizer_w = torch.optim.Adam([self.w], lr=lr_w, betas=(0.9, 0.999), eps=1e-7, weight_decay=0)
+        # self.optimizer_x = torch.optim.Adam(params, lr=lr_w, betas=(0.9, 0.999), eps=1e-7, weight_decay=weight_decay)
+
 
 
     def train(self):
@@ -1032,10 +1035,9 @@ class PCgraph(torch.nn.Module):
 
     def test(self):
         self.mode = "test"
-
         print(self.mode)
-        # self.update_mask = self.update_mask_test
 
+        # self.update_mask = self.update_mask_test
 
     def init_modes(self, batch_example):
         
@@ -1055,34 +1057,32 @@ class PCgraph(torch.nn.Module):
         base_supervised_labels = [int(idx) for sublist in self.base_supervised_labels for idx in sublist] if isinstance(self.base_supervised_labels[0], list) else self.base_supervised_labels
 
         # Create batched indices by iterating over batch size and offsetting by graph index
-        sensory_indices_batch = [
+        self.sensory_indices_batch = [
             index + i * self.num_vertices for i in range(self.batch_size) for index in base_sensory_indices
         ]
-        internal_indices_batch = [
+        self.internal_indices_batch = [
             index + i * self.num_vertices for i in range(self.batch_size) for index in base_internal_indices
         ]
-        supervised_labels_batch = [
+        self.supervised_labels_batch = [
             index + i * self.num_vertices for i in range(self.batch_size) for index in base_supervised_labels
         ] if base_supervised_labels else []
 
         # Convert to tensors for masking purposes during updates
-        self.sensory_indices_batch = torch.tensor(sorted(sensory_indices_batch), device=self.device)
-        self.internal_indices_batch = torch.tensor(sorted(internal_indices_batch), device=self.device)
-        self.supervised_labels_batch = torch.tensor(sorted(supervised_labels_batch), device=self.device) if supervised_labels_batch else None
+        # self.sensory_indices_batch = torch.tensor(sorted(sensory_indices_batch), device=self.device)
+        # self.internal_indices_batch = torch.tensor(sorted(internal_indices_batch), device=self.device)
+        # self.supervised_labels_batch = torch.tensor(sorted(supervised_labels_batch), device=self.device) if supervised_labels_batch else None
 
-        print("Sensory indices batch:", self.sensory_indices_batch.shape, 784, self.batch_size)
-        print("Internal indices batch:", self.internal_indices_batch.shape, self.num_internal, self.batch_size)
+        print("Sensory indices batch:", len(self.sensory_indices_batch), 784, self.batch_size)
+        print("Internal indices batch:", len(self.internal_indices_batch), self.num_internal, self.batch_size)
         if self.supervised_labels_batch is not None:
-            print("Supervised labels batch:", self.supervised_labels_batch.shape, 10, self.batch_size)
+            print("Supervised labels batch:", len(self.supervised_labels_batch), 10, self.batch_size)
 
-     
         # Update only internal nodes during training
-        self.internal_mask_train = torch.tensor(internal_indices_batch, device=self.device)
-
-        # Update internal + supervision nodes during testing
-        self.update_mask_test = torch.tensor(sorted(internal_indices_batch + supervised_labels_batch), device=self.device)
+        # self.internal_mask_train = torch.tensor(internal_indices_batch, device=self.device)
+        self.internal_mask_train = torch.tensor(self.internal_indices_batch, device=self.device)
 
         # update_mask = self.internal_mask_train if train else self.update_mask_test
+        self.update_mask_test = torch.tensor(sorted(self.internal_indices_batch + self.supervised_labels_batch), device=self.device)
 
         ########################################## 
         batch_size = self.batch_size
@@ -1093,6 +1093,29 @@ class PCgraph(torch.nn.Module):
         self.batched_edge_index = torch.cat(
             [self.edge_index + i * num_nodes for i in range(batch_size)], dim=1
         )  # Concatenate and offset indices
+
+
+    def set_task(self, task):
+
+        if task == "classification":
+            # Update both the internal and supervised nodes during classification
+            self.update_mask_test = torch.tensor(sorted(self.internal_indices_batch + self.supervised_labels_batch), device=self.device)
+            print("Classification task")
+            print("self.update_mask_test", self.update_mask_test.shape)
+
+        elif task in ["generation", "reconstruction", "denoising", "occlusion"]:
+            # Update both the internal and sensory nodes during these tasks
+            self.update_mask_test = torch.tensor(sorted(self.internal_indices_batch + self.sensory_indices_batch), device=self.device)
+            print("Generation task")
+            print("self.update_mask_test", self.update_mask_test.shape)
+        else:
+            raise ValueError(f"Invalid task: {task}")
+        
+        # # Update internal + supervision nodes during testing
+        # # self.update_mask_test = torch.tensor(sorted(internal_indices_batch + supervised_labels_batch), device=self.device)
+        # self.update_mask_test = torch.tensor(sorted(self.internal_indices_batch + self.supervised_labels_batch), device=self.device)
+
+
 
 
 
@@ -1122,8 +1145,6 @@ class PCgraph(torch.nn.Module):
     #     # Apply mask to edge index and weights
     #     filtered_edge_index = batched_edge_index[:, mask]
     #     filtered_weights = batched_weights[mask]
-
-
     #     pass
         
 
@@ -1139,15 +1160,17 @@ class PCgraph(torch.nn.Module):
         # di = self.structure.shape[0]
         # upper = -self.structure.shape[2] if train else self.num_vertices
 
-        T = self.T_train if train else self.T_test
-
         # batch_size = batch_size
         # batch_size = self.x.shape[0]
       
         for t in range(T): 
             # print("t", t)
 
-            self.w = self.adj * self.w 
+            # self.w = self.adj * self.w 
+            # Perform the operation and reassign self.w as a Parameter
+            with torch.no_grad():
+                self.w.copy_(self.adj * self.w)
+                
 
             # self.weights_1d = self.w_to_sparse(self.w)
             # Gather 1D weights corresponding to connected edges
@@ -1160,7 +1183,6 @@ class PCgraph(torch.nn.Module):
             #                         self.batched_edge_index.to(DEVICE), 
                                     # batched_weights.to(DEVICE))
             # self.e = self.values - predicted_mpU
-
 
             # self.errors = self.errors.view(self.batch_size, self.num_vertices)
             self.x = self.values.view(self.batch_size, self.num_vertices)
@@ -1205,7 +1227,7 @@ class PCgraph(torch.nn.Module):
                     x=self.values.view(-1,1),
                     edge_index=self.batched_edge_index.to(DEVICE),  
                     error=self.errors.view(-1,1), 
-                    weight=batched_weights.to(DEVICE),
+                    weight=batched_weights.view(-1,1).to(DEVICE),
             )
 
             dEdx = dEdx_[update_mask]
@@ -1228,19 +1250,21 @@ class PCgraph(torch.nn.Module):
 
                 # print("optimizer step")
         
-                if self.w.is_sparse:
-                    self.w = self.w.to_dense()
-                if self.dw.is_sparse:
-                    self.dw = self.dw.to_dense()
+                # if self.w.is_sparse:
+                #     self.w = self.w.to_dense()
+                # if self.dw.is_sparse:
+                #     self.dw = self.dw.to_dense()
 
-                # Convert m and gradients to dense if necessary
-                if self.dw.is_sparse:
-                    self.dw = self.dw.to_dense()
+                # # Convert m and gradients to dense if necessary
+                # if self.dw.is_sparse:
+                #     self.dw = self.dw.to_dense()
 
-                if self.optimizer.m_w.is_sparse:
-                    self.optimizer.m_w = self.optimizer.m_w.to_dense()
+                # if self.optimizer.m_w.is_sparse:
+                #     self.optimizer.m_w = self.optimizer.m_w.to_dense()
                 
-                self.optimizer.step(self.params, self.grads, batch_size=self.batch_size)
+                self.w.grad = self.dw
+                self.optimizer_w.step()
+                # self.optimizer.step(self.params, self.grads, batch_size=self.batch_size)
             if self.early_stop:
                 if early_stopper.early_stop( self.get_energy() ):
                     break            
@@ -1286,6 +1310,7 @@ class PCgraph(torch.nn.Module):
     def train_supervised(self, data):
         # edge_index = data.edge_index.to(self.device)
 
+        self.optimizer_w.zero_grad()
         # self.data_ptr = data.ptr
         self.batch_size = data.x.shape[0] // self.num_vertices
 
@@ -1295,13 +1320,14 @@ class PCgraph(torch.nn.Module):
         self.update_w()
 
         if not self.incremental:
-            self.optimizer.step(self.params, self.grads, batch_size=self.batch_size)
+            self.w.grad = self.dw
+            self.optimizer_w.step()
+            # self.optimizer.step(self.params, self.grads, batch_size=self.batch_size)
 
         # print("w mean", self.w.mean())
 
-    def test_iterative(self, data, remove_label=True):
-        # edge_index = data.edge_index
-
+    def test_classifications(self, data, remove_label=True):
+            
         # remove one_hot
         if remove_label:
             for i in range(len(data)):
@@ -1321,11 +1347,77 @@ class PCgraph(torch.nn.Module):
         # logits = logits.view(self.batch_size, len(self.base_supervised_labels))   # batch,10
         # OR 
         logits = self.values.view(self.batch_size, self.num_vertices)   # batch,10
+        # print("logits ", logits)
         logits = logits[:, -10:]
 
-        # print("logits ", logits.shape)
         y_pred = torch.argmax(logits, axis=1).squeeze()
+        # print("logits ", logits.shape)
+        # print("y_pred ", y_pred.shape)
         return y_pred.cpu().detach()
+    
+
+
+    def test_generative(self, data, remove_label=True):
+              
+        # remove one_hot
+        if remove_label:
+            for i in range(len(data)):
+                sub_graph = data[i]  # Access the subgraph
+
+                # set sensory indices to zero / random noise
+                # sub_graph.x[sub_graph.sensory_indices, 0] = torch.zeros_like(sub_graph.x[sub_graph.sensory_indices, 0])  # Check all feature dimensions
+                # random noise
+                sub_graph.x[sub_graph.sensory_indices, 0] = torch.normal(0.5, self.node_init_std, size=(len(sub_graph.sensory_indices),), device=DEVICE)
+
+        self.values, _ , _ = self.unpack_features(data.x, reshape=False)
+        
+        # print("0", self.values[:, -10:].shape, self.values[:, -10:])
+
+        self.update_xs(train=False)
+        # logits = self.values[:, data.supervision_indices[0]]
+        # logits = self.values[:, -10:]
+        # print("supervised_labels_batch ", self.supervised_labels_batch)
+      
+        # logits = self.values[self.supervised_labels_batch]
+        # logits = logits.view(self.batch_size, len(self.base_supervised_labels))   # batch,10
+        # OR 
+
+        generated_imgs = self.values[self.base_sensory_indices]   # batch,10
+       
+        generated_imgs = generated_imgs.view(self.batch_size, 28, 28)   # batch,10
+
+        # save img inside 1 big plt imshow plot; take first 10 images
+        import matplotlib.pyplot as plt
+
+        fig, axs = plt.subplots(1, 10, figsize=(20, 2))
+        for i in range(10):
+            axs[i].imshow(generated_imgs[i].cpu().detach().numpy())
+            axs[i].axis("off")
+        
+        plt.show()
+        # save 
+        plt.savefig("generated_imgs.png")
+       
+        return y_pred.cpu().detach()
+    
+
+
+
+    def test_iterative(self, data, eval_types=None, remove_label=True):
+        # edge_index = data.edge_index
+
+        # eval_type = ["classification", "generative", "..."]
+
+        if "classification" in eval_types:
+            return self.test_classifications(data.clone().to(self.device), 
+                                      remove_label=remove_label)
+        elif "generation" in eval_types:
+            self.test_generative(data.clone().to(self.device), 
+                                 remove_label=remove_label)
+            
+            return 0 # Placeholder ""
+        else:
+            raise ValueError("Unknown evaluation type")
     
     def get_energy(self):
         return torch.sum(self.errors**2).item()
@@ -1409,6 +1501,10 @@ args = {
     "seed": 2,  # Random seed
 }
 
+torch.set_default_dtype(torch.float32)  # Ensuring consistent precision
+
+# Use compiled model for speed optimization (if PyTorch 2.0+)
+USE_TORCH_COMPILE = True
 
 
 # Access the arguments just like you would with argparse
@@ -1709,10 +1805,9 @@ val_graph_dataset = PCGraphDataset(graph, val_set, supervised_learning=True, num
 test_graph_dataset = PCGraphDataset(graph, test_set, supervised_learning=True, numbers_list=list(range(10)))
 
 # PYG DataLoaders
-train_loader = GeoDataLoader(train_graph_dataset, batch_size=batch_size, collate_fn=custom_collate_fn, shuffle=True, drop_last=True)
-val_loader = GeoDataLoader(val_graph_dataset, batch_size=batch_size, collate_fn=custom_collate_fn, shuffle=False, drop_last=True)
-test_loader = GeoDataLoader(test_graph_dataset, batch_size=batch_size, collate_fn=custom_collate_fn, shuffle=False, drop_last=True)
-
+train_loader = GeoDataLoader(train_graph_dataset, batch_size=batch_size, collate_fn=custom_collate_fn, shuffle=True, pin_memory=True, num_workers=4, drop_last=True)
+val_loader = GeoDataLoader(val_graph_dataset, batch_size=batch_size, collate_fn=custom_collate_fn, shuffle=False,  pin_memory=True, num_workers=4, drop_last=True)
+test_loader = GeoDataLoader(test_graph_dataset, batch_size=batch_size, collate_fn=custom_collate_fn, shuffle=False,  pin_memory=True, num_workers=4, drop_last=True)
 
 
 #### GET EXAMPLE BATCH #### 
@@ -1773,7 +1868,6 @@ for batch in train_loader:
 
 
 
-
 # from models.PC_vanZwol import PC_graph_zwol 
 
 # """ WITH MESSAGE_PASSING """
@@ -1818,7 +1912,8 @@ PCG = PCgraph(f,
         use_input_error=use_input_error,
         )
 
-optimizer = optim.Adam(
+# optimizer = optim.Adam(
+optimizer = Adam(
     PCG.params,
     learning_rate=lr_w,
     grad_clip=grad_clip,
@@ -1829,8 +1924,15 @@ PCG.set_optimizer(optimizer)
 
 PCG.init_modes(batch_example=batch)
 
+if sum(args.discriminative_hidden_layers) > 0:
+    TASK = "classification"
+else:
+    TASK = "generation"
+    
+PCG.set_task(TASK)
+
 model = PCG
-model = torch.compile(model)
+model = torch.compile(model) 
 
 
 from datetime import datetime
@@ -1851,6 +1953,8 @@ model = PCG  # Assuming PCG is defined elsewhere
 # break_num = 100
 
 break_num = 200
+# break_num = 100
+# break_num = 5
 
 with torch.no_grad():
     for epoch in tqdm(range(num_epochs), desc="Epoch Progress"):
@@ -1865,23 +1969,25 @@ with torch.no_grad():
 
             if batch_no >= break_num:
                 break
+        
 
+        #### 
         loss, acc = 0, 0
         model.test()
         cntr = 0
 
-        break_num_eval = 50
+        break_num_eval = 20
         print("\n----test_iterative-----")
         accs = []
 
         # for batch_no, batch in enumerate(tqdm(val_loader, total=min(len(val_loader)), desc=f"Epoch {epoch+1} - Validation", leave=False)):
-        for batch_no, batch in enumerate(tqdm(val_loader, total=len(val_loader), desc=f"Epoch {epoch+1} - Validation", leave=False)):
+        for batch_no, batch in enumerate(tqdm(val_loader, total=len(val_loader), desc=f"Epoch {epoch+1} - Validation | {TASK}", leave=False)):
             y_batch = batch.y.clone()
             batch = batch.to(model.device)
-            y_pred = PCG.test_iterative(batch)
-            # print("y_pred:", y_pred.shape)
-            # print("y_batch :", y_batch.shape)
+            y_pred = PCG.test_iterative(batch, eval_types=[TASK], remove_label=True)
 
+            # print("y_pred", y_pred.shape)
+            # print("y_pred", y_batch.shape)
             correct = torch.mean((y_pred == y_batch).float()).item()
             acc += correct
 
