@@ -6,7 +6,9 @@ import torch.nn.init as init
 import numpy as np
 import math
 from torch_geometric.utils import to_dense_adj, degree
-from models.MessagePassing import PredictionMessagePassing, ValueMessagePassing
+
+# from models.MessagePassing import PredictionMessagePassing, ValueMessagePassing
+from models.MessagePassing_old import PredictionMessagePassing, ValueMessagePassing
 from helper.activation_func import set_activation
 from helper.grokfast import gradfilter_ema, gradfilter_ma, gradfilter_ema_adjust
 import os 
@@ -20,7 +22,7 @@ import torch.optim.lr_scheduler
 class PCGraphConv(torch.nn.Module): 
     def __init__(self, num_vertices, sensory_indices, internal_indices, 
                  learning_rate, T, graph_structure,
-                 batch_size, edge_type, update_rules, delta_w_selection, use_bias=False, use_learning_optimizer=False, 
+                 batch_size, edge_type, incremental_learning, update_rules, delta_w_selection, use_bias=False, use_learning_optimizer=False, 
                  use_grokfast=False,
                  weight_init="normal", clamping=None,  
                  supervised_learning=False, normalize_msg=False, debug=False, activation=None, 
@@ -42,8 +44,8 @@ class PCGraphConv(torch.nn.Module):
         self.lr_values , self.lr_weights = learning_rate  
         self.T = T  # Number of iterations for gradient descent
         
-        self.T_train = self.T
-        self.T_test = self.T * 7 
+        self.T_train = self.T[0]
+        self.T_test = self.T[1]
    
         self.debug = debug
         self.edge_index_single_graph = graph_structure  # a geometric graph structure
@@ -58,6 +60,8 @@ class PCGraphConv(torch.nn.Module):
         self.internal_clock = 0
         self.clamping = clamping
         self.wandb_logger = wandb_logger
+
+        self.incremental_learning = incremental_learning  # False ]/True"standard" or "incremental" PC 
 
         self.trace_activity_values, self.trace_activity_errors, self.trace_activity_preds = False, False, False  
         self.trace = {
@@ -825,7 +829,7 @@ class PCGraphConv(torch.nn.Module):
 
             # weights_batched_graph_T = self.weights.T.repeat(1, self.batchsize).to(self.device)
 
-            # self.predictions = self.prediction_mp(self.data.x.to(self.device), self.data.edge_index.to(self.device), weights_batched_graph, norm=self.norm.to(self.device))
+            # self.predictions = self.prediction_mp(self.data.x.to(self.device), self.data.edge_index.to(self.device), weights_batched_graph, self.norm.to(self.device))
             # self.predictions = self.prediction_mp(self.data.x.to(self.device), self.data.edge_index.to(self.device), self.weights)
             
             # ------------- TODO NEW ----------------------
@@ -839,7 +843,7 @@ class PCGraphConv(torch.nn.Module):
             with torch.no_grad():
                 
                 # calculate dE/dx 
-                delta_x = self.values_mp(self.data.x.to(self.device), self.data.edge_index.to(self.device), weights_batched_graph, norm=self.norm.to(self.device)).squeeze()
+                delta_x = self.values_mp(self.data.x.to(self.device), self.data.edge_index.to(self.device), weights_batched_graph).squeeze()
                 # delta_x = delta_x.detach()
 
         if self.update_rules == "Van_Zwol":
@@ -880,6 +884,8 @@ class PCGraphConv(torch.nn.Module):
         # #### TODO NEW 
         # if self.delta_w_selection == "internal_only":
         #     delta_x[self.sensory_indices_batch] = 0  # Sensory nodes are fixed
+
+   
 
         # self.copy_node_values_to_dummy(self.values)
         self.copy_node_values_to_dummy(self.data.x[:, 0])
@@ -970,7 +976,7 @@ class PCGraphConv(torch.nn.Module):
 
             if self.update_rules == "Salvatori":
 
-                self.predictions = self.prediction_mp(self.data.x.to(self.device), self.data.edge_index.to(self.device), weights_batched_graph, norm=self.norm.to(self.device))
+                self.predictions = self.prediction_mp(self.data.x.to(self.device), self.data.edge_index.to(self.device), weights_batched_graph)
                 # self.predictions = self.prediction_mp(self.data.x.to(self.device), self.data.edge_index.to(self.device), self.weights)
 
             if self.update_rules == "Van_Zwol":
@@ -1077,9 +1083,9 @@ class PCGraphConv(torch.nn.Module):
         # self.use_input_error = ["sensory"]
         # self.use_input_error = ["supervised"]
         
-        self.use_input_error = None
+        self.not_use_input_error = None
     
-        if self.mode == "training" and self.use_input_error:
+        if self.mode == "training" and self.not_use_input_error:
             # use_input_error from VanZwol 
             """ 
             Note that to get the same updates as a PCN, use_input_error = False is required.
@@ -1087,12 +1093,19 @@ class PCGraphConv(torch.nn.Module):
             self.errors[self.sensory_indices] = 0
             """
       
-            if "sensory" in self.use_input_error:
+            if "sensory" in self.not_use_input_error:
                 self.errors[self.sensory_indices] = 0
-            if "internal" in self.use_input_error:
+            if "internal" in self.not_use_input_error:
                 self.errors[self.internal_indices] = 0
-            if "supervised" in self.use_input_error:
+            if "supervised" in self.not_use_input_error:
                 self.errors[self.supervised_labels] = 0
+
+            # if not self.use_input_error:
+            # if self.task == "classification":
+            #     self.errors[self.sensory_indices_batch] = 0
+            # elif self.task in ["generation", "reconstruction", "denoising", "occlusion"]:
+            #     self.errors[self.supervised_labels_batch] = 0
+            #     # self.errors[self.sensory_indices_batch] = 0
 
         
         # TODO IMPORTANT TESTING
@@ -1279,6 +1292,12 @@ class PCGraphConv(torch.nn.Module):
 
         from tqdm import tqdm
 
+        if self.mode == "training":
+            self.T = self.T_train
+        elif self.mode == "testing":
+            self.T = self.T_test 
+
+        print("T", self.T)
         t_bar = tqdm(range(self.T), leave=False)
 
         # t_bar.set_description(f"Total energy at time 0 {energy} Per avg. vertex {energy['internal_energy'] / len(self.internal_indices)}")
@@ -1321,7 +1340,12 @@ class PCGraphConv(torch.nn.Module):
                 
                 # 3. Update values 
                 self.update_values()
-                
+
+                if self.incremental_learning and self.mode == "training": #and self.delta_w is not None:
+                    self.set_phase('weight_update')
+                    self.weight_update()
+                    self.set_phase('weight_update done')
+
                 # Recalculate energy
                 energy = self.energy()
                 
@@ -1558,9 +1582,11 @@ class PCGraphConv(torch.nn.Module):
         self.set_phase('inference done')
 
         ## WEIGHT UPDATE 
-        self.set_phase('weight_update')
-        self.weight_update()
-        self.set_phase('weight_update done')
+        if not self.incremental_learning:
+            ## WEIGHT UPDATE 
+            self.set_phase('weight_update')
+            self.weight_update()
+            self.set_phase('weight_update done')
 
         # Energy at t=T+1 after weight update
         energy = self.energy()
@@ -1966,7 +1992,7 @@ class PCGraphConv(torch.nn.Module):
 class PCGNN(nn.Module):
     def __init__(self, num_vertices, sensory_indices, internal_indices, 
                  lr_params, T, graph_structure, 
-                 batch_size, edge_type, update_rules,
+                 batch_size, edge_type, incremental_learning, update_rules,
                  delta_w_selection, use_bias, 
                  use_learning_optimizer=False, 
                  use_grokfast=False,
@@ -1979,7 +2005,7 @@ class PCGNN(nn.Module):
         # INSIDE LAYERS CAN HAVE PREDCODING - intra-layer 
         self.pc_conv1 = PCGraphConv(num_vertices, sensory_indices, internal_indices, 
                                     lr_params, T, graph_structure, 
-                                    batch_size, edge_type, update_rules, delta_w_selection, use_bias, use_learning_optimizer, 
+                                    batch_size, edge_type, incremental_learning, update_rules, delta_w_selection, use_bias, use_learning_optimizer, 
                                     use_grokfast, weight_init, clamping, supervised_learning, 
                                     normalize_msg, 
                                     debug, activation, log_tensorboard, wandb_logger, device)

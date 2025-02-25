@@ -29,6 +29,8 @@ jobs/create_jobs/**/*
 
 scr/trained_models/*/
 scr/trained_models/**/*
+scr2/trained_models/**/*
+scr2/trained_models/*/
 scr/trained_models_experimenting/*/
 scr/trained_models_experimenting/**/*
 

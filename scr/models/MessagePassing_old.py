@@ -29,7 +29,7 @@ class PredictionMessagePassing(MessagePassing):
         # GET THIS with init. the 
         # self.edge_index = edge_index
 
-    def forward(self, x, edge_index, weight_matrix, norm):
+    def forward(self, x, edge_index, weight_matrix):
         # x: Node features (values, errors, predictions)
         # edge_index: Graph connectivity (2, num_edges)
         # edge_weight: Edge weights (num_edges,)
@@ -53,7 +53,7 @@ class PredictionMessagePassing(MessagePassing):
         #     # make norm the identity
         #     norm = torch.ones(edge_index.size(1), device=x.device)
 
-        return self.propagate(edge_index, x=x, weight_matrix=weight_matrix, norm=norm)
+        return self.propagate(edge_index, x=x, weight_matrix=weight_matrix)
         
             
 
@@ -73,7 +73,7 @@ class PredictionMessagePassing(MessagePassing):
     #     # return norm.view(-1, 1) * edge_weight.view(-1, 1) * self.activation(x_j[:, 0]).view(-1, 1)
     
     # Corrected to match paper's Eq. (1):
-    def message(self, x_j, weight_matrix, norm):
+    def message(self, x_j, weight_matrix):
         # θj,i * f(xj,t) as per paper
         return self.f(x_j[:, 0]).view(-1, 1) * weight_matrix.view(-1, 1)
 
@@ -103,7 +103,7 @@ class ValueMessagePassing(MessagePassing):
         self.activation, self.f_prime = set_activation(activation)
         
 
-    def forward(self, x, edge_index, weight_matrix, norm):
+    def forward(self, x, edge_index, weight_matrix):
         # x: Node features (values, errors, predictions)
         # edge_index: Graph connectivity (2, num_edges)
         # edge_weight: Edge weights (num_edges,)
@@ -124,10 +124,10 @@ class ValueMessagePassing(MessagePassing):
         #     # make norm the identity
         #     norm = torch.ones(edge_index.size(1), device=x.device)
 
-        return self.propagate(edge_index, x=x, weight_matrix=weight_matrix, norm=norm)
+        return self.propagate(edge_index, x=x, weight_matrix=weight_matrix)
         # return self.propagate(edge_index, x=x, weight_matrix=weight_matrix)
 
-    def message(self, x_j, weight_matrix, norm):
+    def message(self, x_j, weight_matrix):
         # x_j: Node features of the neighboring nodes (source nodes in edge_index)
         # x_i: Node features of the destination nodes in edge_index
         # edge_weight: Weights of the edges

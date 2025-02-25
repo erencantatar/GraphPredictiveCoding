@@ -1036,9 +1036,6 @@ class PCgraph(PCmodel):
             [self.edge_index + i * num_nodes for i in range(batch_size)], dim=1
         )  # Concatenate and offset indices
 
-
-
-
         for t in range(T): 
             # print("t", t)
 
@@ -1064,24 +1061,19 @@ class PCgraph(PCmodel):
                 # Expand edge weights for each graph
                 batched_weights = weights_1d.repeat(batch_size)
 
-                # # Perform message passing
-                # epsilon, mu_mp, delta_x = self.MP.forward(
-                #     values, batched_edge_index.to(DEVICE), batched_weights.to(DEVICE)
-                # )
+                predicted_mpU = self.pred_mu_MP(self.x.view(-1,1).to(DEVICE),
+                                        self.batched_edge_index.to(DEVICE), 
+                                        batched_weights.to(DEVICE))
 
-            #     predicted_mpU = self.pred_mu_MP(self.x.view(-1,1).to(DEVICE),
-            #                             self.batched_edge_index.to(DEVICE), 
-            #                             batched_weights.to(DEVICE))
-
-            #     predicted_mpU = predicted_mpU.view(batch_size, self.structure.N)
-            #     self.e = self.x - predicted_mpU
+                predicted_mpU = predicted_mpU.view(batch_size, self.structure.N)
+                self.e = self.x - predicted_mpU
 
             # else:
             #     mu = torch.matmul(f(self.x), self.w.T)
             #     self.e = self.x - mu 
 
-            mu = torch.matmul(f(self.x), self.w.T)
-            self.e = self.x - mu 
+            # mu = torch.matmul(f(self.x), self.w.T)
+            # self.e = self.x - mu 
 
             # values, self.edge_index, self.weights_1d = values.to(DEVICE), self.edge_index.to(DEVICE), self.weights_1d.to(DEVICE)
             # epsilon, mu_mp, delta_x = self.MP.forward(values, self.edge_index, self.weights_1d)
@@ -1122,8 +1114,8 @@ class PCgraph(PCmodel):
         
             # print("e1", torch.mean(self.e))
             # TODO
-            if not self.use_input_error:
-                self.e[:,:di] = 0 
+            # if not self.use_input_error:
+            #     self.e[:,:di] = 0 
 
             # print("dx----0")
 
@@ -1148,7 +1140,8 @@ class PCgraph(PCmodel):
                 dEdx = dEdx_ 
 
             else:
-                dEdx = self.structure.grad_x(self.x.to(DEVICE), self.e.to(DEVICE), self.w.to(DEVICE), self.b.to(DEVICE),train=train) # only hidden nodes
+                continue
+                # dEdx = self.structure.grad_x(self.x.to(DEVICE), self.e.to(DEVICE), self.w.to(DEVICE), self.b.to(DEVICE),train=train) # only hidden nodes
 
             clipped_dEdx = torch.clamp(dEdx, -1, 1)
 
@@ -1159,18 +1152,18 @@ class PCgraph(PCmodel):
             
             if self.incremental and self.dw is not None:
 
-                # print("optimizer step")
-                if self.w.is_sparse:
-                    self.w = self.w.to_dense()
-                if self.dw.is_sparse:
-                    self.dw = self.dw.to_dense()
+                # # print("optimizer step")
+                # if self.w.is_sparse:
+                #     self.w = self.w.to_dense()
+                # if self.dw.is_sparse:
+                #     self.dw = self.dw.to_dense()
 
-                # Convert m and gradients to dense if necessary
-                if self.dw.is_sparse:
-                    self.dw = self.dw.to_dense()
+                # # Convert m and gradients to dense if necessary
+                # if self.dw.is_sparse:
+                #     self.dw = self.dw.to_dense()
 
-                if self.optimizer.m_w.is_sparse:
-                    self.optimizer.m_w = self.optimizer.m_w.to_dense()
+                # if self.optimizer.m_w.is_sparse:
+                #     self.optimizer.m_w = self.optimizer.m_w.to_dense()
 
                 # self.update_w()   # added myself
                 self.optimizer.step(self.params, self.grads, batch_size=self.x.shape[0])
@@ -1554,7 +1547,7 @@ with torch.no_grad():
             PCG.train_supervised(X_batch, y_batch)
             energy += PCG.get_energy()
 
-            if batch_no >= 400:
+            if batch_no >= 200:
                 break 
         train_energy.append(energy/len(train_loader))
 

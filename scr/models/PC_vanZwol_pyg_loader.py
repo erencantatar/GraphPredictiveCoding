@@ -148,14 +148,14 @@ class PC_graph_zwol_PYG(torch.nn.Module):
 
     def unpack_features(self, batch, reshape=True):
         """Unpack values, errors, and predictions from the batched graph."""
-        values, errors, predictions = batch[:, 0, :].to(self.device), batch[:, 1, :].to(self.device),  None
+        values, errors, predictions = batch[:, 0, :].to(self.device), None,  None
         # print("unpacked featreus")
         # print(values.shape)
 
         # reshape to (batch_size, num_vertices)
         if reshape:
             values      = values.view(self.batch_size, self.num_vertices)
-            errors      = errors.view(self.batch_size, self.num_vertices)
+            # errors      = errors.view(self.batch_size, self.num_vertices)
             # predictions = predictions.view(self.batch_size, self.num_vertices)
 
         return values, errors, predictions
@@ -192,6 +192,7 @@ class PC_graph_zwol_PYG(torch.nn.Module):
         # print("update_mask shape", self.update_mask.shape)
 
         for t in range(T):
+
             self.prediction = self.get_prediction(self.values).to(self.device)
       
             self.errors = self.values - self.prediction  # Update errors
@@ -258,6 +259,8 @@ class PC_graph_zwol_PYG(torch.nn.Module):
 
     def test_iterative(self, data, remove_label=True):
         # edge_index = data.edge_index
+
+        self.batch_size = data.x.shape[0] // self.num_vertices
 
         # remove one_hot
         if remove_label:

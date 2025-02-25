@@ -222,7 +222,7 @@ graph_params = {
     "seed": args.seed,   
 }
 
-eval_generation, eval_classification, eval_denoise, eval_occlusion = True, True, 0, 0 
+# eval_generation, eval_classification, eval_denoise, eval_occlusion = True, True, 0, 0 
 
 
 # add graph specific info: 
@@ -281,6 +281,7 @@ if graph_params["graph_type"]["name"] in ["single_hidden_layer"]:
 
     # edge_index, N = test_single_hidden_layer(discriminative_hidden_layers, generative_hidden_layers,
     #                                         no_sens2sens=True, no_sens2supervised=True)
+    eval_generation, eval_classification, eval_denoise, eval_occlusion = True, True, 0, 0 
 
     if sum(discriminative_hidden_layers) == 0:
         eval_classification = False
@@ -288,7 +289,7 @@ if graph_params["graph_type"]["name"] in ["single_hidden_layer"]:
         eval_generation = False
 
     # TODO ; still unsure about which graph does which task
-    eval_generation, eval_classification, eval_denoise, eval_occlusion = True, True, 0, 0 
+    # eval_generation, eval_classification, eval_denoise, eval_occlusion = True, True, 0, 0 
 
 if graph_params["graph_type"]["name"] not in ["single_hidden_layer"]:
     # Ensure these arguments are not specified for other graph types
@@ -899,7 +900,7 @@ threshold_earlystop = 0.05
 max_energy_threshold = 1e6
 accuracy_mean = 0 
 
-items_per_epoch = 10 
+items_per_epoch = 20 
 # because batch size is 1
 if args.update_rules == "Van_Zwol":
     items_per_epoch = 50
@@ -1064,7 +1065,10 @@ for epoch in range(args.epochs):
         
     elif accuracy_mean > 0.6:
         test_params["num_samples"] = 4 * len(custom_dataset_test.numbers_list)  # Moderate increase for mid-range accuracy
-        
+    
+
+    test_params["num_samples"] = 100
+
     if accuracy_mean < 0.2 and epoch >= 10:  # Adjust the threshold as needed
         earlystop = True
         break
@@ -1199,14 +1203,14 @@ for epoch in range(args.epochs):
             "generation/MSE_max": avg_MSE_max,
         })
 
+    if eval_generation:
 
-    if (epoch % 5 == 0 and epoch >= 2) and ((avg_SSIM_mean >= 0.1 or avg_MSE_max > 0.4) or accuracy_mean > 0.8):
-        
-        if eval_generation:
+        if (epoch % 5 == 0 and epoch >= 2) and ((avg_SSIM_mean >= 0.1 or avg_MSE_max > 0.4) or accuracy_mean > 0.8):
+            
             plot_digits_vertically(test_loader_1_batch, model, test_params, custom_dataset_test.numbers_list)
 
             # plot_digits_vertically(test_loader, model=model, test_params, numbers_list=custom_dataset_test.numbers_list)
-            progressive_digit_generation(test_loader_1_batch, model, test_params, custom_dataset_test.numbers_list)
+            # progressive_digit_generation(test_loader_1_batch, model, test_params, custom_dataset_test.numbers_list)
 
     # change the LR for the weights after 10 epochs
 

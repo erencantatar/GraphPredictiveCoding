@@ -60,18 +60,18 @@ class ValueMessagePassing(MessagePassing):
             norm = torch.ones(edge_index.size(1), device=values.device)
 
         # Perform value update message passing (aggregating errors and updating values)
-        return self.propagate(edge_index, values=values, errors=errors, weight_matrix=weight_matrix, norm=norm)
+        return self.propagate(edge_index, values=values, errors=errors, weight_matrix=weight_matrix)
 
     def message(self, errors_j, weight_matrix, norm):
         # ε_{k,t} θ_{k,i}
-        return weight_matrix.view(-1, 1) * errors_j.view(-1, 1) * norm.view(-1, 1)
+        return weight_matrix.view(-1, 1) * errors_j.view(-1, 1)
 
     def update(self, aggr_out, values, errors):
         # Compute the derivative of the activation function applied to the values
         f_prime_values = self.f_prime(values).view(-1, 1)
 
         # Compute change in values using Δx_{i,t} = γ (-ε_{i,t} + f'(x_{i,t}) ∑_k ε_{k,t} θ_{k,i})
-        # delta_x = -values.view(-1, 1) + f_prime_values * aggr_out
-        delta_x = -errors.view(-1, 1) + f_prime_values * aggr_out
+        delta_x = -values.view(-1, 1) + f_prime_values * aggr_out
+        # delta_x = -errors.view(-1, 1) + f_prime_values * aggr_out
 
         return delta_x.view(-1, 1)

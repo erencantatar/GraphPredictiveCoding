@@ -851,8 +851,6 @@ def classification(test_loader, model, test_params, num_samples=5):
         
         denoised_output = predictions[0:784].view(28,28).cpu().detach().numpy()
 
-        
-   
         # ----------- Plotting ---------------
 
         # Creating a subplot mosaic
