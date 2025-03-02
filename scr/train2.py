@@ -222,7 +222,7 @@ graph_params = {
     "seed": args.seed,   
 }
 
-# eval_generation, eval_classification, eval_denoise, eval_occlusion = True, True, 0, 0 
+eval_generation, eval_classification, eval_denoise, eval_occlusion = True, True, 0, 0 
 
 
 # add graph specific info: 

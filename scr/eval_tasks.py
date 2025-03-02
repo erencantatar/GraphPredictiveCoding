@@ -903,7 +903,7 @@ def classification(test_loader, model, test_params, num_samples=5):
 
         if sum(labels) == 0:
             print("-----------NO prediction on labels-----------")
-            return y_true, y_pred, 0
+            return y_true, y_pred, -1
             
         else: 
             label_pred = torch.argmax(softmax_labels)

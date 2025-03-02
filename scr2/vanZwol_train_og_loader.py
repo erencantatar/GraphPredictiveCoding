@@ -911,19 +911,19 @@ class PCgraph(torch.nn.Module):
         # self.w = torch.empty( self.num_vertices, self.num_vertices, device=DEVICE)
        
         # best for Classification
-        nn.init.normal_(self.w, mean=0, std=0.05)  
-        # 
+        # nn.init.normal_(self.w, mean=0, std=0.05)  
+        # # 
 
-        # trying for generation
+        # # trying for generation
         # nn.init.normal_(self.w, mean=0.1, std=0.05)  
 
 
         # # # # # BEST FOR GENERATION
-        # self.w.data.fill_(0.001)
-        # # self.w.data.fill_(0.0001)
-        # # Add small random noise
-        # noise = torch.randn_like(self.w) * 0.0001
-        # self.w.data.add_(noise)
+        self.w.data.fill_(0.001)
+        # self.w.data.fill_(0.0001)
+        # Add small random noise
+        noise = torch.randn_like(self.w) * 0.0001
+        self.w.data.add_(noise)
         
 
         # Perform the operation and reassign self.w as a Parameter
@@ -1283,8 +1283,9 @@ class PCgraph(torch.nn.Module):
 
             dEdx = dEdx_[update_mask]
         
-            clipped_dEdx = torch.clamp(dEdx, -1, 1)
-            # clipped_dEdx = dEdx
+        
+            # clipped_dEdx = torch.clamp(dEdx, -1, 1)
+            clipped_dEdx = dEdx
 
                     
             self.values[update_mask] -= self.lr_x * clipped_dEdx
@@ -1412,7 +1413,7 @@ class PCgraph(torch.nn.Module):
     
 
 
-    def test_generative(self, data, remove_label=True):
+    def test_generative(self, data, remove_label=True, save_imgs=False):
               
         # remove one_hot
         if remove_label:
@@ -1445,7 +1446,6 @@ class PCgraph(torch.nn.Module):
         # generated_imgs = generated_imgs.view(self.batch_size, 28, 28)   # batch,10
 
         # save img inside 1 big plt imshow plot; take first 10 images
-        save_imgs = False
         if save_imgs:
             import matplotlib.pyplot as plt
 
@@ -1505,7 +1505,7 @@ class PCgraph(torch.nn.Module):
             self.trace = True 
 
             self.test_generative(data.clone().to(self.device), 
-                                 remove_label=remove_label)
+                                 remove_label=remove_label, save_imgs=True)
             
             return 0 # Placeholder ""
         else:
@@ -1562,11 +1562,11 @@ args = {
     # "graph_type": "fully_connected",  # Type of graph
 
     "graph_type": "single_hidden_layer",  # Type of graph
-    "discriminative_hidden_layers": [32, 16],  # Hidden layers for discriminative model
-    "generative_hidden_layers": [0],  # Hidden layers for generative model
+    # "discriminative_hidden_layers": [32, 16],  # Hidden layers for discriminative model
+    # "generative_hidden_layers": [0],  # Hidden layers for generative model
 
-    # "discriminative_hidden_layers": [0],  # Hidden layers for discriminative model
-    # "generative_hidden_layers": [100],  # Hidden layers for generative model
+    "discriminative_hidden_layers": [0],  # Hidden layers for discriminative model
+    "generative_hidden_layers": [50,50],  # Hidden layers for generative model
 
 
     "delta_w_selection": "all",  # Selection strategy for weight updates
@@ -1592,7 +1592,7 @@ args = {
     "activation_func": "swish",  # Activation function
     "epochs": 10,  # Number of training epochs
     # "batch_size": 0,  # Batch size for training; fine for discriminative
-    "batch_size": 1,  # Batch size for training
+    "batch_size": 30,  # Batch size for training
     # "batch_size": 200,  # Batch size for training
     "seed": 2,  # Random seed
 }
@@ -2006,7 +2006,6 @@ use_input_error = False     # whether to use errors in the input layer or not
 
 # Learning
 lr_w = 0.00001      
-lr_w = 0.0001  #TEST      
 # Learning
 # lr_w = 0.00001              # learning rate hierarchial model
 # lr_w = 0.000001              # learning rate generative model
@@ -2021,7 +2020,7 @@ lr_w = 0.0001  #TEST
 
 # # OKAY FOR GENRATION
 # lr_x = 0.001                  # inference rate                   # inference rate 
-# lr_w = 0.001              # learning rate hierarchial model
+lr_w = 0.001              # learning rate hierarchial model
 # T_train = 15                 # inference time scale
 # T_test = 20  
 
@@ -2091,7 +2090,7 @@ num_epochs = 40
 
 break_num = 200
 break_num = 100
-break_num = 500
+break_num = 100
 # break_num = 30
 
 with torch.no_grad():
@@ -2126,7 +2125,7 @@ with torch.no_grad():
         # break_num_eval = 20
         # if TASK == "generation":
         #     break_num_eval = 1
-        break_num_eval = 100
+        break_num_eval = 10
             
         print("\n----test_iterative-----")
         accs = []

@@ -119,7 +119,12 @@ model.query(method="pass",
 6. 
    if self.edge_type.numel() > 0:
       self.log_delta_w(adjusted_delta_w if self.adjust_delta_w else delta_w, self.edge_type, log=False)
-      
+7. - make 3: sens2Sup, sup2sep, sens2sens,
+- add clipping of dEdX:
+- Memory-Efficient aggregations [Advanced PyTorch Geometric Tutorial 6]
+
+8. graphx cuda
+
 
 ## Sources:
 - https://github.com/bjornvz/PRECO/tree/main 
