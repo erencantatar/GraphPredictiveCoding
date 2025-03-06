@@ -18,7 +18,7 @@ args = {
     # "generative_hidden_layers": [0],  # Hidden layers for generative model
 
     "discriminative_hidden_layers": [0],  # Hidden layers for discriminative model
-    "generative_hidden_layers": [200, 100, 50],  # Hidden layers for generative model
+    "generative_hidden_layers": [100, 50],  # Hidden layers for generative model
 
 
     "delta_w_selection": "all",  # Selection strategy for weight updates
@@ -536,26 +536,25 @@ lr_w = 0.00001
 # lr_w = 0.0001      
 
 # # OKAY FOR GENRATION
-# f = relu
-lr_x = 0.5                  # inference rate                   # inference rate 
-# lr_x = 1                 # inference rate                   # inference rate 
-T_train = 10                 # inference time scale
-# T_train = 50                 # inference time scale
-T_test = 15              # unused for hierarchical model
-incremental = True          # whether to use incremental EM or not
-use_input_error = False     # whether to use errors in the input layer or not
+# lr_x = 0.5                  # inference rate                   # inference rate 
+# # lr_x = 1                 # inference rate                   # inference rate 
+# T_train = 10                 # inference time scale
+# # T_train = 50                 # inference time scale
+# T_test = 15              # unused for hierarchical model
+# incremental = True          # whether to use incremental EM or not
+# use_input_error = False     # whether to use errors in the input layer or not
 
-# Learning
-lr_w = 0.00001      
-# Learning
-lr_w = 0.00001              # learning rate hierarchial model
-# lr_w = 0.000001              # learning rate generative model
-weight_decay = 0             
-grad_clip = 1
-batch_scale = False
+# # Learning
+# lr_w = 0.00001      
+# # Learning
+# lr_w = 0.00001              # learning rate hierarchial model
+# # lr_w = 0.000001              # learning rate generative model
+# weight_decay = 0             
+# grad_clip = 1
+# batch_scale = False
 
-# lr_x = 0.01                  # inference rate                   # inference rate 
-# lr_w = 0.000001              # learning rate hierarchial model
+lr_x = 0.01                  # inference rate                   # inference rate 
+lr_w = 0.000001              # learning rate hierarchial model
 
 
 weight_decay = 0             
@@ -628,9 +627,9 @@ num_epochs = 40
 # break_num = 100
 
 break_num = 1200
-# break_num = 200
-# break_num = 100
-break_num = 30
+break_num = 200
+break_num = 100
+# break_num = 30
 
 DEVICE = device 
 

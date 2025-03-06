@@ -102,7 +102,6 @@ class PredictionMessagePassing(MessagePassing):
         # return self.f(x_j) * weight[:, None]
         return self.f(x_j) * weight.view(-1, 1)
 
-        
         # return self.f(x_j) 
     
     def update(self, aggr_out):
@@ -181,7 +180,7 @@ class vanZwol_AMB(UpdateRule):
 
 class MP_AMB(UpdateRule):
 
-    def __init__(self, update_type, batch_size, f, dfdx, edge_index):
+    def __init__(self, update_type, batch_size, f, dfdx, edge_index, batched_edge_index):
         super().__init__(update_type, batch_size, f, dfdx)
         """ 
         Message Passing for Predictive Coding:
@@ -191,22 +190,37 @@ class MP_AMB(UpdateRule):
         self.pred_mu_MP = PredictionMessagePassing(self.f)
         self.grad_x_MP = GradientMessagePassing(self.dfdx)
         self.edge_index = edge_index
+        self.batched_edge_index = batched_edge_index
 
 
     def pred(self, x, w):
         # Gather 1D weights corresponding to connected edges
-        weights_1d = w[self.edge_index[0], self.edge_index[1]]  # Extract relevant weights from W
+        # print("w shape", w.shape)
+        # print("edge_index shape", self.edge_index.shape)
 
+
+        weights_1d = w[self.edge_index[0], self.edge_index[1]]  # Extract relevant weights from W
+        
+        # print("weights_1d", weights_1d.shape)
+        # print("selfbatch_size", self.batch_size)
         # # Expand edge weights for each graph
-        batched_weights = weights_1d.repeat(self.batch_size)
+
+        batched_weights = weights_1d
+        # num_features = 1
+        # batched_weights = weights_1d.repeat(self.batch_size).
+        batched_weights = weights_1d.repeat(self.batch_size).view(-1, 1)
+                        
         # batched_weights = weights_1d.expand(self.batch_size, -1)
 
-        print("pred()")
-        print("x: ", x.shape)
-        print("edge_index: ", self.edge_index.shape)
-        print("batched_weights: ", batched_weights.shape)
+        # print("pred()")
+        # print("x: ", x.shape)
+        # print("edge_index: ", self.edge_index.shape)
+
+        # print("batched_edge_index: ", self.batched_edge_index.shape)
+        # print("batched_weights: ", batched_weights.shape)
         
-        self.pred_mu_MP(x, self.edge_index, batched_weights)
+        # self.pred_mu_MP(x, self.edge_index, batched_weights) batched_edge_index
+        return self.pred_mu_MP(x, self.batched_edge_index, batched_weights) 
 
     def grad_x(self, x, e, w):
 
@@ -214,10 +228,11 @@ class MP_AMB(UpdateRule):
         weights_1d = w[self.edge_index[0], self.edge_index[1]]  # Extract relevant weights from W
 
         # # Expand edge weights for each graph
-        batched_weights = weights_1d.repeat(self.batch_size)
+        batched_weights = weights_1d.repeat(self.batch_size).view(-1, 1)
         # batched_weights = weights_1d.expand(self.batch_size, -1)
 
-        dEdx = self.grad_x_MP(x, self.edge_index, e, batched_weights)
+        # dEdx = self.grad_x_MP(x, self.edge_index, e, batched_weights)
+        dEdx = self.grad_x_MP(x, self.batched_edge_index, e, batched_weights)
     
         return dEdx
 
@@ -274,8 +289,8 @@ class PCgraph(torch.nn.Module):
         # self.MP = PredictiveCodingLayer(f=self.structure.f, 
         #                                 f_prime=self.structure.dfdx)
 
-        update_rule = "vanZwol_AMB"
-        # update_rule = "MP_AMB"
+        # update_rule = "vanZwol_AMB"
+        update_rule = "MP_AMB"
 
 
         if update_rule in ["vectorized", "vanZwol_AMB"]:
@@ -286,13 +301,16 @@ class PCgraph(torch.nn.Module):
             print("-------Using MP_AMB-------------")
             self.reshape = False
 
+            print("self.edge_index", self.edge_index.shape)
             self.batched_edge_index = torch.cat(
                 [self.edge_index + i * self.num_vertices for i in range(self.batch_size)], dim=1
             )       
+            print("self.batched_edge_index", self.batched_edge_index.shape)
+            print("batch size", self.batch_size)
     
             self.updates = MP_AMB(update_type=update_rule, batch_size=self.batch_size, 
-                                #   edge_index=self.edge_index, 
-                                  edge_index=self.batched_edge_index,
+                                  edge_index=self.edge_index, 
+                                  batched_edge_index=self.batched_edge_index,
                                   f=self.f, dfdx=self.dfdx)
             
         else:
@@ -344,14 +362,14 @@ class PCgraph(torch.nn.Module):
         # self.w = torch.empty( self.num_vertices, self.num_vertices, device=DEVICE)
        
         # best for Classification
-        # nn.init.normal_(self.w, mean=0, std=0.05)  
+        nn.init.normal_(self.w, mean=0, std=0.05)  
         # # 
 
         # trying for generation
 
         # # # BEST FOR GENERATION
-        # self.w.data.fill_(0.001)
-        self.w.data.fill_(0.0001)
+        self.w.data.fill_(0.001)
+        # self.w.data.fill_(0.0001)
         # Add small random noise
         noise = torch.randn_like(self.w) * 0.0001
         self.w.data.add_(noise)
@@ -427,8 +445,9 @@ class PCgraph(torch.nn.Module):
             self.errors = torch.empty(batch_size, self.num_vertices, device=DEVICE)
             self.values = torch.zeros(batch_size, self.num_vertices, device=DEVICE)
         else:
-            self.errors = torch.empty(batch_size * self.num_vertices, device=DEVICE)
-            self.values = torch.zeros(batch_size * self.num_vertices, device=DEVICE)
+            num_features = 1
+            self.errors = torch.empty(batch_size * self.num_vertices, num_features, device=DEVICE)
+            self.values = torch.zeros(batch_size * self.num_vertices, num_features, device=DEVICE)
 
     # def clamp_input(self, inp):
     #     di = self.structure.shape[0]
@@ -625,6 +644,30 @@ class PCgraph(torch.nn.Module):
         upper = -10 if train else self.num_vertices
         
         for t in range(T): 
+            
+            if self.trace:
+                
+                # print(self.x.shape)
+                if self.reshape:
+                    x_slice = self.values[0:1, 0:784].cpu().detach().numpy()
+                else:
+                    x_slice = self.values[0:784].cpu().detach().numpy()
+                # print("x_slice shape", x_slice.shape)
+
+                if not isinstance(x_slice, torch.Tensor):
+                    x_slice = torch.tensor(x_slice, device=self.device)
+
+                if x_slice.numel() == 0:
+                    print("Warning: x_slice is empty")
+                    return
+
+                x_slice = x_slice.contiguous().cpu().numpy()
+
+                if not isinstance(x_slice, np.ndarray):
+                    print("Error: Converted x_slice is not a NumPy array")
+                    return
+                
+                self.trace_data.append(x_slice.reshape(28, 28))
 
             # self.w = self.adj * self.w 
             # Perform the operation and reassign self.w as a Parameter
@@ -635,8 +678,11 @@ class PCgraph(torch.nn.Module):
                 # self.w[0:784, -10:] /= 2 
                 # self.w[-10:, 0:784] /= 2 
                 
+            # print("self.w", self.w.shape)
+            # print("self.values", self.values.shape)
             self.mu = self.updates.pred(self.values.to(self.device), self.w.to(self.device))
-
+            # print("self.mu", self.mu.shape)
+            
             # predicted_mpU = self.pred_mu_MP.forward(self.values.view(-1,1).to(DEVICE),
             #                         self.batched_edge_index.to(DEVICE), 
             #                         batched_weights.to(DEVICE))
@@ -695,7 +741,7 @@ class PCgraph(torch.nn.Module):
             # error = self.e.T.contiguous().view(-1, 1).to(DEVICE)  # Shape: [num_nodes, batch_size]
             
             dEdx = self.updates.grad_x(self.values, self.errors, self.w)
-            clipped_dEdx = torch.clamp(dEdx, -1, 1)
+            # clipped_dEdx = torch.clamp(dEdx, -1, 1)
 
             if self.reshape:
                 
@@ -739,26 +785,7 @@ class PCgraph(torch.nn.Module):
             #     if early_stopper.early_stop( self.get_energy() ):
             #         break            
 
-            if self.trace:
-                
-                # print(self.x.shape)
-                x_slice = self.values[0:1, 0:784].cpu().detach().numpy()
-                # print("x_slice shape", x_slice.shape)
-
-                if not isinstance(x_slice, torch.Tensor):
-                    x_slice = torch.tensor(x_slice, device=self.device)
-
-                if x_slice.numel() == 0:
-                    print("Warning: x_slice is empty")
-                    return
-
-                x_slice = x_slice.contiguous().cpu().numpy()
-
-                if not isinstance(x_slice, np.ndarray):
-                    print("Error: Converted x_slice is not a NumPy array")
-                    return
-                
-                self.trace_data.append(x_slice.reshape(28, 28))
+           
             
 
 
@@ -810,8 +837,14 @@ class PCgraph(torch.nn.Module):
         self.reset_nodes(batch_size=data.shape[0])        
                 
         # Directly set graph_data into self.x
-        self.values[:, :] = data.clone()
-      
+        if self.reshape:
+            self.values[:, :] = data.clone()
+        else:
+            data = data.view(self.batch_size * self.num_vertices, 1)
+            # print("data", data.shape)
+            # print("self.values", self.values.shape)
+            self.values = data
+
         # self.values, _ , _ = self.unpack_features(data.x, reshape=False)
         
         self.update_xs(train=True)
@@ -831,10 +864,16 @@ class PCgraph(torch.nn.Module):
         # self.reset_nodes(batch_size=data.shape[0])
 
         # Set the graph data (flattened image + internal zeros + one-hot label)
-        self.values[:, :] = data.clone()
 
-        # Zero out the one-hot vector (last output_size elements)
-        self.values[:, -10:] = 0
+        if self.reshape:
+            self.values[:, :] = data.clone()
+
+            # Zero out the one-hot vector (last output_size elements)
+            self.values[:, -10:] = 0
+        else:
+            data = data.view(self.batch_size * self.num_vertices, 1)
+            self.values = data
+            self.values[self.supervised_labels_batch] = 0
 
         self.update_xs(train=False)
             
@@ -877,11 +916,21 @@ class PCgraph(torch.nn.Module):
 
         self.reset_nodes(batch_size=data.shape[0])        
 
-        self.values[:, :] = data.clone()
+       
+        if self.reshape:
+            self.values[:, :] = data.clone()
 
-        # Zero out the imgae vector 
-        # self.values[:, 0:784] = 0
-        self.values[:, 0:784] = torch.randn_like(self.values[:, 0:784])  # Check all feature dimensions
+            # Zero out the imgae vector 
+            # self.values[:, 0:784] = 0
+            self.values[:, 0:784] = torch.randn_like(self.values[:, 0:784])  # Check all feature dimensions
+        else:
+            tmp = data.clone().view(self.batch_size, self.num_vertices)
+            tmp[:, 0:784] = torch.randn_like(tmp[:, 0:784])  # Check all feature dimensions
+
+            data = tmp.view(self.batch_size * self.num_vertices, 1)
+            self.values = data
+            self.values[self.sensory_indices_batch] = 0
+
 
         self.update_xs(train=False)
 
@@ -944,15 +993,14 @@ class PCgraph(torch.nn.Module):
             plt.savefig(f"trained_models/{self.task}/generated_imgs_{self.epoch}.png")
             plt.close()
 
+            print("len of trace_data", len(self.trace_data))
             # plot self.trace_data
             if self.trace:
                 fig, axs = plt.subplots(1, self.T_test, figsize=(20, 2))
-                # for i in range(len(self.trace_data)):
-                #     axs[i].imshow(self.trace_data[i])
-                for img in (self.trace_data):
-                    axs[i].imshow(img)
+                for i in range(len(self.trace_data)):
+                    axs[i].imshow(self.trace_data[i])
                     axs[i].axis("off")
-                    axs[i].set_title(labels[0].item())
+                    axs[i].set_title(labels[self.epoch].item())
 
                 # plt.show()
                 # save 

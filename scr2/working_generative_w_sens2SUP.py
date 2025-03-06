@@ -905,10 +905,10 @@ class PCgraph(torch.nn.Module):
 
         self.w = torch.nn.Parameter(torch.empty(self.num_vertices, self.num_vertices, device=DEVICE))
         # self.w = torch.empty( self.num_vertices, self.num_vertices, device=DEVICE)
-        nn.init.normal_(self.w, mean=0, std=0.05)  
+        # nn.init.normal_(self.w, mean=0, std=0.05)  
         # 
         # self.w.data.fill_(0.001)
-        self.w.data.fill_(0.001)
+        self.w.data.fill_(0.0001)
 
         # noise_std = 0.005  # Standard deviation of the noise
         # noise_std = 0  # Standard deviation of the noise
@@ -1193,15 +1193,20 @@ class PCgraph(torch.nn.Module):
 
             # # Expand edge weights for each graph
             batched_weights = weights_1d.repeat(self.batch_size)
-            # predicted_mpU = self.pred_mu_MP.forward(self.values.view(-1,1).to(DEVICE),
-            #                         self.batched_edge_index.to(DEVICE), 
-                                    # batched_weights.to(DEVICE))
+            predicted_mpU = self.pred_mu_MP.forward(self.values.view(-1,1).to(DEVICE),
+                                    self.batched_edge_index.to(DEVICE), 
+                                    batched_weights.to(DEVICE))
+            
+            mu = predicted_mpU
             # self.e = self.values - predicted_mpU
 
             # self.errors = self.errors.view(self.batch_size, self.num_vertices)
-            self.x = self.values.view(self.batch_size, self.num_vertices)
-            mu = torch.matmul(f(self.x), self.w.T)
-            mu = mu.view(-1, 1)
+            # self.x = self.values.view(self.batch_size, self.num_vertices)
+            # mu = torch.matmul(f(self.x), self.w.T)
+            # mu = mu.view(-1, 1)
+
+
+
             # print(torch.allclose(mu_mp, mu, atol=1))  # Should be True
             # print(torch.allclose(predicted_mpU, mu, atol=1))  # Should be True
             
@@ -1217,8 +1222,8 @@ class PCgraph(torch.nn.Module):
             if not self.use_input_error:
                 if self.task == "classification":
                     self.errors[self.sensory_indices_batch] = 0
-                # elif self.task in ["generation", "reconstruction", "denoising", "occlusion"]:
-                #     self.errors[self.supervised_labels_batch] = 0
+                elif self.task in ["generation", "reconstruction", "denoising", "occlusion"]:
+                    self.errors[self.supervised_labels_batch] = 0
 
             # total_mean_error = self.errors.mean()
             total_mean_error = torch.sum(self.errors**2).mean()
@@ -1261,8 +1266,8 @@ class PCgraph(torch.nn.Module):
             # print("update_mask", len(update_mask))
             # print("update_mask", update_mask.shape)
 
-            clipped_dEdx = torch.clamp(dEdx, -1, 1)
-            # clipped_dEdx = dEdx
+            # clipped_dEdx = torch.clamp(dEdx, -1, 1)
+            clipped_dEdx = dEdx
 
 
             self.values[update_mask] -= self.lr_x * clipped_dEdx
@@ -1394,9 +1399,10 @@ class PCgraph(torch.nn.Module):
                 sub_graph = data[i]  # Access the subgraph
 
                 # set sensory indices to zero / random noise
-                # sub_graph.x[sub_graph.sensory_indices, 0] = torch.zeros_like(sub_graph.x[sub_graph.sensory_indices, 0])  # Check all feature dimensions
+                sub_graph.x[sub_graph.sensory_indices, 0] = torch.zeros_like(sub_graph.x[sub_graph.sensory_indices, 0])  # Check all feature dimensions
+                sub_graph.x[0:784, 0] = torch.zeros_like(sub_graph.x[0:784, 0])  # Check all feature dimensions
                 # random noise
-                sub_graph.x[sub_graph.sensory_indices, 0] = torch.randn_like(sub_graph.x[sub_graph.sensory_indices, 0])  # Check all feature dimensions
+                # sub_graph.x[sub_graph.sensory_indices, 0] = torch.randn_like(sub_graph.x[sub_graph.sensory_indices, 0])  # Check all feature dimensions
 
         self.values, _ , _ = self.unpack_features(data.x, reshape=False)
         
