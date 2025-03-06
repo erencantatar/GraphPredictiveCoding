@@ -64,3 +64,7 @@ scr2/graphs/
 scr2/graphs/single_hidden_layer/_no_sens2sens_no_sens2sup/2/graph_type.json
 scr2/graphs/single_hidden_layer/_no_sens2sens_no_sens2sup/2/edge_index.pt
 scr2/graphs/single_hidden_layer/_no_sens2sens_no_sens2sup/2/edge_type.pt
+scr3/graphs/**/
+scr3/graphs/*/*/
+scr3/trained_models/**/
+

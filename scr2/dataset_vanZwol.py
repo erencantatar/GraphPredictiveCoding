@@ -164,3 +164,64 @@ class PCGraphDataset(Dataset):
                 internal_indices=self.internal_indices,
                 supervision_indices=self.supervision_indices,
         )
+
+# import torch
+# from torch_geometric.data import Data
+# from torch.utils.data import Dataset
+# import torch
+# from torch_geometric.data import Data, Dataset
+
+from torch_geometric.data import Data
+from torch.utils.data import Dataset  # Correct import for PyTorch Dataset
+
+
+# class PCGraphDataset(Dataset):
+#     def __init__(self, graph, mnist_dataset, supervised_learning=True):
+#         self.mnist_dataset = mnist_dataset
+#         self.supervised_learning = supervised_learning
+
+#         # 🔹 Store precomputed graph structure (backbone)
+#         self.num_vertices = graph.num_vertices
+#         self.sensory_indices = graph.sensory_indices
+#         self.internal_indices = graph.internal_indices
+#         self.supervision_indices = graph.supervision_indices
+#         self.edge_index_tensor = graph.edge_index
+
+#         # 🔹 Create a backbone graph structure once
+#         self.backbone_graph = Data(
+#             x=torch.zeros(self.num_vertices, 1),  # Placeholder for image values
+#             edge_index=self.edge_index_tensor,
+#             y=torch.zeros(10),  # Placeholder for one-hot labels
+#             edge_attr=torch.ones(self.edge_index_tensor.size(1)),
+#             sensory_indices=self.sensory_indices,
+#             internal_indices=self.internal_indices,
+#             supervision_indices=self.supervision_indices,
+#         )
+
+#         print(f"🚀 Precomputed Graph Backbone: {self.num_vertices} nodes, {self.edge_index_tensor.shape[1]} edges")
+
+#     def __len__(self):
+#         """Fix: Implement `__len__` to return dataset size"""
+#         return len(self.mnist_dataset)
+
+#     def __getitem__(self, idx):
+#         """Fix: Implement `__getitem__` to return graph data"""
+#         image, label = self.mnist_dataset[idx]
+
+#         # 🔹 Clone precomputed graph (avoids recomputation)
+#         graph_data = self.backbone_graph.clone()
+
+#         # 🔹 Set image values (only modify sensory nodes)
+#         graph_data.x[self.sensory_indices].copy_(image.view(-1, 1))
+
+#         # 🔹 Set label (one-hot encode if supervised)
+#         if self.supervised_learning:
+#             label_vector = torch.zeros(10)
+#             label_vector[label] = 1  # One-hot encoding
+#             graph_data.y.copy_(label_vector)
+
+#             # Assign supervision nodes
+#             for i, supervision_idx in enumerate(self.supervision_indices):
+#                 graph_data.x[supervision_idx] = label_vector[i]
+
+#         return graph_data

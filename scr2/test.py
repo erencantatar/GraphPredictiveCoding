@@ -910,12 +910,12 @@ class PCgraph(torch.nn.Module):
         # # self.w.data.fill_(0.001)
         # self.w.data.fill_(0.001)
 
-        # # noise_std = 0.005  # Standard deviation of the noise
-        # # noise_std = 0  # Standard deviation of the noise
+        # noise_std = 0.005  # Standard deviation of the noise
+        # noise_std = 0  # Standard deviation of the noise
 
-        # # Fill with fixed value
+        # Fill with fixed value
 
-        # # Add small random noise
+        # Add small random noise
         # noise = torch.randn_like(self.w) * 0.0001
         # self.w.data.add_(noise)
         
@@ -1516,7 +1516,7 @@ args = {
     "generative_hidden_layers": [0],  # Hidden layers for generative model
 
     # "discriminative_hidden_layers": [0],  # Hidden layers for discriminative model
-    # "generative_hidden_layers": [200, 100, 50],  # Hidden layers for generative model
+    # "generative_hidden_layers": [50, 50],  # Hidden layers for generative model
 
 
     "delta_w_selection": "all",  # Selection strategy for weight updates
@@ -2008,7 +2008,7 @@ model = PCG  # Assuming PCG is defined elsewhere
 
 break_num = 200
 break_num = 100
-break_num = 30
+# break_num = 30
 # break_num = 5
 
 with torch.no_grad():

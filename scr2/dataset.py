@@ -1,6 +1,8 @@
 
 import torch
-from torch.utils.data import Dataset
+# from torch.utils.data import Dataset
+
+from torch_geometric.data import Dataset
 from torch_geometric.data import Data
 import numpy as np
 from torchvision.datasets import MNIST

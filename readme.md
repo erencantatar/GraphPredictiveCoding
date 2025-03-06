@@ -18,6 +18,7 @@ and 784 sensory vertices
 5. Training using clamped img (X) and img_label (Y)
    Test on val_set by removing either img for generation eval or remove img_label for classification task, depedining on the task and topology (FC can do both, hierachical (VanZwol only either one))
 6. Eval on eval_set
+7. Single MP that does all (pred, call error, dEdX)
 
 
 
@@ -95,6 +96,7 @@ def gradfilter_ema(
 
 ## TODO
 
+- save artifact to wandb (model_type (class/generation/both), model_weights and edge_index)
 - # validate_messagePassing()
 - random_internal=True, inside:
 model.query(method="pass", 
