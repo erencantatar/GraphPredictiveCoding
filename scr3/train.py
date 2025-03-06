@@ -8,24 +8,24 @@ import matplotlib.pyplot as plt
 
 args = {
     "model_type": "IPC",
-    # "ype": "stochastic_block",  # Type of graph
+    "graph_type": "stochastic_block",  # Type of graph
     "update_rules": "Van_Zwol",  # Update rules for learning
 
     # "graph_type": "fully_connected",  # Type of graph
 
-    "graph_type": "single_hidden_layer",  # Type of graph
+    # "graph_type": "single_hidden_layer",  # Type of graph
     # "discriminative_hidden_layers": [32, 16],  # Hidden layers for discriminative model
     # "generative_hidden_layers": [0],  # Hidden layers for generative model
 
-    "discriminative_hidden_layers": [0],  # Hidden layers for discriminative model
-    "generative_hidden_layers": [100, 50],  # Hidden layers for generative model
+    # "discriminative_hidden_layers": [0],  # Hidden layers for discriminative model
+    # "generative_hidden_layers": [100, 50],  # Hidden layers for generative model
 
 
     "delta_w_selection": "all",  # Selection strategy for weight updates
     "weight_init": "fixed 0.001 0.001",  # Weight initialization method
     "use_grokfast": True,  # Whether to use GrokFast
     "optimizer": 1.0,  # Optimizer setting
-    "remove_sens_2_sens": True,  # Remove sensory-to-sensory connections
+    "remove_sens_2_sens": False,  # Remove sensory-to-sensory connections
     "remove_sens_2_sup": False,  # Remove sensory-to-supervised connections
     "set_abs_small_w_2_zero": False,  # Set small absolute weights to zero
     "mode": "experimenting",  # Mode of operation (training/experimenting)
@@ -194,6 +194,8 @@ if graph_params["graph_type"]["name"] == "stochastic_block":
     
     # override internal nodes if doing clustering
     graph_params["internal_nodes"] = (graph_params["graph_type"]["params"]["num_communities"] * graph_params["graph_type"]["params"]["community_size"])
+#    self.INTERNAL = range(self.SENSORY_NODES, (self.SENSORY_NODES+sum(sizes)))
+#     self.num_internal_nodes = sum(self.INTERNAL)
 
 if graph_params["graph_type"]["name"] == "stochastic_block_hierarchy":
     raise ValueError("Not implemented yet")
@@ -283,6 +285,7 @@ if args.graph_type == "single_hidden_layer":
         TASK.append("classification")
     else:
         TASK.append("generation")
+        
         
 import os 
 # if not exist make folder trained_models/args.graph_type/
@@ -459,7 +462,16 @@ batch_size = args.batch_size
 input_size = 784  # Flattened MNIST image
 # hidden_size = 32+16  # Number of internal nodes in graph
 
-hidden_size = len(graph.num_internal_nodes)  # Number of internal nodes in graph
+print(graph_params["internal_nodes"] )
+# print(graph.INTERNAL)
+# print(graph.num_internal_nodes)
+
+# if type(graph.num_internal_nodes) == int:
+#     hidden_size = graph.num_internal_nodes
+# if type(graph.num_internal_nodes) == list:
+#     hidden_size = len(graph.num_internal_nodes)  # Number of internal nodes in graph
+
+hidden_size = graph_params["internal_nodes"] 
 output_size = 10  # Number of classes
 
 # Load the raw MNIST dataset
@@ -597,7 +609,10 @@ PCG = PCgraph(f,
 # ) 
 # PCG.set_optimizer(optimizer)
 
-PCG.init_modes(graph=graph)
+        
+
+
+PCG.init_modes(graph_type=args.graph_type, graph=graph)
 
 PCG.set_task(TASK)
 
@@ -716,6 +731,7 @@ with torch.no_grad():
         plt.imshow(w)
         plt.colorbar()
         plt.savefig(f"trained_models/{args.graph_type}/weights/model_{epoch}.png")
+
         plt.close()
 
 

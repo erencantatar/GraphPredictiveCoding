@@ -517,7 +517,9 @@ class PCgraph(torch.nn.Module):
 
         # self.update_mask = self.update_mask_test
 
-    def init_modes(self, graph):
+    def init_modes(self, graph_type, graph):
+        
+        self.graph_type = graph_type
         
         # take first item 
         # batch_example = batch_example[0]
@@ -990,7 +992,8 @@ class PCgraph(torch.nn.Module):
             # Add colorbar (one for all images, linked to the first one)
             cbar = fig.colorbar(ims[0], ax=axs, orientation='vertical', fraction=0.02, pad=0.04)
 
-            plt.savefig(f"trained_models/{self.task}/generated_imgs_{self.epoch}.png")
+            plt.savefig(f"trained_models/{self.graph_type}/generated_imgs_{self.epoch}.png")
+            # plt.savefig(f"trained_models/{self.graph_type}/{self.task}/generated_imgs_{self.epoch}.png")
             plt.close()
 
             print("len of trace_data", len(self.trace_data))
