@@ -1,0 +1,78 @@
+#!/bin/bash
+
+#SBATCH --partition=gpu
+#SBATCH --gpus=1
+#SBATCH --job-name=gen
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=18
+#SBATCH --time=02:00:00
+#SBATCH --output=outputs/fc/slurm_output_%A_gen_.out
+
+module purge
+module load 2022
+module load Anaconda3/2022.05
+
+cd /home/etatar/GraphPredCod2/scr3
+
+source activate PredCod
+# Activated your environment
+
+# experiment 1: own params 
+echo "Running simple training"
+
+echo "----IPC----"
+
+# experiment 1: own params 
+echo "Running simple training"
+
+wandb online 
+
+
+
+srun train.py --model_type IPC --dataset_transform normalize_mnist_mean_std --graph_type single_hidden_layer --discriminative_hidden_layers 0 --generative_hidden_layers 200,200,200 --task generation --update_rules vanZwol_AMB --delta_w_selection all --weight_init "fixed 0.0001 0" --use_grokfast False --optimizer 1 --remove_sens_2_sens True --remove_sens_2_sup False --set_abs_small_w_2_zero False --mode experimenting --use_wandb online --tags PC_vs_IPC --use_bias False --set_abs_small_w_2_zero False --normalize_msg False --numbers_list 0,1,2,3,4,5,6,7,8,9 --N all --supervision_label_val 1 --num_internal_nodes 1000 --T_train 10 --T_test 15 --lr_values 0.01 --lr_weights 0.0001 --activation_func swish --epochs 20 --batch_size 50 --seed 2
+
+
+# # srun python train.py \
+#     --model_type IPC \
+#     --dataset_transform normalize_mnist_mean_std \
+#     --graph_type single_hidden_layer --discriminative_hidden_layers 50,30 --generative_hidden_layers 0 \
+#     --update_rules vanZwol_AMB \
+#     --delta_w_selection all \
+#     --weight_init "normal 0 0.005" \
+#     --use_grokfast False \
+#     --optimizer 1 \
+#     --remove_sens_2_sens True \
+#     --remove_sens_2_sup True \
+#     --set_abs_small_w_2_zero False \
+#     --mode experimenting \
+#     --use_wandb online \
+#     --tags PC_vs_IPC \
+#     --use_bias False \
+#     --set_abs_small_w_2_zero False \
+#     --normalize_msg False \
+#     --numbers_list 0,1,2,3,4,5,6,7,8,9 \
+#     --N all \
+#     --supervision_label_val 1 \
+#     --num_internal_nodes 1000 \
+#     --T 10 \
+#     --lr_values 0.01 \
+#     --lr_weights 0.000001 \
+#     --activation_func swish \
+#     --epochs 20 \
+#     --batch_size 1 \
+#     --seed 2 \
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

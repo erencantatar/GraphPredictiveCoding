@@ -65,11 +65,15 @@ from helper.args import true_with_float, valid_str_or_float, valid_int_or_all, v
 from helper.activation_func import activation_functions
 from graphbuilder import graph_type_options
 
+# allowed_tasks = ['classification', 'generation', 'denoise', 'occlusion']
+allowed_tasks = ['classification', 'generation']
+
 # Parsing command-line arguments
 parser = argparse.ArgumentParser(description='Train a model with specified parameters.')
 
 # Training mode 
 parser.add_argument('--mode', choices=['training', 'experimenting'], required=True,  help="Mode for training the model or testing new features.")
+parser.add_argument('--tasks',nargs='+',choices=allowed_tasks,required=True,help=f"use allChoose one or more tasks from: {allowed_tasks}")
 
 # -----dataset----- 
 #data_dir default --data_dir default to $TMPDIR
@@ -164,7 +168,8 @@ args.set_abs_small_w_2_zero = args.set_abs_small_w_2_zero == 'True'
 args.grokfast = args.use_grokfast == 'True'
 
 tags_list = args.tags.split(",") if args.tags else []
-
+if 'all' in args.tasks:
+    args.tasks = allowed_tasks
 
 
 # Using argparse values
@@ -361,16 +366,21 @@ if graph_params["graph_type"]["name"] in ["single_hidden_layer"]:
 #     graph_params["internal_nodes"] = branch1_internal_nodes + branch2_internal_nodes
 
 
-TASK = []
-if args.graph_type == "fully_connected" or args.graph_type == "stochastic_block":
-    TASK = ["classification", "generation"]
+# TASK = []
+# if args.graph_type == "fully_connected" or args.graph_type == "stochastic_block":
+#     TASK = ["classification", "generation"]
 
-if args.graph_type == "single_hidden_layer":
-    if sum(args.discriminative_hidden_layers) > 0:
-        TASK.append("classification")
-    else:
-        TASK.append("generation")
+# if args.graph_type == "single_hidden_layer":
+#     if sum(args.discriminative_hidden_layers) > 0:
+#         TASK.append("classification")
+#     else:
+#         TASK.append("generation")
         
+
+TASK = args.tasks
+
+print("----------TASK------------------")
+print("TASK", TASK)
         
 import os 
 # if not exist make folder trained_models/args.graph_type/
@@ -805,7 +815,7 @@ model_params = {
     "T": (args.T_train, args.T_test),  # Number of iterations for gradient descent. (T_train, T_test)
 
     "incremental_learning": True if args.model_type == "IPC" else False, 
-    "use_input_error": use_input_error,
+    "use_input_error": False,
 
     "update_rules": args.update_rules,  # "Van_Zwol" or "salvatori", "vectorized"
     "weight_init": args.weight_init,   # xavier, 'uniform', 'based_on_f', 'zero', 'kaiming'
@@ -874,10 +884,10 @@ num_epochs = 40
 # break_num = int(len(train_loader) -1 )
 # break_num = 100
 
-break_num = 1200
-break_num = 200
+# break_num = 1200
+# break_num = 200
 break_num = 100
-# break_num = 50
+# break_num = 30
 
 DEVICE = device 
 
@@ -934,7 +944,7 @@ with torch.no_grad():
         cntr = 0
 
         break_num_eval = 20
-        if TASK == "generation":
+        if "generation" in TASK:
             break_num_eval = 1
         # break_num_eval = 10
             
@@ -954,7 +964,7 @@ with torch.no_grad():
                                             eval_types=[task], remove_label=True)
 
             # do generation once
-            if "generation" in TASK_copy:
+            if "generation" in TASK_copy and "classification" in TASK_copy:
                 TASK_copy = ["classification"]
 
             # print("y_pred", y_pred.shape)
@@ -966,17 +976,18 @@ with torch.no_grad():
 
             if batch_no >= break_num_eval:
                 break
+        
+        if "classification" in TASK:
+            accuracy_mean = (sum(accs) / len(accs)) if accs else 0
+            val_acc.append(accuracy_mean)
 
-        accuracy_mean = sum(accs) / len(accs)
-        val_acc.append(accuracy_mean)
+            print("epoch", epoch, "accuracy_mean", accuracy_mean)
 
-        print("epoch", epoch, "accuracy_mean", accuracy_mean)
-
-        wandb.log({
-            "epoch": epoch,
-            "classification/accuracy_mean": accuracy_mean,
-            "classification/size":  len(accs) * args.batch_size,
-        })
+            wandb.log({
+                "epoch": epoch,
+                "classification/accuracy_mean": accuracy_mean,
+                "classification/size":  len(accs) * args.batch_size,
+            })
 
         # save model weights plt.imshow to "trained_models/{TASK}/weights/model_{epoch}.png"
         # make folder if not exist
