@@ -5,68 +5,156 @@ from torch_geometric.data import Data
 from torch_geometric.loader import DataLoader  # PyG's DataLoader
 
 import matplotlib.pyplot as plt
-
-args = {
-    "model_type": "IPC",
-    "graph_type": "stochastic_block",  # Type of graph
-    "update_rules": "Van_Zwol",  # Update rules for learning
-
-    # "graph_type": "fully_connected",  # Type of graph
-
-    # "graph_type": "single_hidden_layer",  # Type of graph
-    # "discriminative_hidden_layers": [32, 16],  # Hidden layers for discriminative model
-    # "generative_hidden_layers": [0],  # Hidden layers for generative model
-
-    # "discriminative_hidden_layers": [0],  # Hidden layers for discriminative model
-    # "generative_hidden_layers": [100, 50],  # Hidden layers for generative model
+from helper.plot import plot_model_weights, plot_energy_graphs
 
 
-    "delta_w_selection": "all",  # Selection strategy for weight updates
-    "weight_init": "fixed 0.001 0.001",  # Weight initialization method
-    "use_grokfast": True,  # Whether to use GrokFast
-    "optimizer": 1.0,  # Optimizer setting
-    "remove_sens_2_sens": False,  # Remove sensory-to-sensory connections
-    "remove_sens_2_sup": False,  # Remove sensory-to-supervised connections
-    "set_abs_small_w_2_zero": False,  # Set small absolute weights to zero
-    "mode": "experimenting",  # Mode of operation (training/experimenting)
-    "use_wandb": "offline",  # WandB logging mode
-    "tags": "PC_vs_IPC",  # Tags for logging
-    "use_bias": False,  # Whether to use bias
-    "normalize_msg": False,  # Normalize message passing
-    "dataset_transform": ["normalize_mnist_mean_std"],  # Data transformations
-    "numbers_list": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],  # Classes to include
-    "N": "all",  # Number of samples per class
-    "supervision_label_val": 1,  # Value assigned for supervision
-    "num_internal_nodes": 1000,  # Number of internal nodes in the network
-    "T": 5,  # Number of inference iterations
-    "lr_values": 0.01,  # Learning rate for value updates
-    "lr_weights": 0.00001,  # Learning rate for weight updates
-    "activation_func": "swish",  # Activation function
-    "epochs": 10,  # Number of training epochs
-    # "batch_size": 0,  # Batch size for training; fine for discriminative
-    # "batch_size": 50,  # Batch size for training
-    # "batch_size": 200,  # Batch size for training
-    "batch_size": 100,  # Batch size for training
-    "seed": 2,  # Random seed
-}
+# args = {
+#     "model_type": "IPC",
+#     # "graph_type": "stochastic_block",  # Type of graph
+#     "update_rules": "Van_Zwol",  # Update rules for learning
+#     # "graph_type": "fully_connected",  # Type of graph
+#     "graph_type": "single_hidden_layer",  # Type of graph
+#     "discriminative_hidden_layers": [32, 16],  # Hidden layers for discriminative model
+#     "generative_hidden_layers": [0],  # Hidden layers for generative model
+
+#     # "discriminative_hidden_layers": [0],  # Hidden layers for discriminative model
+#     # "generative_hidden_layers": [100, 50],  # Hidden layers for generative model
+
+#     "delta_w_selection": "all",  # Selection strategy for weight updates
+#     "weight_init": "fixed 0.001 0.001",  # Weight initialization method
+#     "use_grokfast": True,  # Whether to use GrokFast
+#     "optimizer": 1.0,  # Optimizer setting
+#     "remove_sens_2_sens": False,  # Remove sensory-to-sensory connections
+#     "remove_sens_2_sup": False,  # Remove sensory-to-supervised connections
+#     "set_abs_small_w_2_zero": False,  # Set small absolute weights to zero
+#     "mode": "experimenting",  # Mode of operation (training/experimenting)
+#     "use_wandb": "online",  # WandB logging mode
+#     "tags": "PC_vs_IPC",  # Tags for logging
+#     "use_bias": False,  # Whether to use bias
+#     "normalize_msg": False,  # Normalize message passing
+#     "dataset_transform": ["normalize_mnist_mean_std"],  # Data transformations
+#     "numbers_list": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],  # Classes to include
+#     "N": "all",  # Number of samples per class
+#     "supervision_label_val": 1,  # Value assigned for supervision
+#     "num_internal_nodes": 500,  # Number of internal nodes in the network
+#     "T": 5,  # Number of inference iterations
+#     "lr_values": 0.01,  # Learning rate for value updates
+#     "lr_weights": 0.00001,  # Learning rate for weight updates
+#     "activation_func": "swish",  # Activation function
+#     "epochs": 10,  # Number of training epochs
+#     # "batch_size": 0,  # Batch size for training; fine for discriminative
+#     # "batch_size": 50,  # Batch size for training
+#     # "batch_size": 200,  # Batch size for training
+#     "batch_size": 100,  # Batch size for training
+#     "seed": 2,  # Random seed
+# }
+
+
+# class Args:
+#     def __init__(self, **entries):
+#         self.__dict__.update(entries)
+
+
+# # Create an object from the dictionary
+# args = Args(**args)
+
+
+import os
+import argparse
+from helper.args import true_with_float, valid_str_or_float, valid_int_or_all, valid_int_list, str2bool, validate_weight_init
+from helper.activation_func import activation_functions
+from graphbuilder import graph_type_options
+
+# Parsing command-line arguments
+parser = argparse.ArgumentParser(description='Train a model with specified parameters.')
+
+# Training mode 
+parser.add_argument('--mode', choices=['training', 'experimenting'], required=True,  help="Mode for training the model or testing new features.")
+
+# -----dataset----- 
+#data_dir default --data_dir default to $TMPDIR
+parser.add_argument('--data_dir', type=str, default='../data', help='Path to the directory to store the dataset. Use $TMPDIR for scratch. or use ../data ')
+
+parser.add_argument('--dataset_transform', nargs='*', default=[], help='List of transformations to apply.', choices=['normalize_min1_plus1', 'normalize_mnist_mean_std', 'random_rotation', 'none', 'None'])
+parser.add_argument('--numbers_list', type=valid_int_list, default=[0, 1, 3, 4, 5, 6, 7], help="A comma-separated list of integers describing which distinct classes we take during training alone")
+parser.add_argument('--N', type=valid_int_or_all, default=20, help="Number of distinct trainig images per class; greater than 0 or the string 'all' for all instances o.")
+
+parser.add_argument('--supervision_label_val', default=10, type=int, required=True, help='An integer value.')
+
+
+## -----graph-----  
+parser.add_argument('--num_internal_nodes', type=int, default=1500, help='Number of internal nodes for fully connected graph. Otherwise, specify the number of internal nodes for other graph types.')
+parser.add_argument('--graph_type', type=str, default="fully_connected", help='Type of Graph', choices=list(graph_type_options.keys()))
+parser.add_argument('--remove_sens_2_sens', type=str2bool, required=True, help='Whether to remove sensory-to-sensory connections.')
+parser.add_argument('--remove_sens_2_sup', type=str2bool, required=True, help='Whether to remove sensory-to-supervised connections.')
+parser.add_argument('--discriminative_hidden_layers', type=valid_int_list, default=None, 
+                    help="Optional: Comma-separated list of integers specifying the number of nodes in each discriminative hidden layer. Only used if graph_type is 'single_hidden_layer'.")
+parser.add_argument('--generative_hidden_layers', type=valid_int_list, default=None, 
+                    help="Optional: Comma-separated list of integers specifying the number of nodes in each generative hidden layer. Only used if graph_type is 'single_hidden_layer'.")
+
+# --MessagePassing--
+parser.add_argument('--normalize_msg', choices=['True', 'False'], required=True,  help='Normalize message passing, expected True or False')
+
+# -----model-----  
+parser.add_argument('--model_type', type=str, default="PC", help='Incremental_learning inside the PC model ', choices=["PC", "IPC"])
+# parser.add_argument("--weight_init", type=str, default="fixed 0.001", help="Initialization method and params for weights")
+parser.add_argument("--weight_init", type=validate_weight_init, default="fixed 0.001", help="Initialization method and params for weights")
+
+parser.add_argument('--use_bias',  choices=['True', 'False'], required=True, help="....")
+parser.add_argument("--bias_init", type=str, default="", required=False, help="ege. fixed 0.0 Initialization method and params for biases")
+
+parser.add_argument('--T_train', type=int, default=5, help='Number of iterations for gradient descent.')
+parser.add_argument('--T_test', type=int, default=10, help='Number of iterations for gradient descent.')
+
+# TODO make T_train and T_test
+# parser.add_argument('--T', type=int, default=40, help='Number of iterations for gradient descent.')
+parser.add_argument('--lr_values', type=float, default=0.5, help='Learning rate values (alpha).')
+parser.add_argument('--lr_weights', type=float, default=0.00001, help='Learning rate weights (gamma).')
+parser.add_argument('--activation_func', default="swish", type=str, choices=list(activation_functions.keys()), required=True, help='Choose an activation function: tanh, relu, leaky_relu, linear, sigmoid, hard_tanh, swish')
+
+# update rules
+# parser str choices "Van_Zwol" or "salvatori", "vectorized"
+parser.add_argument('--update_rules', type=str, default="vanZwol_AMB", choices=["vanZwol_AMB", "MP_AMB"], help="Choose the update rules for the model equations")
+
+parser.add_argument('--delta_w_selection', type=str, required=True, choices=["all", "internal_only"], help="Which weights to optimize in delta_w")
+parser.add_argument('--use_grokfast', type=str, default="False", choices=["True", "False"], help="GroKfast fast and slow weights before using the optimizer")
+
+# -----training----- 
+parser.add_argument('--epochs', type=int, default=5, help='Number of epochs to train.')
+parser.add_argument('--batch_size', type=int, default=1, help='Batch size.')
+parser.add_argument('--seed', type=int, default=42, help='Random seed.')
+parser.add_argument('--optimizer', type=true_with_float, default=False,
+                    help="Either False or, if set to True, requires a float value.")
+
+# ---after training-----
+parser.add_argument('--set_abs_small_w_2_zero',  choices=['True', 'False'], required=True, help="....")
+
+# logging 
+import wandb
+parser.add_argument('--use_wandb', type=str, default="disabled", help='Wandb mode.', choices=['shared', 'online', 'run', 'dryrun', 'offline', 'disabled'])
+parser.add_argument('--tags', type=str, default="", help="Comma-separated tags to add to wandb logging (e.g., 'experiment,PC,test')")
+
+args = parser.parse_args()
+
+# Using argparse values
+torch.manual_seed(args.seed)
+
+generator_seed = torch.Generator()
+generator_seed.manual_seed(args.seed)
+
+# Device configuration
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+print(f'Using device: {device}')
+print(f"Seed used", args.seed)
+if torch.cuda.is_available():
+    print("Device name: ", torch.cuda.get_device_name(0))
+
+
 
 torch.set_default_dtype(torch.float32)  # Ensuring consistent precision
 
 # Use compiled model for speed optimization (if PyTorch 2.0+)
 USE_TORCH_COMPILE = True
-
-
-# Access the arguments just like you would with argparse
-print(args['dataset_transform'])  # Example of accessing an argument
-
-
-class Args:
-    def __init__(self, **entries):
-        self.__dict__.update(entries)
-
-
-# Create an object from the dictionary
-args = Args(**args)
 
 
 # Make True of False bool
@@ -122,9 +210,6 @@ if args.dataset_transform:
     if "random_rotation" in args.dataset_transform:
         transform_list.append(transforms.RandomRotation(degrees=20))
     
-
-
-
 
 # # Create the transform
 print("TODO ADD COMPASE TRANSFORMS")
@@ -305,6 +390,107 @@ graph = GraphBuilder(**graph_params)
 # 🔹 Create Graph Structure (Assuming GraphBuilder is already defined)
 graph = GraphBuilder(**graph_params)
 single_graph = graph.edge_index  # Use the precomputed edge index
+
+
+import wandb 
+optimizer_str = str(args.optimizer) if isinstance(args.optimizer, float) else str(args.optimizer)
+
+model_params_name = (
+    f"{args.model_type}_"
+    f"nodes_{graph_params['internal_nodes']}_" 
+    f"T_{args.T_train}_"
+    f"lr_vals_{args.lr_values}_"
+    f"lr_wts_{args.lr_weights}_"
+    f"bs_{args.batch_size}_"
+    f"act_{args.activation_func}_"
+    f"init_{args.weight_init}_"
+    f"graph_{args.graph_type}_"
+    f"sup_{args.supervision_label_val}_"
+    f"norm_{args.normalize_msg}_"
+    f"nums_{'_'.join(map(str, args.numbers_list))}_"
+    f"N_{args.N}_"
+    f"ep_{args.epochs}_"
+    f"opt_{optimizer_str}_"
+    f"trans_{'_'.join(args.dataset_transform) if args.dataset_transform else 'none'}"
+)
+model_params_name_full = (
+    f"model_{args.model_type}_"
+    f"num_internal_nodes_{graph_params['internal_nodes']}_"
+    f"T_{args.T_train}_"
+    f"lr_values_{args.lr_values}_"
+    f"lr_weights_{args.lr_weights}_"
+    f"batch_size_{args.batch_size}_"
+    f"activation_{args.activation_func}_"
+    f"weight_init_{args.weight_init}_"
+    f"graph_type_{args.graph_type}_"
+    f"supervision_val_{args.supervision_label_val}_"
+    f"normalize_msg_{args.normalize_msg}_"
+    f"numbers_list_{'_'.join(map(str, args.numbers_list))}_"
+    f"N_{args.N}_"
+    f"epochs_{args.epochs}_"
+    f"optimizer_{optimizer_str}_"
+    f"dataset_transform_{'_'.join(args.dataset_transform) if args.dataset_transform else 'none'}"
+)
+model_params_short = f"{args.model_type}_{args.graph_type}_T_{args.T_train}_lr_w_{args.lr_weights}_lr_val_{args.lr_values}"
+
+from datetime import datetime
+date_hour = datetime.now().strftime("%Y-%m-%d_%H_%M_%S")
+path = ""
+# Initialize base path depending on mode (training or experimenting)
+if args.mode == "experimenting":
+    path += f"trained_models_experimenting/"
+elif args.mode == "training":
+    path += f"trained_models/"
+else:
+    raise ValueError("Invalid mode")
+
+path += f"{args.model_type.lower()}/{graph_params['graph_type']['name']}/"
+  
+# Modify the path based on the graph configuration (removing sens2sens or sens2sup)
+if graph_params["graph_type"]["params"]["remove_sens_2_sens"] and graph_params["graph_type"]["params"]["remove_sens_2_sup"]:
+    graph_type_ = "_no_sens2sens_no_sens2sup"
+elif graph_params["graph_type"]["params"]["remove_sens_2_sens"]:
+    graph_type_ = "_no_sens2sens"
+elif graph_params["graph_type"]["params"]["remove_sens_2_sup"]:
+    graph_type_ = "_no_sens2sup"
+else:
+    graph_type_ = "_normal"  # If neither are removed, label the folder as 'normal'
+
+path += graph_type_
+# Append graph type, model parameters, and timestamp to the path
+path += f"/{model_params_name}_{date_hour}/"
+model_dir = path
+
+config_dict = vars(args)  # Convert argparse Namespace to dictionary
+
+config_dict.update({
+    'graph_type_conn': graph_type_,  # Adding model type manually
+    'remove_sens_2_sens_': args.remove_sens_2_sens,  # Custom boolean flag for data augmentation
+    'remove_sens_2_sup_': args.remove_sens_2_sup,  # Custom boolean flag for data augmentation
+    "checkpoint_dir": model_dir,  # Track where model checkpoints are saved
+    **graph_params["graph_type"]["params"],  # Merge dynamic graph parameters
+})
+
+run = wandb.init(
+    mode=args.use_wandb,
+    # entity="Erencan Tatar", 
+    project=f"PredCod",
+    # name=f"T_{args.T}_lr_value_{args.lr_values}_lr_weights_{args.lr_weights}_",
+    name=f"{model_params_short}_{date_hour}",
+    # id=f"{model_params_short}_{date_hour}",
+    tags=tags_list,  # Add tags list here
+
+    dir=model_dir,
+    # tags=["param_search", str(model_params["weight_init"]), model_params["activation"],  *learning_params['dataset_transform']], 
+    # Track hyperparameters and run metadata
+    config=config_dict,  # Pass the updated config dictionary to wandb.init
+)
+
+
+
+
+
+
 
 # from torch_geometric.data import Data
 # from torch_geometric.loader import DataLoader
@@ -495,6 +681,13 @@ val_loader = DataLoader(val_set, batch_size=args.batch_size, shuffle=False, drop
 test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, drop_last=False, num_workers=4, pin_memory=True)
 
 
+# graph_type [FC, generative, discriminative, SBM, (SBM_hierarchy, custom_two_branch, two_branch_graph) ]
+# task       [classification, generation, denoise, occlusion]
+
+
+
+
+
 
 
 print("done dataloader")
@@ -525,7 +718,7 @@ print("done dataloader")
 
 # Inference
 f = "tanh"
-# f = relu
+# f = "relu"
 lr_x = 0.5                  # inference rate                   # inference rate 
 T_train = 5                 # inference time scale
 T_test = 10              # unused for hierarchical model
@@ -547,8 +740,8 @@ lr_w = 0.00001
 # lr_w = 0.00001              # learning rate hierarchial model
 # lr_w = 0.0001      
 
-# # OKAY FOR GENRATION
-# lr_x = 0.5                  # inference rate                   # inference rate 
+# # # OKAY FOR GENRATION
+# # lr_x = 0.5                  # inference rate                   # inference rate 
 # # lr_x = 1                 # inference rate                   # inference rate 
 # T_train = 10                 # inference time scale
 # # T_train = 50                 # inference time scale
@@ -565,8 +758,8 @@ lr_w = 0.00001
 # grad_clip = 1
 # batch_scale = False
 
-lr_x = 0.01                  # inference rate                   # inference rate 
-lr_w = 0.000001              # learning rate hierarchial model
+# lr_x = 0.1                  # inference rate                   # inference rate 
+# lr_w = 0.000001              # learning rate hierarchial model
 
 
 weight_decay = 0             
@@ -585,20 +778,63 @@ print("adj_matrix_pyg", adj_matrix_pyg.shape)
 
 from model import PCgraph
 
-PCG = PCgraph(f,
-        device=device,
-        num_vertices=graph.num_vertices,
-        num_internal=sum(graph.internal_indices),
-        adj=adj_matrix_pyg,
-        edge_index=graph.edge_index,
-        batch_size=batch_size,
-        # mask=mask,
-        learning_rates=(lr_x, lr_w), 
-        T_train=T_train,
-        T_test=T_test,
-        incremental=incremental, 
-        use_input_error=use_input_error,
-        )
+model_params = {
+    "delta_w_selection": args.delta_w_selection,  # "all" or "internal_only"
+    "use_bias": args.use_bias,
+    "lr_params": (args.lr_values, args.lr_weights),
+    #   (args.lr_gamma, args.lr_alpha), 
+    "batch_size": train_loader.batch_size, 
+ 
+ }
+
+
+
+model_params = {
+    "activation": args.activation_func,  
+    "device": device,
+    "num_vertices": graph.num_vertices,
+    "num_internal": sum(graph.internal_indices),
+    "adj": adj_matrix_pyg,             # 2d Adjacency matrix
+    "edge_index": graph.edge_index,    # [2, num_edges] edge index
+    "batch_size": batch_size,
+    # "mask": mask,
+    # "learning_rates": (lr_x, lr_w),
+    "learning_rates": (args.lr_values, args.lr_weights),
+    # "T_train": T_train,
+    # "T_test": T_test,
+    "T": (args.T_train, args.T_test),  # Number of iterations for gradient descent. (T_train, T_test)
+
+    "incremental_learning": True if args.model_type == "IPC" else False, 
+    "use_input_error": use_input_error,
+
+    "update_rules": args.update_rules,  # "Van_Zwol" or "salvatori", "vectorized"
+    "weight_init": args.weight_init,   # xavier, 'uniform', 'based_on_f', 'zero', 'kaiming'
+
+    # "edge_type":  custom_dataset_train.edge_type,
+    # "use_learning_optimizer": use_learning_optimizer,    # False or [0], [(weight_decay=)]
+    # "use_grokfast": args.grokfast,  # False or True
+    # "clamping": None , # (0, torch.inf) or 'None'
+}
+
+PCG = PCgraph(**model_params, 
+                wandb_logging=run if args.use_wandb in ['online', 'run'] else None,
+                debug=False)
+
+
+# PCG = PCgraph(f,
+#         device=device,
+#         num_vertices=graph.num_vertices,
+#         num_internal=sum(graph.internal_indices),
+#         adj=adj_matrix_pyg,
+#         edge_index=graph.edge_index,
+#         batch_size=batch_size,
+#         # mask=mask,
+#         learning_rates=(lr_x, lr_w), 
+#         T_train=T_train,
+#         T_test=T_test,
+#         incremental=incremental, 
+#         use_input_error=use_input_error,
+#         )
 
 # optimizer = Adam(
 #     PCG.params,
@@ -609,20 +845,17 @@ PCG = PCgraph(f,
 # ) 
 # PCG.set_optimizer(optimizer)
 
-        
-
-
 PCG.init_modes(graph_type=args.graph_type, graph=graph)
-
 PCG.set_task(TASK)
 
 model = PCG
+
+plot_model_weights(model, args.graph_type, model_dir=None, save_wandb="before_training")
+
+print("------------- compile model ------------- ")
 # model = torch.compile(model, disable=True) 
 # torch.compile(model, dynamic=True)
 model = torch.compile(model, mode="max-autotune")
-
-
-
 model.task = ""   # classification or generation, or both 
 
 from datetime import datetime
@@ -644,9 +877,18 @@ num_epochs = 40
 break_num = 1200
 break_num = 200
 break_num = 100
-# break_num = 30
+# break_num = 50
 
 DEVICE = device 
+
+
+
+TASKs = {
+    "classification": 
+        {"batch_break": 100, "wandb": eval_classification},
+}
+
+
 
 with torch.no_grad():
 
@@ -672,8 +914,16 @@ with torch.no_grad():
             history = model.train_supervised(X_batch)  # history is [..., ...]
             # history = model.train_supervised(batch)  # history is [..., ...]
             # append all items in history to epoch_history
-            for item in history:
-                epoch_history.append(item)
+            # for energy in history:
+            #     epoch_history.append(energy)
+
+            #     wandb.log({
+            #         "epoch": epoch,
+            #         "Training/internal_energy_mean": energy,
+            #         # "Training/sensory_energy_mean": history_epoch["sensory_energy_mean"],
+
+            #     })
+
 
             if batch_no >= break_num:
                 break
@@ -683,10 +933,10 @@ with torch.no_grad():
         model.test_()
         cntr = 0
 
-        # break_num_eval = 20
-        # if TASK == "generation":
-        #     break_num_eval = 1
-        break_num_eval = 10
+        break_num_eval = 20
+        if TASK == "generation":
+            break_num_eval = 1
+        # break_num_eval = 10
             
         print("\n----test_iterative-----")
         accs = []
@@ -710,14 +960,23 @@ with torch.no_grad():
             # print("y_pred", y_pred.shape)
             # print("y_pred", y_batch.shape)
             if "classification" in TASK_copy:
-                correct = torch.mean((y_pred == y_batch).float()).item()
-                acc += correct
-                accs.append(correct)
+                mean_correct = torch.mean((y_pred == y_batch).float()).item()
+                acc += mean_correct
+                accs.append(mean_correct)
 
-            cntr += 1
             if batch_no >= break_num_eval:
                 break
 
+        accuracy_mean = sum(accs) / len(accs)
+        val_acc.append(accuracy_mean)
+
+        print("epoch", epoch, "accuracy_mean", accuracy_mean)
+
+        wandb.log({
+            "epoch": epoch,
+            "classification/accuracy_mean": accuracy_mean,
+            "classification/size":  len(accs) * args.batch_size,
+        })
 
         # save model weights plt.imshow to "trained_models/{TASK}/weights/model_{epoch}.png"
         # make folder if not exist
@@ -725,44 +984,44 @@ with torch.no_grad():
         if not os.path.exists(f"trained_models/{args.graph_type}/weights/"):
             os.makedirs(f"trained_models/{args.graph_type}/weights/")
         
-        # save weights
-        w = PCG.w.detach().cpu().numpy()
-        print("mean w", w.mean())
-        plt.imshow(w)
-        plt.colorbar()
-        plt.savefig(f"trained_models/{args.graph_type}/weights/model_{epoch}.png")
+        if epoch % 10 == 0:
+            plot_model_weights(model, args.graph_type, model_dir=None, save_wandb=str(epoch))
 
-        plt.close()
+        # # save weights
+        # w = PCG.w.detach().cpu().numpy()
+        # print("mean w", w.mean())
+        # plt.imshow(w)
+        # plt.colorbar()
+        # plt.savefig(f"trained_models/{args.graph_type}/weights/model_{epoch}.png")
+        # plt.close()
 
 
-
-
-        if "classification" in TASK:
+        # if "classification" in TASK:
             
-            # Corrected validation accuracy calculations
-            val_acc.append(acc / len(val_loader))
-            val_acc2.append(acc / cntr)
-            val_loss.append(loss)
+        #     # Corrected validation accuracy calculations
+        #     val_acc.append(acc / len(val_loader))
+        #     val_acc2.append(acc / cntr)
+        #     val_loss.append(loss)
 
         
-            print("val_acc2", val_acc2)
-            print("Last prediction:", y_pred)
-            print("Last y_batch:", y_batch)
-            print("accs", accs)
-            print("accs", sum(accs) / len(accs))
+        #     print("val_acc2", val_acc2)
+        #     print("Last prediction:", y_pred)
+        #     print("Last y_batch:", y_batch)
+        #     print("accs", accs)
+        #     print("accs", sum(accs) / len(accs))
 
-            print(f"\nEpoch {epoch+1}/{num_epochs} Completed")
-            print(f"  Validation Accuracy: {val_acc[-1]:.3f}")
-            print(f"  Validation Accuracy (limited): {val_acc2[-1]:.3f}")
+        #     print(f"\nEpoch {epoch+1}/{num_epochs} Completed")
+        #     print(f"  Validation Accuracy: {val_acc[-1]:.3f}")
+        #     print(f"  Validation Accuracy (limited): {val_acc2[-1]:.3f}")
 
 
         # plot history of energy
-        import matplotlib.pyplot as plt
-        print("epoch_history", len(epoch_history))
-        plt.plot(epoch_history)
+        # import matplotlib.pyplot as plt
+        # print("epoch_history", len(epoch_history))
+        # plt.plot(epoch_history)
 
-        plt.savefig(f"trained_models/{args.graph_type}/energy_history.png")
-        plt.close()
+        # plt.savefig(f"trained_models/{args.graph_type}/energy_history.png")
+        # plt.close()
 
 
 

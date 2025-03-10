@@ -16,7 +16,7 @@ import torch
 from torch_geometric.nn import MessagePassing
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
-
+import wandb 
 
 start_time = datetime.now()
 dt_string = start_time.strftime("%Y%m%d-%H.%M")
@@ -35,54 +35,60 @@ else:
 #########################################################
 # ACTIVATION FUNCTIONS
 #########################################################
-relu = torch.nn.ReLU()
-tanh = torch.nn.Tanh()
-sigmoid = torch.nn.Sigmoid()
-silu = torch.nn.SiLU()
-linear = torch.nn.Identity()
-leaky_relu = torch.nn.LeakyReLU()
 
-@torch.jit.script
-def sigmoid_derivative(x):
-    return torch.exp(-x)/((1.+torch.exp(-x))**2)
-
-@torch.jit.script
-def relu_derivative(x):
-    return torch.heaviside(x, torch.tensor(0.))
-
-@torch.jit.script
-def tanh_derivative(x):
-    return 1-tanh(x)**2
-
-@torch.jit.script
-def silu_derivative(x):
-    return silu(x) + torch.sigmoid(x)*(1.0-silu(x))
-
-@torch.jit.script
-def leaky_relu_derivative(x):
-    return torch.where(x > 0, torch.tensor(1.), torch.tensor(0.01))
-
-def get_derivative(f):
+# NEW 
+from helper.activation_func import set_activation
 
 
-    print("f", f)
+# OLD 
+# relu = torch.nn.ReLU()
+# tanh = torch.nn.Tanh()
+# sigmoid = torch.nn.Sigmoid()
+# silu = torch.nn.SiLU()
+# linear = torch.nn.Identity()
+# leaky_relu = torch.nn.LeakyReLU()
 
-    if f == "sigmoid":
-        f, f_prime = sigmoid, sigmoid_derivative
-    elif f == "relu":
-        f, f_prime = relu, relu_derivative
-    elif f == "tanh":
-        f, f_prime = tanh, tanh_derivative
-    elif f == "silu":
-        f, f_prime = silu, silu_derivative
-    elif f == "linear":
-        f, f_prime = 1, 1
-    elif f == "leaky_relu":
-        f, f_prime = leaky_relu, leaky_relu_derivative
-    else:
-        raise NotImplementedError(f"Derivative of {f} not implemented")
+# @torch.jit.script
+# def sigmoid_derivative(x):
+#     return torch.exp(-x)/((1.+torch.exp(-x))**2)
 
-    return f, f_prime
+# @torch.jit.script
+# def relu_derivative(x):
+#     return torch.heaviside(x, torch.tensor(0.))
+
+# @torch.jit.script
+# def tanh_derivative(x):
+#     return 1-tanh(x)**2
+
+# @torch.jit.script
+# def silu_derivative(x):
+#     return silu(x) + torch.sigmoid(x)*(1.0-silu(x))
+
+# @torch.jit.script
+# def leaky_relu_derivative(x):
+#     return torch.where(x > 0, torch.tensor(1.), torch.tensor(0.01))
+
+# def get_derivative(f):
+
+
+#     print("f", f)
+
+#     if f == "sigmoid":
+#         f, f_prime = sigmoid, sigmoid_derivative
+#     elif f == "relu":
+#         f, f_prime = relu, relu_derivative
+#     elif f == "tanh":
+#         f, f_prime = tanh, tanh_derivative
+#     elif f == "silu":
+#         f, f_prime = silu, silu_derivative
+#     elif f == "linear":
+#         f, f_prime = 1, 1
+#     elif f == "leaky_relu":
+#         f, f_prime = leaky_relu, leaky_relu_derivative
+#     else:
+#         raise NotImplementedError(f"Derivative of {f} not implemented")
+
+#     return f, f_prime
 
 # Message passing layer
 class PredictionMessagePassing(MessagePassing):
@@ -236,9 +242,15 @@ class MP_AMB(UpdateRule):
     
         return dEdx
 
+
+
 class PCgraph(torch.nn.Module): 
 
-    def __init__(self, f, device, num_vertices, num_internal, adj, edge_index, batch_size, learning_rates, T_train, T_test, incremental, use_input_error, node_init_std=None, min_delta=None, early_stop=None):
+    def __init__(self, activation, device, num_vertices, num_internal, adj, edge_index,
+                    batch_size, learning_rates, T, incremental_learning, use_input_error,
+                    update_rules, weight_init, 
+                    early_stop=None, edge_type=None, use_learning_optimizer=None, use_grokfast=None, clamping=None,
+                    wandb_logging=None, debug=False, **kwargs):
         super().__init__()
 
         self.device = device
@@ -250,35 +262,34 @@ class PCgraph(torch.nn.Module):
         # self.edge_index = torch_geometric.utils.dense_to_sparse(adj)[0]
 
         self.edge_index = edge_index.to(self.device)  # PYG edge_index
+        self.edge_index_single_graph = edge_index
 
         self.lr_x, self.lr_w = learning_rates 
-        self.T_train = T_train
-        self.T_test = T_test
-        self.node_init_std = node_init_std
-        self.incremental = incremental 
-        self.min_delta = min_delta
-        self.early_stop = early_stop
+        self.T_train, self.T_test = T 
+        self.incremental = incremental_learning 
+        # self.early_stop = early_stop
 
         self.epoch = 0 
         self.batch_size = batch_size  # Number of graphs in the batch
 
-        self.f, self.dfdx = get_derivative(f)
+        self.f, self.dfdx = set_activation(activation)            
+        # self.f, self.dfdx = get_derivative(activation)
+
         self.use_input_error = use_input_error
         self.trace = False 
 
         # self.w = nn.Parameter(torch.empty(num_vertices, num_vertices, device=self.device))
         # self.b = nn.Parameter(torch.empty(num_vertices, device=self.device))
         self.device = device 
-
-        
-        # print("edge_index: ", edge_index)
-        # print("self.edge_index: ", self.edge_index)
-        # assert self.edge_index == edge_index        
         
         # assert torch.all(self.edge_index == edge_index)
 
         self.adj = torch.tensor(adj).to(DEVICE)
         self.mask = self.adj
+
+        self.update_rules = update_rules 
+        self.weight_init  = weight_init  
+        self.wandb_logging = wandb_logging
         
         self._reset_grad()
         self._reset_params()
@@ -290,31 +301,30 @@ class PCgraph(torch.nn.Module):
         #                                 f_prime=self.structure.dfdx)
 
         # update_rule = "vanZwol_AMB"
-        update_rule = "MP_AMB"
+        # update_rule = "MP_AMB"
+     
 
-
-        if update_rule in ["vectorized", "vanZwol_AMB"]:
+        if self.update_rules in ["vectorized", "vanZwol_AMB"]:
             print("--------------Using vanZwol_AMB------------")
             self.reshape = True
-            self.updates = vanZwol_AMB(update_type=update_rule, batch_size=self.batch_size, f=self.f, dfdx=self.dfdx)
-        elif update_rule in ["MP", "MP_AMB"]:
+            self.updates = vanZwol_AMB(update_type=self.update_rules, batch_size=self.batch_size, f=self.f, dfdx=self.dfdx)
+        elif self.update_rules in ["MP", "MP_AMB"]:
             print("-------Using MP_AMB-------------")
             self.reshape = False
 
-            print("self.edge_index", self.edge_index.shape)
+            # print("self.edge_index", self.edge_index.shape)
             self.batched_edge_index = torch.cat(
                 [self.edge_index + i * self.num_vertices for i in range(self.batch_size)], dim=1
             )       
-            print("self.batched_edge_index", self.batched_edge_index.shape)
-            print("batch size", self.batch_size)
+            # print("self.batched_edge_index", self.batched_edge_index.shape)
+            # print("batch size", self.batch_size)
     
-            self.updates = MP_AMB(update_type=update_rule, batch_size=self.batch_size, 
+            self.updates = MP_AMB(update_type=self.update_rules, batch_size=self.batch_size, 
                                   edge_index=self.edge_index, 
                                   batched_edge_index=self.batched_edge_index,
                                   f=self.f, dfdx=self.dfdx)
-            
         else:
-            raise ValueError(f"Invalid update rule: {update_rule}")
+            raise ValueError(f"Invalid update rule: {self.update_rules}")
 
 
         self.mode = "train"
@@ -359,27 +369,60 @@ class PCgraph(torch.nn.Module):
     def _reset_params(self):
 
         self.w = torch.nn.Parameter(torch.empty(self.num_vertices, self.num_vertices, device=DEVICE))
-        # self.w = torch.empty( self.num_vertices, self.num_vertices, device=DEVICE)
-       
-        # best for Classification
-        nn.init.normal_(self.w, mean=0, std=0.05)  
-        # # 
+        # self.weights = torch.nn.Parameter(torch.zeros(self.edge_index_single_graph.size(1), device=self.device, requires_grad=True))
 
-        # trying for generation
+        # Weight initialization
+        init_type, m, std_val = self.weight_init.split()
 
-        # # # BEST FOR GENERATION
-        self.w.data.fill_(0.001)
-        # self.w.data.fill_(0.0001)
-        # Add small random noise
-        noise = torch.randn_like(self.w) * 0.0001
-        self.w.data.add_(noise)
+        # Convert parsed values to appropriate types
+        m = float(m)
+        std_val = float(std_val)
+
+
+        # init_type = "type" "mean" "std"
+        # normal 0.001 0.02
+        # fixed  0.001 0   
+        # fixed  0.001 0.005
+        # if not params, set to default values (mean = 0.0, std = 0.02)
+
+        if init_type == "normal":
+            # mean = float(params[0]) if params else 0.0
+            # std_val = 0.02 # 2% 
+            # std = max(0.01, abs(mean) * std_val)  # Set std to std_val% of mean or 0.01 minimum
+            # nn.init.normal_(self.weights, mean=mean, std=std)
+
+            # Because of: Predictive Coding Networks and Inference Learning: Tutorial and Survey
+
+            nn.init.normal_(self.w, mean=m, std=std_val)   
+            
+        elif init_type == "uniform" or init_type == "nn.linear":
+            import math
+            k = 1 / math.sqrt(self.num_vertices)
+            nn.init.uniform_(self.w, -k, k)
+        elif init_type == "fixed":
+            value = float(m) if m else 0.1
+            self.w.data.fill_(value)
+
+
+            # noise_std = 0.005  # Standard deviation of the noise
+            # noise_std = 0  # Standard deviation of the noise
+
+            # Fill with fixed value
+            # self.weights.data.fill_(value)
+
+            # Add small random noise
+            noise = torch.randn_like(self.w) * std_val
+            self.w.data.add_(noise)
+
         
 
         # Perform the operation and reassign self.w as a Parameter
         with torch.no_grad():
             self.w.copy_(self.adj * self.w)
 
-        # self.w = self.adj * self.w 
+
+        # self.values_dummy = torch.nn.Parameter(torch.zeros(self.batch_size * self.num_vertices, device=self.device), requires_grad=True) # requires_grad=False)                
+
 
 
         ## -------------------------------------------------
@@ -427,7 +470,7 @@ class PCgraph(torch.nn.Module):
         # plt.close()
 
         ## -------------------------------------------------
-        self.b = torch.empty( self.num_vertices, device=DEVICE)
+        # self.b = torch.empty( self.num_vertices, device=DEVICE)
         # if self.structure.use_bias:
         #     self.bias_init(self.b)
 
@@ -715,6 +758,10 @@ class PCgraph(torch.nn.Module):
             
 
             if self.reshape:
+                # BEFORE using use_input_error
+                total_sensor_error = torch.mean(self.errors[:,:di]**2).item()
+                total_internal_error = torch.mean(self.errors**2).item()
+
                 if not self.use_input_error:
                     if self.task == "classification":
                         self.errors[:,:di] = 0 
@@ -723,8 +770,6 @@ class PCgraph(torch.nn.Module):
                         # self.errors[:,di:upper] = 0
 
                 # print("self.errors", self.errors.shape)
-
-                self.history.append(torch.sum(self.errors**2).item())
                 # self.history.append(self.errors.cpu().mean().numpy()**2)
             else:
 
@@ -735,10 +780,25 @@ class PCgraph(torch.nn.Module):
                         self.errors[self.supervised_labels_batch] = 0
                         # self.errors[self.sensory_indices_batch] = 0
 
-                total_internal_error = (self.errors[self.internal_indices_batch]**2).mean()
-                self.history.append(total_internal_error.cpu().numpy())
+                total_sensor_error   = (self.errors[self.sensory_indices_batch]**2).mean().cpu().numpy()
+                total_internal_error = (self.errors[self.internal_indices_batch]**2).mean().cpu().numpy()
+                # self.history.append(total_internal_error)
 
-            
+            if self.wandb_logging:
+                if train:
+                    wandb.log({
+                                "epoch": self.epoch,
+                                "Training/internal_energy_mean": total_internal_error,
+                                "Training/sensory_energy_mean": total_sensor_error,
+                                })
+                else:
+                    wandb.log({
+                                "epoch": self.epoch,
+                                "Validation/internal_energy_mean": total_internal_error,
+                                "Validation/sensory_energy_mean": total_sensor_error,
+                                })
+                    
+            #             
             # x = self.x.T.contiguous().view(-1, 1).to(DEVICE)  # Shape: [num_nodes, batch_size]
             # error = self.e.T.contiguous().view(-1, 1).to(DEVICE)  # Shape: [num_nodes, batch_size]
             
@@ -890,7 +950,7 @@ class PCgraph(torch.nn.Module):
     
 
 
-    def test_generative(self, data, labels, remove_label=True, save_imgs=False):
+    def test_generative(self, data, labels, remove_label=True, save_imgs=False, wandb_logging=False):
         
         print("self.reshape", self.reshape)
         # remove one_hot
@@ -975,7 +1035,7 @@ class PCgraph(torch.nn.Module):
         generated_imgs = torch.nan_to_num(generated_imgs, nan=0.0)
 
         # save img inside 1 big plt imshow plot; take first 10 images
-        if save_imgs:
+        if save_imgs or wandb_logging:
 
             fig, axs = plt.subplots(1, 10, figsize=(20, 2))
 
@@ -992,24 +1052,27 @@ class PCgraph(torch.nn.Module):
             # Add colorbar (one for all images, linked to the first one)
             cbar = fig.colorbar(ims[0], ax=axs, orientation='vertical', fraction=0.02, pad=0.04)
 
-            plt.savefig(f"trained_models/{self.graph_type}/generated_imgs_{self.epoch}.png")
-            # plt.savefig(f"trained_models/{self.graph_type}/{self.task}/generated_imgs_{self.epoch}.png")
-            plt.close()
-
-            print("len of trace_data", len(self.trace_data))
-            # plot self.trace_data
-            if self.trace:
-                fig, axs = plt.subplots(1, self.T_test, figsize=(20, 2))
-                for i in range(len(self.trace_data)):
-                    axs[i].imshow(self.trace_data[i])
-                    axs[i].axis("off")
-                    axs[i].set_title(labels[self.epoch].item())
-
-                # plt.show()
-                # save 
-                plt.savefig(f"trained_models/{self.task}/trace_data_{self.epoch}.png")
+            if save_imgs:
+                plt.savefig(f"trained_models/{self.graph_type}/generated_imgs_{self.epoch}.png")
+                # plt.savefig(f"trained_models/{self.graph_type}/{self.task}/generated_imgs_{self.epoch}.png")
                 plt.close()
-            
+
+                print("len of trace_data", len(self.trace_data))
+                # plot self.trace_data
+                if self.trace:
+                    fig, axs = plt.subplots(1, self.T_test, figsize=(20, 2))
+                    for i in range(len(self.trace_data)):
+                        axs[i].imshow(self.trace_data[i])
+                        axs[i].axis("off")
+                        axs[i].set_title(labels[self.epoch].item())
+
+                    # plt.show()
+                    # save 
+                    plt.savefig(f"trained_models/{self.task}/trace_data_{self.epoch}.png")
+                    plt.close()
+
+            if wandb_logging:
+                wandb.log({f"Generation/Generated_Images_{self.epoch}": [wandb.Image(generated_imgs, caption="Generated Images")]})
        
         return 0
     
@@ -1037,7 +1100,7 @@ class PCgraph(torch.nn.Module):
 
             self.test_generative(graph.clone().to(self.device), 
                                  label.clone().to(self.device),
-                                 remove_label=remove_label, save_imgs=True)
+                                 remove_label=remove_label, save_imgs=False, wandb_logging=True)
             
             return 0 # Placeholder ""
         else:

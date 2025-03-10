@@ -704,7 +704,6 @@ print(f"Using batch size of \t: {train_loader.batch_size}")
 print("Device \t\t\t:",          device)
 print("Model type", args.model_type.lower())
 
-
 model = PCGNN(**model_params,   
     log_tensorboard=False,
     wandb_logger=run if args.use_wandb in ['online', 'run'] else None,
