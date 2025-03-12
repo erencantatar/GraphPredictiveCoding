@@ -800,6 +800,10 @@ model_params = {
 
 
 model_params = {
+
+    "graph_type": args.graph_type,
+    "task": TASK,
+
     "activation": args.activation_func,  
     "device": device,
     "num_vertices": graph.num_vertices,
@@ -893,7 +897,7 @@ DEVICE = device
 
 
 
-TASKs = {
+TASK_config = {
     "classification": 
         {"batch_break": 100, "wandb": eval_classification},
 }

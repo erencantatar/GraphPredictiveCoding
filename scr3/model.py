@@ -246,7 +246,7 @@ class MP_AMB(UpdateRule):
 
 class PCgraph(torch.nn.Module): 
 
-    def __init__(self, activation, device, num_vertices, num_internal, adj, edge_index,
+    def __init__(self, graph_type, task, activation, device, num_vertices, num_internal, adj, edge_index,
                     batch_size, learning_rates, T, incremental_learning, use_input_error,
                     update_rules, weight_init, 
                     early_stop=None, edge_type=None, use_learning_optimizer=None, use_grokfast=None, clamping=None,
@@ -265,6 +265,8 @@ class PCgraph(torch.nn.Module):
         self.edge_index_single_graph = edge_index
 
         self.lr_x, self.lr_w = learning_rates 
+        self.lr_values, self.lr_weights = learning_rates
+        
         self.T_train, self.T_test = T 
         self.incremental = incremental_learning 
         # self.early_stop = early_stop
@@ -291,18 +293,6 @@ class PCgraph(torch.nn.Module):
         self.weight_init  = weight_init  
         self.wandb_logging = wandb_logging
         
-        self._reset_grad()
-        self._reset_params()
-
-        self.optimizer_w = torch.optim.Adam([self.w], lr=self.lr_w, betas=(0.9, 0.999), eps=1e-7, weight_decay=0)
-
-
-        # self.MP = PredictiveCodingLayer(f=self.structure.f, 
-        #                                 f_prime=self.structure.dfdx)
-
-        # update_rule = "vanZwol_AMB"
-        # update_rule = "MP_AMB"
-     
 
         if self.update_rules in ["vectorized", "vanZwol_AMB"]:
             print("--------------Using vanZwol_AMB------------")
@@ -329,6 +319,41 @@ class PCgraph(torch.nn.Module):
 
         self.mode = "train"
         self.use_bias = False
+
+
+        self._reset_grad()
+        self._reset_params()
+
+
+        self.use_learning_optimizer = use_learning_optimizer
+        self.use_grokfast = use_grokfast    
+
+        self.optimizer_weights = torch.optim.Adam([self.w], lr=self.lr_w, betas=(0.9, 0.999), eps=1e-7, weight_decay=0)
+        self.optimizer_values = torch.optim.Adam([self.values_dummy], lr=self.lr_x, betas=(0.9, 0.999), eps=1e-7, weight_decay=0)
+
+        if self.use_learning_optimizer:
+
+            # self.optimizer_weights = torch.optim.Adam([self.w], lr=self.lr_w, betas=(0.9, 0.999), eps=1e-7, weight_decay=0)
+            # self.optimizer_values = torch.optim.Adam([self.values_dummy], lr=self.lr_x, betas=(0.9, 0.999), eps=1e-7, weight_decay=0)
+
+            # self.optimizer_weights = torch.optim.AdamW([self.weights], lr=self.lr_weights, weight_decay=weight_decay)      
+            # # self.optimizer_weights = torch.optim.Adam([self.weights], lr=self.lr_weights, weight_decay=weight_decay)      
+            # self.optimizer_values = torch.optim.SGD([self.values_dummy], lr=self.lr_values, momentum=0, weight_decay=weight_decay, nesterov=False) # nestrov only for momentum > 0
+
+            self.w.grad = torch.zeros_like(self.weights)
+            self.values_dummy.grad = torch.zeros_like(self.values_dummy)
+
+            # self.lr_scheduler = False        
+            # if self.lr_scheduler:
+            #     self.scheduler_weights = torch.optim.lr_scheduler.ReduceLROnPlateau(self.optimizer_weights, mode='min', patience=10, factor=0.1)
+
+
+        # self.MP = PredictiveCodingLayer(f=self.structure.f, 
+        #                                 f_prime=self.structure.dfdx)
+
+        # update_rule = "vanZwol_AMB"
+        # update_rule = "MP_AMB"
+     
 
         self.test_supervised = self.test_iterative
 
@@ -368,6 +393,7 @@ class PCgraph(torch.nn.Module):
         
     def _reset_params(self):
 
+        #### WEIGHT INITIALIZATION ####
         self.w = torch.nn.Parameter(torch.empty(self.num_vertices, self.num_vertices, device=DEVICE))
         # self.weights = torch.nn.Parameter(torch.zeros(self.edge_index_single_graph.size(1), device=self.device, requires_grad=True))
 
@@ -420,10 +446,11 @@ class PCgraph(torch.nn.Module):
         with torch.no_grad():
             self.w.copy_(self.adj * self.w)
 
-
-        # self.values_dummy = torch.nn.Parameter(torch.zeros(self.batch_size * self.num_vertices, device=self.device), requires_grad=True) # requires_grad=False)                
-
-
+        ######## VALUE OPTIMIZATION ########
+        if self.reshape:
+            self.values_dummy = torch.nn.Parameter(torch.zeros(self.batch_size, self.num_vertices, device=self.device), requires_grad=True) # requires_grad=False)                
+        else:
+            self.values_dummy = torch.nn.Parameter(torch.zeros(self.batch_size * self.num_vertices, 1, device=self.device), requires_grad=True)
 
         ## -------------------------------------------------
 
@@ -673,6 +700,112 @@ class PCgraph(torch.nn.Module):
     #     filtered_edge_index = batched_edge_index[:, mask]
     #     filtered_weights = batched_weights[mask]
     #     pass
+
+
+    def gradient_descent_update(self, grad_type, parameter, delta, learning_rate, nodes_or_edge2_update, 
+                                optimizer=None, use_optimizer=False):
+        
+        self.use_grokfast = False 
+
+        if grad_type == "weights" and self.use_grokfast:
+            param_type = "weights"
+            
+            # assert 
+                # Collect parameters explicitly
+            params = {"weights": self.weights}
+
+            # if self.grokfast_type == 'ema':
+                
+            #     # python main_mnist.py --label test --alpha 0.8 --lamb 0.1 --weight_decay 2.0
+            #     final_grad, self.avg_grad = gradfilter_ema_adjust(delta, self.avg_grad, alpha=0.8, lamb=0.1)
+            #     delta = final_grad  # Replace gradient with modified version
+
+            #     # # Call the gradfilter_ema function
+            #     # self.grads = gradfilter_ema(grads=self.grads, params=params, alpha=0.8, lamb=0.1)
+
+
+            #     # self.grads[grad_type] = gradfilter_ema(self, grads=self.grads[grad_type], alpha=0.8, lamb=0.1)
+            # elif self.grokfast_type == 'ma':
+            #     self.grads[grad_type] = gradfilter_ma(self, grads=self.grads[grad_type], window_size=100, lamb=5.0, filter_type='mean')
+
+        # ---------------------------------------------------------------------------- 
+
+
+
+        if use_optimizer and optimizer:
+            # Clear 
+            optimizer.zero_grad()
+            if parameter.grad is None:
+                parameter.grad = torch.zeros_like(parameter)
+            else:
+                parameter.grad.zero_()  # Reset the gradients to zero
+
+
+            # Apply the delta to the parameter
+            if self.delta_w_selection == "all":
+                parameter.grad = -delta.detach().clone()  # Apply full delta to the parameter
+            else:
+                
+                if grad_type == "weights" and self.update_rules == "Van_Zwol":
+
+                    # delta[784:-10, 784:-10] = 0
+                    # parameter.grad.data[784:-10, 784:-10] = 0
+                    # delta = delta * self.adj
+                    parameter.grad = -delta  # Update only specific nodes
+                    # parameter.grad = delta  # Update only specific nodes
+
+                else:
+                    parameter.grad[nodes_or_edge2_update] = -delta[nodes_or_edge2_update].detach().clone()  # Update only specific nodes
+        
+            # perform optimizer weight update step
+            optimizer.step()
+
+        else:
+            # Manually update the parameter using gradient descent
+            if self.delta_w_selection == "all":
+            # if nodes_or_edge2_update == "all": ### BUG ### 
+                parameter.data += learning_rate * delta
+            else:
+                
+                # print shapes
+                if grad_type == "weights" and self.update_rules == "Van_Zwol":
+
+                    parameter.data += learning_rate * delta
+                else:
+                    
+                    parameter.data[nodes_or_edge2_update] += learning_rate * delta[nodes_or_edge2_update]
+                
+    def get_trace(self, trace=False):
+           
+        if self.trace or trace:
+            if self.reshape:
+                # OLD:
+                # x_batch = self.values[:, 0:784].cpu().detach().numpy()
+                
+                # ✅ NEW: Use actual current batch size
+                current_batch_size = self.values.shape[0]
+
+                x_batch = self.values[:, 0:784].cpu().detach().numpy()
+
+                # ✅ Reshape to [current_batch_size, 28, 28]
+                x_batch = x_batch.reshape(current_batch_size, 28, 28)
+
+                self.trace_data.append(x_batch)
+                
+            else:
+                # Same for non-reshape cases
+                current_batch_size = self.values.shape[0] // self.num_vertices
+                # print("current_batch_size", current_batch_size)
+                # print("self.num_vertices", self.num_vertices)
+                # print("self.values", self.values.shape)
+
+                x_batch = self.values.view(current_batch_size, self.num_vertices)
+                x_batch = x_batch[:, 0:784].cpu().detach().numpy()
+
+                x_batch = x_batch.reshape(current_batch_size, 28, 28)
+
+                self.trace_data.append(x_batch)
+
         
 
     def update_xs(self, train=True, trace=False):
@@ -688,39 +821,12 @@ class PCgraph(torch.nn.Module):
         di = 784
         upper = -10 if train else self.num_vertices
         
+
+
+
         for t in range(T): 
-            
-            if self.trace or trace:
-                if self.reshape:
-                    # OLD:
-                    # x_batch = self.values[:, 0:784].cpu().detach().numpy()
-                    
-                    # ✅ NEW: Use actual current batch size
-                    current_batch_size = self.values.shape[0]
-
-                    x_batch = self.values[:, 0:784].cpu().detach().numpy()
-
-                    # ✅ Reshape to [current_batch_size, 28, 28]
-                    x_batch = x_batch.reshape(current_batch_size, 28, 28)
-
-                    self.trace_data.append(x_batch)
-                    
-                else:
-                    # Same for non-reshape cases
-                    current_batch_size = self.values.shape[0] // self.num_vertices
-                    # print("current_batch_size", current_batch_size)
-                    # print("self.num_vertices", self.num_vertices)
-                    # print("self.values", self.values.shape)
-
-                    x_batch = self.values.view(current_batch_size, self.num_vertices)
-                    x_batch = x_batch[:, 0:784].cpu().detach().numpy()
-
-                    x_batch = x_batch.reshape(current_batch_size, 28, 28)
-
-                    self.trace_data.append(x_batch)
-
-
-
+         
+            self.get_trace(trace=trace)
 
             # self.w = self.adj * self.w 
             # Perform the operation and reassign self.w as a Parameter
@@ -768,7 +874,7 @@ class PCgraph(torch.nn.Module):
             if self.reshape:
                 # BEFORE using use_input_error
                 total_sensor_error = torch.mean(self.errors[:,:di]**2).item()
-                total_internal_error = torch.mean(self.errors**2).item()
+                total_internal_error = torch.mean(self.errors[:, 784:-10]**2).item()
 
                 if not self.use_input_error:
                     if self.task == "classification":
@@ -827,29 +933,28 @@ class PCgraph(torch.nn.Module):
                 clipped_dEdx = dEdx
                 self.values[update_mask] -= self.lr_x * clipped_dEdx
 
+            # # Use the gradient descent update for updating values
+            # self.gradient_descent_update(
+            #     grad_type="values",
+            #     parameter=self.values_dummy,  # Assuming values are in self.data.x[:, 0]
+            #     delta=dEdx,
+            #     learning_rate=self.lr_values,
+            #     nodes_or_edge2_update=self.nodes_2_update,  # Mandatory
+
+            #     optimizer=self.optimizer_values if self.use_learning_optimizer else None,
+            #     use_optimizer=self.use_learning_optimizer
+            # )
+
+
             
             if train and self.incremental and self.dw is not None:
             # if train and self.incremental:
 
-                # self.update_w()
-                # print("optimizer step")
-        
-                # if self.w.is_sparse:
-                #     self.w = self.w.to_dense()
-                # if self.dw.is_sparse:
-                #     self.dw = self.dw.to_dense()
-
-                # # Convert m and gradients to dense if necessary
-                # if self.dw.is_sparse:
-                #     self.dw = self.dw.to_dense()
-
-                # if self.optimizer.m_w.is_sparse:
-                #     self.optimizer.m_w = self.optimizer.m_w.to_dense()
-                
+           
                 # self.dw = torch.clamp(self.dw, -1, 1)
 
                 self.w.grad = self.dw
-                self.optimizer_w.step()
+                self.optimizer_weights.step()
                 # self.optimizer.step(self.params, self.grads, batch_size=self.batch_size)
             # if self.early_stop:
             #     if early_stopper.early_stop( self.get_energy() ):
@@ -898,7 +1003,7 @@ class PCgraph(torch.nn.Module):
         # edge_index = data.edge_index.to(self.device)
         self.history = []
 
-        self.optimizer_w.zero_grad()
+        self.optimizer_weights.zero_grad()
         # self.data_ptr = data.ptr
         # self.batch_size = data.x.shape[0] // self.num_vertices
         self.batch_size = data.shape[0]
@@ -922,7 +1027,7 @@ class PCgraph(torch.nn.Module):
 
         if not self.incremental:
             self.w.grad = self.dw
-            self.optimizer_w.step()
+            self.optimizer_weights.step()
             # self.optimizer.step(self.params, self.grads, batch_size=self.batch_size)
 
         # print("w mean", self.w.mean())
@@ -1244,20 +1349,23 @@ class PCgraph(torch.nn.Module):
 
             # Zero or randomize sensory nodes
             # self.values[:, 0:input_size] = torch.zeros_like(self.values[:, 0:input_size])
-            self.values[:, 0:input_size] = torch.randn_like(self.values[:, 0:input_size])
+            # self.values[:, 0:input_size] = torch.randn_like(self.values[:, 0:input_size])
+            self.values[:, 0:input_size] = torch.rand_like(self.values[:, 0:input_size])
+            self.values[:, 0:input_size] = 0
 
-            if remove_label:
-                self.values[:, -output_size:] = 0.0
+            # if remove_label:
+            #     self.values[:, -output_size:] = 0.0
 
         else:
             data = data.view(self.batch_size, self.num_vertices)
 
             # Zero or randomize sensory nodes
             # data[:, 0:input_size] = torch.zeros_like(data[:, 0:input_size])
-            data[:, 0:input_size] = torch.randn_like(data[:, 0:input_size])
+            # data[:, 0:input_size] = torch.randn_like(data[:, 0:input_size])
+            data[:, 0:input_size] = torch.rand_like(data[:, 0:input_size])
 
-            if remove_label:
-                data[:, -output_size:] = 0.0
+            # if remove_label:
+            #     data[:, -output_size:] = 0.0
 
             self.values = data.view(self.batch_size * self.num_vertices, 1)
             self.values[self.sensory_indices_batch] = 0.0
@@ -1307,16 +1415,18 @@ class PCgraph(torch.nn.Module):
 
         # Optionally log to Weights & Biases
         if wandb_logging:
-            if wandb_logging:
-                wandb.log({
-                    "Generation/Images": wandb.Image(
-                        fig, caption=f"Generated Images at Epoch {self.epoch}"
-                    )
-                })
-                print(f"Logged generated images to WandB under 'Generation/Images' at epoch {self.epoch}")
+            wandb.log({
+                "Generation/Images": wandb.Image(
+                    fig, caption=f"Generated Images at Epoch {self.epoch}"
+                )
+            })
+            print(f"Logged generated images to WandB under 'Generation/Images' at epoch {self.epoch}")
 
         plt.close(fig)
         print("test_generative() complete!\n")
+
+        # plot trace
+        # TODO 
 
         return True 
 
