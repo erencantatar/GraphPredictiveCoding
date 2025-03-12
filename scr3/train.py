@@ -66,7 +66,7 @@ from helper.activation_func import activation_functions
 from graphbuilder import graph_type_options
 
 # allowed_tasks = ['classification', 'generation', 'denoise', 'occlusion']
-allowed_tasks = ['classification', 'generation']
+allowed_tasks = ['classification', 'generation', 'denoise', 'occlusion']
 
 # Parsing command-line arguments
 parser = argparse.ArgumentParser(description='Train a model with specified parameters.')
@@ -734,6 +734,7 @@ T_train = 5                 # inference time scale
 T_test = 10              # unused for hierarchical model
 incremental = True          # whether to use incremental EM or not
 use_input_error = False     # whether to use errors in the input layer or not
+# use_input_error = True      # whether to use errors in the input layer or not
 
 # Learning
 lr_w = 0.00001      
@@ -890,8 +891,9 @@ num_epochs = 40
 
 # break_num = 1200
 # break_num = 200
-break_num = 100
-# break_num = 30
+# break_num = 100
+break_num = 50
+# break_num = 20
 
 DEVICE = device 
 

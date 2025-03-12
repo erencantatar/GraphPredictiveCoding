@@ -1033,7 +1033,7 @@ class PCgraph(torch.nn.Module):
         # if self.structure.use_bias:
         #     self.db = self.structure.grad_b(x=self.x, e=self.e, w=self.w, b=self.b)
             
-    def set_optimizer(self, optimizer):
+    def set_optimizer(self, optimizer=None):
 
         # self.optimizer = optimizer
 
@@ -1951,6 +1951,7 @@ T_train = 10                 # inference time scale
 T_test = 15              # unused for hierarchical model
 incremental = True          # whether to use incremental EM or not
 use_input_error = False     # whether to use errors in the input layer or not
+# use_input_error = True     # whether to use errors in the input layer or not
 
 # Learning
 lr_w = 0.00001      
@@ -1982,14 +1983,16 @@ PCG = PCgraph(f,
         )
 
 # optimizer = optim.Adam(
-optimizer = Adam(
-    PCG.params,
-    learning_rate=lr_w,
-    grad_clip=grad_clip,
-    batch_scale=batch_scale,
-    weight_decay=weight_decay,
-)
-PCG.set_optimizer(optimizer)
+# optimizer = Adam(
+#     PCG.params,
+#     learning_rate=lr_w,
+#     grad_clip=grad_clip,
+#     batch_scale=batch_scale,
+#     weight_decay=weight_decay,
+# )
+# PCG.set_optimizer(optimizer)
+
+PCG.set_optimizer(None)
 
 PCG.init_modes(batch_example=batch)
 

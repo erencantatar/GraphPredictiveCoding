@@ -657,11 +657,22 @@ class PCgraph(torch.nn.Module):
             # print("Classification task")
             # print("self.update_mask_test", self.update_mask_test.shape)
 
-        elif task in ["generation", "reconstruction", "denoising", "occlusion"]:
+        elif task in ["generation", "reconstruction", "denoising"]:
             # Update both the internal and sensory nodes during these tasks
             self.update_mask_test = torch.tensor(sorted(self.internal_indices_batch + self.sensory_indices_batch), device=self.device)
             # print("Generation task")
             # print("self.update_mask_test", self.update_mask_test.shape)
+
+        elif task == "occlusion":
+            # Only update internal nodes + occluded sensory nodes
+            occluded_indices = list(range(392, 784))  # For example
+            self.update_mask_test = torch.tensor(
+                sorted(self.internal_indices_batch + [
+                    index + i * self.num_vertices for i in range(self.batch_size)
+                    for index in occluded_indices
+                ]), device=self.device
+            )
+
         else:
             raise ValueError(f"Invalid task: {task}")
         
@@ -821,7 +832,8 @@ class PCgraph(torch.nn.Module):
         di = 784
         upper = -10 if train else self.num_vertices
         
-
+        self.lst_sensor_error = []
+        self.lst_internal_error = []
 
 
         for t in range(T): 
@@ -874,18 +886,29 @@ class PCgraph(torch.nn.Module):
             if self.reshape:
                 # BEFORE using use_input_error
                 total_sensor_error = torch.mean(self.errors[:,:di]**2).item()
-                total_internal_error = torch.mean(self.errors[:, 784:-10]**2).item()
+                total_internal_error = torch.mean(self.errors[:, 784:-10]**2).item()    
 
+                self.lst_sensor_error.append(total_sensor_error)
+                self.lst_internal_error.append(total_internal_error)
+    
                 if not self.use_input_error:
                     if self.task == "classification":
-                        self.errors[:,:di] = 0 
-                    # elif self.task in ["generation", "reconstruction", "denoising", "occlusion"]:
-                    #     self.errors[:,di:upper] = 0
+                        self.errors[:,:784] = 0 
+                    elif self.task in ["generation", "reconstruction", "denoising", "occlusion"]:
+                        self.errors[:,-10:] = 0
                         # self.errors[:,di:upper] = 0
 
                 # print("self.errors", self.errors.shape)
                 # self.history.append(self.errors.cpu().mean().numpy()**2)
+
             else:
+                
+                total_sensor_error   = (self.errors[self.sensory_indices_batch]**2).mean().cpu().numpy()
+                total_internal_error = (self.errors[self.internal_indices_batch]**2).mean().cpu().numpy()
+                # self.history.append(total_internal_error)
+
+                self.lst_sensor_error.append(total_sensor_error)
+                self.lst_internal_error.append(total_internal_error)
 
                 if not self.use_input_error:
                     if self.task == "classification":
@@ -894,9 +917,7 @@ class PCgraph(torch.nn.Module):
                         self.errors[self.supervised_labels_batch] = 0
                         # self.errors[self.sensory_indices_batch] = 0
 
-                total_sensor_error   = (self.errors[self.sensory_indices_batch]**2).mean().cpu().numpy()
-                total_internal_error = (self.errors[self.internal_indices_batch]**2).mean().cpu().numpy()
-                # self.history.append(total_internal_error)
+             
 
             if self.wandb_logging:
                 if train:
@@ -1336,6 +1357,13 @@ class PCgraph(torch.nn.Module):
         import numpy as np
         import wandb
 
+        # IF task generation --> "Generation/Images"
+        # if task occlusion --> "Occlusion/Images"
+        # --> use self.task
+
+        folder = self.task 
+
+
         DEVICE = self.device
         input_size = 784
         output_size = 10
@@ -1343,32 +1371,42 @@ class PCgraph(torch.nn.Module):
         self.batch_size = data.shape[0]
         self.reset_nodes(batch_size=self.batch_size)
 
-        # Directly set graph_data into self.values
-        if self.reshape:
-            self.values[:, :] = data.clone()
+        data = data.clone()
+        data = data.view(self.batch_size, self.num_vertices)
 
-            # Zero or randomize sensory nodes
-            # self.values[:, 0:input_size] = torch.zeros_like(self.values[:, 0:input_size])
-            # self.values[:, 0:input_size] = torch.randn_like(self.values[:, 0:input_size])
-            self.values[:, 0:input_size] = torch.rand_like(self.values[:, 0:input_size])
-            self.values[:, 0:input_size] = 0
+        
+        if self.task == "generation":
+            if self.reshape:
+                self.values[:, :] = data
 
-            # if remove_label:
-            #     self.values[:, -output_size:] = 0.0
+                # Zero or randomize sensory nodes
+                # self.values[:, 0:input_size] = torch.zeros_like(self.values[:, 0:input_size])
+                self.values[:, 0:input_size] = torch.randn_like(self.values[:, 0:input_size])
+                # self.values[:, 0:input_size] = torch.rand_like(self.values[:, 0:input_size])
+                # self.values[:, 0:input_size] = 0
 
-        else:
-            data = data.view(self.batch_size, self.num_vertices)
+                # if remove_label:
+                #     self.values[:, -output_size:] = 0.0
+                
+                # assert onehot equal to label 
+                # print("labels", labels)
+                # print("self.values[:, -output_size:]", self.values[:, -output_size:].argmax(dim=1))
+                assert (self.values[:, -output_size:].argmax(dim=1) == labels).all()
 
-            # Zero or randomize sensory nodes
-            # data[:, 0:input_size] = torch.zeros_like(data[:, 0:input_size])
-            # data[:, 0:input_size] = torch.randn_like(data[:, 0:input_size])
-            data[:, 0:input_size] = torch.rand_like(data[:, 0:input_size])
+            else:
+                data = data.view(self.batch_size, self.num_vertices)
 
-            # if remove_label:
-            #     data[:, -output_size:] = 0.0
+                # Zero or randomize sensory nodes
+                # data[:, 0:input_size] = torch.zeros_like(data[:, 0:input_size])
+                data[:, 0:input_size] = torch.randn_like(data[:, 0:input_size])
+                # data[:, 0:input_size] = torch.rand_like(data[:, 0:input_size])
 
-            self.values = data.view(self.batch_size * self.num_vertices, 1)
-            self.values[self.sensory_indices_batch] = 0.0
+                # if remove_label:
+                #     data[:, -output_size:] = 0.0
+
+                self.values = data.view(self.batch_size * self.num_vertices, 1)
+                # self.values[self.sensory_indices_batch] = 0.0
+
 
         # Run inference
         self.trace_data = []
@@ -1376,18 +1414,26 @@ class PCgraph(torch.nn.Module):
         self.update_xs(train=False, trace=True)
 
 
-        if self.reshape:
-            generated_imgs = self.values.view(self.batch_size, -1)   # batch,10
-            generated_imgs = generated_imgs[:, :784] # batch,10
-            generated_imgs = generated_imgs.view(self.batch_size, 28, 28)   # batch,10
+        # if self.reshape:
+        #     generated_imgs = self.values.view(self.batch_size, -1)   # batch,10
+        #     generated_imgs = generated_imgs[:, :784] # batch,10
+        #     generated_imgs = generated_imgs.view(self.batch_size, 28, 28)   # batch,10
 
-        else:   
-            # generated_imgs_test = self.values.view(self.batch_size, -1)   # batch,10
-            # print("generated_imgs_test", generated_imgs_test.shape) 
+        # else:   
+        #     # generated_imgs_test = self.values.view(self.batch_size, -1)   # batch,10
+        #     # print("generated_imgs_test", generated_imgs_test.shape) 
 
-            # Select final reconstructions from the sensory nodes
-            generated_imgs = self.values[self.sensory_indices_batch]
-            generated_imgs = generated_imgs.view(self.batch_size, 28, 28)
+        #     # Select final reconstructions from the sensory nodes
+        #     generated_imgs = self.values[self.sensory_indices_batch]
+        #     generated_imgs = generated_imgs.view(self.batch_size, 28, 28)
+
+
+        # generated_imgs = self.values[self.sensory_indices_batch]   # batch,10
+        # generated_imgs = generated_imgs.view(self.batch_size, 28, 28)   # batch,10
+
+        logits = self.values.view(self.batch_size, self.num_vertices)   # batch,10
+        generated_imgs = logits[:, :784] # batch,10
+        generated_imgs = generated_imgs.view(self.batch_size, 28, 28)   # batch,10
 
         # Pick 10 random images from the batch
         num_to_show = 10
@@ -1406,27 +1452,123 @@ class PCgraph(torch.nn.Module):
         plt.tight_layout()
 
         # Save image grid
-        if save_imgs:
-            save_dir = f"trained_models/{self.task}/"
-            os.makedirs(save_dir, exist_ok=True)
-            filename = f"{save_dir}/generated_imgs_{self.epoch}.png"
-            plt.savefig(filename)
-            print(f"Saved generated image grid to: {filename}")
+        # if save_imgs:
+        #     save_dir = f"trained_models/{self.task}/"
+        #     os.makedirs(save_dir, exist_ok=True)
+        #     filename = f"{save_dir}/generated_imgs_{self.epoch}.png"
+        #     plt.savefig(filename)
+        #     print(f"Saved generated image grid to: {filename}")
 
         # Optionally log to Weights & Biases
         if wandb_logging:
             wandb.log({
-                "Generation/Images": wandb.Image(
+                f"{folder}/Images": wandb.Image(
                     fig, caption=f"Generated Images at Epoch {self.epoch}"
                 )
             })
-            print(f"Logged generated images to WandB under 'Generation/Images' at epoch {self.epoch}")
+            print(f"Logged generated images to WandB under '{self.task}/Images' at epoch {self.epoch}")
 
         plt.close(fig)
         print("test_generative() complete!\n")
 
         # plot trace
-        # TODO 
+        # ----- Plot TRACE over time -----
+        # ----- Plot TRACE over time -----
+        if self.trace_data and len(self.trace_data) > 0:
+            trace_steps = len(self.trace_data)
+
+            # ====== Toggle normalization on/off ======
+            normalize_trace_images = True  # <<< ---- Toggle this to False if you don't want normalization
+            norm_status = "Normalized" if normalize_trace_images else "Raw"
+
+            # ====== Create snapshot indices ======
+            snapshot_indices = []
+
+            # Dense at start (first 20% of T)
+            early_steps = list(range(min(trace_steps, 5)))  # E.g., 0,1,2,3,4
+            snapshot_indices.extend(early_steps)
+
+            # Sparse in middle (20% - 80% of T)
+            middle_start = early_steps[-1] + 1 if early_steps else 0
+            middle_end = int(0.8 * trace_steps)
+            middle_steps = list(range(middle_start, middle_end, max((middle_end - middle_start) // 4, 1)))  # 4 middle points
+            snapshot_indices.extend(middle_steps)
+
+            # Dense at end (last 20% of T)
+            late_steps = list(range(max(middle_end, trace_steps - 5), trace_steps))
+            snapshot_indices.extend(late_steps)
+
+            # Ensure uniqueness and sorted order
+            snapshot_indices = sorted(set(snapshot_indices))
+
+            print(f"Trace steps: {trace_steps}")
+            print(f"Snapshot indices: {snapshot_indices}")
+
+            # ====== Build subplot layout ======
+            num_snapshots = len(snapshot_indices)
+            mosaic_rows = [
+                [str(i) for i in range(num_snapshots)],  # Snapshot row
+                ["F"] * (num_snapshots // 2) + ["G"] * (num_snapshots - num_snapshots // 2),  # Energy + final value
+            ]
+
+            # Figure size scales with number of snapshots
+            fig_trace, ax = plt.subplot_mosaic(mosaic_rows, figsize=(num_snapshots * 3, 6))
+
+            # Add the main title, showing whether images are normalized or raw
+            fig_trace.suptitle(f"Trace over T Steps ({norm_status})", fontsize=16, fontweight='bold')
+
+            fig_trace.text(0.02, 0.67, "Values [0-T]", ha='center', va='center', fontsize=12, rotation='vertical', fontweight='bold')
+
+            # ====== Normalize function ======
+            def normalize_image(img):
+                img_min = img.min()
+                img_max = img.max()
+                if img_max - img_min < 1e-8:
+                    return img * 0  # If constant image, return zeros to avoid NaNs
+                return (img - img_min) / (img_max - img_min)
+
+            # ====== Plot snapshots from trace_data ======
+            for idx, t_idx in enumerate(snapshot_indices):
+                img = self.trace_data[t_idx][0]
+
+                if normalize_trace_images:
+                    img = normalize_image(img)
+
+                ax[str(idx)].imshow(img, cmap='gray')
+                ax[str(idx)].set_title(f"T = {t_idx}")
+                ax[str(idx)].axis('off')
+
+            # ====== Plot Energy (optional) ======
+            if sum(self.lst_internal_error) > 0 and sum(self.lst_sensor_error) > 0:
+                ax["F"].plot(self.lst_internal_error, label="Internal Energy")
+                ax["F"].plot(self.lst_sensor_error, label="Sensory Energy")
+                ax["F"].legend()
+
+            # ====== Final Value State ======
+            final_img = self.trace_data[-1][0]
+
+            if normalize_trace_images:
+                final_img = normalize_image(final_img)
+
+            ax["G"].imshow(final_img, cmap='gray')
+            ax["G"].set_title(f"Final Values T={trace_steps - 1}")
+            ax["G"].axis('off')
+
+            plt.tight_layout()
+
+            # if save_imgs:
+            #     filename_trace = f"{save_dir}/trace_{self.epoch}.png"
+            #     fig_trace.savefig(filename_trace)
+            #     print(f"Saved trace plot to: {filename_trace}")
+
+            if wandb_logging:
+                wandb.log({
+                    f"{folder}/Trace": wandb.Image(fig_trace, caption=f"Trace Images at Epoch {self.epoch}")
+                })
+
+            plt.close(fig_trace)
+      
+
 
         return True 
 
@@ -1457,6 +1599,23 @@ class PCgraph(torch.nn.Module):
                                  remove_label=False, save_imgs=False, wandb_logging=True)
             
             return 0 # Placeholder ""
+        
+        if "occlusion" in eval_types:
+            self.set_task("occlusion")
+
+            self.trace_data = []
+            self.trace = True 
+            
+            occluded_graph = graph.clone().to(self.device)   # batch_size, num_vertices
+
+            occluded_graph[:, 392:784] = 0.0   # or add noise instead of zero
+
+            self.test_generative(occluded_graph, 
+                                label.clone().to(self.device),
+                                remove_label=False, save_imgs=True, wandb_logging=True)
+
+            return 0  # Or the reconstructed images
+
         else:
             raise ValueError("Unknown evaluation type")
     
