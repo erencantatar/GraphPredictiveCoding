@@ -127,8 +127,8 @@ parser.add_argument('--use_grokfast', type=str, default="False", choices=["True"
 parser.add_argument('--epochs', type=int, default=5, help='Number of epochs to train.')
 parser.add_argument('--batch_size', type=int, default=1, help='Batch size.')
 parser.add_argument('--seed', type=int, default=42, help='Random seed.')
-parser.add_argument('--optimizer', type=true_with_float, default=False,
-                    help="Either False or, if set to True, requires a float value.")
+parser.add_argument('--use_learning_optimizer', '--optimizer', type=true_with_float, default=False,
+                    help="Either False or, if set to True, requires a float value for weight decay.") 
 
 # ---after training-----
 parser.add_argument('--set_abs_small_w_2_zero',  choices=['True', 'False'], required=True, help="....")
@@ -141,15 +141,20 @@ parser.add_argument('--tags', type=str, default="", help="Comma-separated tags t
 args = parser.parse_args()
 
 # Using argparse values
-torch.manual_seed(args.seed)
+# torch.manual_seed(args.seed)
+print("FOR NOW ADD RANDOM SEED TO THE MODEL")
+random_seed = torch.randint(0, 10, (1,)).item()
+torch.manual_seed(random_seed)
+
 
 generator_seed = torch.Generator()
-generator_seed.manual_seed(args.seed)
+generator_seed.manual_seed(random_seed)
 
 # Device configuration
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f'Using device: {device}')
-print(f"Seed used", args.seed)
+# print(f"Seed used", args.seed)
+print(f"Seed used", random_seed)
 if torch.cuda.is_available():
     print("Device name: ", torch.cuda.get_device_name(0))
 
@@ -403,7 +408,7 @@ single_graph = graph.edge_index  # Use the precomputed edge index
 
 
 import wandb 
-optimizer_str = str(args.optimizer) if isinstance(args.optimizer, float) else str(args.optimizer)
+optimizer_str = str(args.use_learning_optimizer) if isinstance(args.use_learning_optimizer, float) else str(args.use_learning_optimizer)
 
 model_params_name = (
     f"{args.model_type}_"
@@ -799,6 +804,9 @@ model_params = {
  }
 
 
+# use_learning_optimizer = True if args.use_learning_optimizer else False
+# use_learning_optimizer = False  
+# use_learning_optimizer = True  
 
 model_params = {
 
@@ -812,11 +820,8 @@ model_params = {
     "adj": adj_matrix_pyg,             # 2d Adjacency matrix
     "edge_index": graph.edge_index,    # [2, num_edges] edge index
     "batch_size": batch_size,
-    # "mask": mask,
     # "learning_rates": (lr_x, lr_w),
     "learning_rates": (args.lr_values, args.lr_weights),
-    # "T_train": T_train,
-    # "T_test": T_test,
     "T": (args.T_train, args.T_test),  # Number of iterations for gradient descent. (T_train, T_test)
 
     "incremental_learning": True if args.model_type == "IPC" else False, 
@@ -826,8 +831,8 @@ model_params = {
     "weight_init": args.weight_init,   # xavier, 'uniform', 'based_on_f', 'zero', 'kaiming'
 
     # "edge_type":  custom_dataset_train.edge_type,
-    # "use_learning_optimizer": use_learning_optimizer,    # False or [0], [(weight_decay=)]
-    # "use_grokfast": args.grokfast,  # False or True
+    "use_learning_optimizer": args.use_learning_optimizer,    # False or [0], [(weight_decay=)]
+    "use_grokfast": args.grokfast,  # False or True
     # "clamping": None , # (0, torch.inf) or 'None'
 }
 
@@ -891,6 +896,7 @@ num_epochs = 40
 
 # break_num = 1200
 # break_num = 200
+break_num = 500
 # break_num = 100
 break_num = 50
 # break_num = 20
@@ -904,7 +910,10 @@ TASK_config = {
         {"batch_break": 100, "wandb": eval_classification},
 }
 
+# model.log_edge_connectivity_distribution_to_wandb(direction="both")
+model.log_node_connectivity_distribution_to_wandb(direction="both")
 
+# model.log_edge_weight_distribution_to_wandb()
 
 with torch.no_grad():
 
@@ -949,7 +958,7 @@ with torch.no_grad():
         model.test_()
         cntr = 0
 
-        break_num_eval = 20
+        break_num_eval = 10
         if "generation" in TASK:
             break_num_eval = 1
         # break_num_eval = 10
@@ -988,6 +997,9 @@ with torch.no_grad():
             val_acc.append(accuracy_mean)
 
             print("epoch", epoch, "accuracy_mean", accuracy_mean)
+
+            if epoch % 10 == 0:
+                print("delta pred ", y_pred - y_batch)
 
             wandb.log({
                 "epoch": epoch,

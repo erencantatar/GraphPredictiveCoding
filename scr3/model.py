@@ -18,6 +18,12 @@ import torch.nn.functional as F
 import matplotlib.pyplot as plt
 import wandb 
 
+    
+import matplotlib.pyplot as plt
+import torch
+import os
+import wandb
+
 start_time = datetime.now()
 dt_string = start_time.strftime("%Y%m%d-%H.%M")
 
@@ -38,6 +44,8 @@ else:
 
 # NEW 
 from helper.activation_func import set_activation
+from helper.grokfast import gradfilter_ema, gradfilter_ma, gradfilter_ema_adjust
+
 
 
 # OLD 
@@ -320,16 +328,19 @@ class PCgraph(torch.nn.Module):
         self.mode = "train"
         self.use_bias = False
 
-
         self._reset_grad()
         self._reset_params()
 
-
         self.use_learning_optimizer = use_learning_optimizer
         self.use_grokfast = use_grokfast    
+        self.grads = None
+        self.grokfast_type = "ema"  # "ema" or "ma"
+        self.avg_grad = None
+
 
         self.optimizer_weights = torch.optim.Adam([self.w], lr=self.lr_w, betas=(0.9, 0.999), eps=1e-7, weight_decay=0)
-        self.optimizer_values = torch.optim.Adam([self.values_dummy], lr=self.lr_x, betas=(0.9, 0.999), eps=1e-7, weight_decay=0)
+        # self.optimizer_values = torch.optim.Adam([self.values_dummy], lr=self.lr_x, betas=(0.9, 0.999), eps=1e-7, weight_decay=0)
+        self.optimizer_values = torch.optim.SGD([self.values_dummy], lr=self.lr_x)
 
         if self.use_learning_optimizer:
 
@@ -340,7 +351,7 @@ class PCgraph(torch.nn.Module):
             # # self.optimizer_weights = torch.optim.Adam([self.weights], lr=self.lr_weights, weight_decay=weight_decay)      
             # self.optimizer_values = torch.optim.SGD([self.values_dummy], lr=self.lr_values, momentum=0, weight_decay=weight_decay, nesterov=False) # nestrov only for momentum > 0
 
-            self.w.grad = torch.zeros_like(self.weights)
+            self.w.grad = torch.zeros_like(self.w)
             self.values_dummy.grad = torch.zeros_like(self.values_dummy)
 
             # self.lr_scheduler = False        
@@ -547,19 +558,24 @@ class PCgraph(torch.nn.Module):
     #         temp[:,lower:upper] = self.structure.pred(x=temp, w=self.w, b=self.b )[:,lower:upper]
     #     self.x = temp
 
-    def update_w(self):
+    def get_dw(self):
         
         self.errors = self.errors.view(self.batch_size, self.num_vertices)
-        self.x = self.values.view(self.batch_size, self.num_vertices)
+
+        # self.x = self.values.view(self.batch_size, self.num_vertices)
+        self.x = self.values_dummy.view(self.batch_size, self.num_vertices)
 
         out = -torch.matmul(self.errors.T, self.f(self.x))
         # out = -torch.sparse.mm(self.errors.T, self.f(self.x))
 
         if self.mask is not None:
             out *= self.mask
+
+        # grad clipping 
+        # delta_w = torch.clamp(delta_w, min=-1, max=1)
+
         self.dw = out 
-        
-        # self.dw = self.structure.grad_w(x=self.x, e=self.e, w=self.w, b=self.b)
+
         # if self.structure.use_bias:
         #     self.db = self.structure.grad_b(x=self.x, e=self.e, w=self.w, b=self.b)
             
@@ -712,37 +728,132 @@ class PCgraph(torch.nn.Module):
     #     filtered_weights = batched_weights[mask]
     #     pass
 
+    def ensure_grad(self, param):
+        if param.grad is None:
+            param.grad = torch.zeros_like(param)
+        else:
+            param.grad.zero_()
 
-    def gradient_descent_update(self, grad_type, parameter, delta, learning_rate, nodes_or_edge2_update, 
+    # Then use it:
+
+
+    def gradient_descent_update_values(self, grad_type, parameter, delta, learning_rate, nodes_or_edge2_update,
+                                            optimizer=None, use_optimizer=False):
+        
+        di = 784
+        upper = -10
+        dEdx = delta 
+        
+        # if self.use_learning_optimizer:
+                
+        #     self.ensure_grad(self.values_dummy)
+
+        #     self.optimizer_values.zero_grad()
+
+        #     if self.values_dummy.grad is None:
+        #         self.values_dummy.grad = torch.zeros_like(self.values_dummy)
+        #     else:
+        #         self.values_dummy.grad.zero_()
+
+        #     if self.reshape:
+        #         self.values_dummy.grad[:, di:upper] = delta[:, di:upper]
+        #     else:
+        #         self.values_dummy.grad[nodes_or_edge2_update] = delta[nodes_or_edge2_update]
+
+        #     self.optimizer_values.step()
+
+        # else:
+
+        if self.reshape:
+            
+            dEdx = delta[:, di:upper]
+            # print("dEdx", dEdx.shape)
+
+            # dEdx = self.structure.grad_x(self.x, self.e, self.w, self.b,train=train) # only hidden nodes
+            # self.values[:,di:upper] -= self.lr_x*dEdx 
+            self.values_dummy.data[:,di:upper] -= self.lr_x*dEdx 
+    
+        else:
+            dEdx = dEdx[nodes_or_edge2_update]
+
+            # clipped_dEdx = torch.clamp(dEdx, -1, 1)
+            clipped_dEdx = dEdx
+            # self.values[nodes_or_edge2_update] -= self.lr_x * clipped_dEdx
+            self.values_dummy.data[nodes_or_edge2_update] -= self.lr_x * clipped_dEdx
+    
+
+        
+
+        # if self.reshape:
+            
+        #     # dEdx = dEdx[:, di:upper]
+        #     dEdx = delta[:, di:upper]
+
+        #     # parameter[:,di:upper] -= self.lr_x*dEdx 
+        #     parameter.data[:,di:upper] -= self.lr_x*dEdx
+
+        # else:
+        #     update_mask = nodes_or_edge2_update
+        #     dEdx = delta[update_mask]
+
+        #     # clipped_dEdx = torch.clamp(dEdx, -1, 1)
+        #     clipped_dEdx = dEdx
+        #     parameter[update_mask] -= self.lr_x * clipped_dEdx
+    
+        # return True
+
+    #   if self.reshape:
+            
+    #         dEdx = dEdx[:, di:upper]
+    #         # print("dEdx", dEdx.shape)
+
+    #         # dEdx = self.structure.grad_x(self.x, self.e, self.w, self.b,train=train) # only hidden nodes
+    #         self.values[:,di:upper] -= self.lr_x*dEdx 
+    #     else:
+    #         dEdx = dEdx[update_mask]
+
+    #         # clipped_dEdx = torch.clamp(dEdx, -1, 1)
+    #         clipped_dEdx = dEdx
+    #         self.values[update_mask] -= self.lr_x * clipped_dEdx
+    
+
+    def gradient_descent_update_w(self, grad_type, parameter, delta, learning_rate, nodes_or_edge2_update, 
                                 optimizer=None, use_optimizer=False):
         
-        self.use_grokfast = False 
+        # self.use_grokfast = False 
+        # self.delta_w_selection = "all"
+        self.delta_w_selection = "internal_only"
 
-        if grad_type == "weights" and self.use_grokfast:
+        if self.use_grokfast:
             param_type = "weights"
             
             # assert 
                 # Collect parameters explicitly
             params = {"weights": self.weights}
 
-            # if self.grokfast_type == 'ema':
+            if self.grokfast_type == 'ema':
                 
-            #     # python main_mnist.py --label test --alpha 0.8 --lamb 0.1 --weight_decay 2.0
-            #     final_grad, self.avg_grad = gradfilter_ema_adjust(delta, self.avg_grad, alpha=0.8, lamb=0.1)
-            #     delta = final_grad  # Replace gradient with modified version
+                # python main_mnist.py --label test --alpha 0.8 --lamb 0.1 --weight_decay 2.0
+                final_grad, self.avg_grad = gradfilter_ema_adjust(delta, self.avg_grad, alpha=0.8, lamb=0.1)
+                delta = final_grad  # Replace gradient with modified version
 
-            #     # # Call the gradfilter_ema function
-            #     # self.grads = gradfilter_ema(grads=self.grads, params=params, alpha=0.8, lamb=0.1)
+                # # Call the gradfilter_ema function
+                # self.grads = gradfilter_ema(grads=self.grads, params=params, alpha=0.8, lamb=0.1)
 
 
-            #     # self.grads[grad_type] = gradfilter_ema(self, grads=self.grads[grad_type], alpha=0.8, lamb=0.1)
-            # elif self.grokfast_type == 'ma':
-            #     self.grads[grad_type] = gradfilter_ma(self, grads=self.grads[grad_type], window_size=100, lamb=5.0, filter_type='mean')
+                # self.grads[grad_type] = gradfilter_ema(self, grads=self.grads[grad_type], alpha=0.8, lamb=0.1)
+            elif self.grokfast_type == 'ma':
+                self.grads[grad_type] = gradfilter_ma(self, grads=self.grads[grad_type], window_size=100, lamb=5.0, filter_type='mean')
 
         # ---------------------------------------------------------------------------- 
 
+        optimizer.zero_grad()
 
+        parameter.grad = delta
+        optimizer.step()
 
+        return True 
+    
         if use_optimizer and optimizer:
             # Clear 
             optimizer.zero_grad()
@@ -757,19 +868,26 @@ class PCgraph(torch.nn.Module):
                 parameter.grad = -delta.detach().clone()  # Apply full delta to the parameter
             else:
                 
-                if grad_type == "weights" and self.update_rules == "Van_Zwol":
+                if self.update_rules == "vanZwol_AMB":
 
                     # delta[784:-10, 784:-10] = 0
                     # parameter.grad.data[784:-10, 784:-10] = 0
                     # delta = delta * self.adj
-                    parameter.grad = -delta  # Update only specific nodes
+                    # parameter.grad = -delta  # Update only specific nodes
                     # parameter.grad = delta  # Update only specific nodes
+
+                    # self.w.grad = self.dw
+                    parameter.grad = delta  # Update only specific nodes
+
+                    # self.optimizer_weights.step()
 
                 else:
                     parameter.grad[nodes_or_edge2_update] = -delta[nodes_or_edge2_update].detach().clone()  # Update only specific nodes
         
             # perform optimizer weight update step
             optimizer.step()
+
+     
 
         else:
             # Manually update the parameter using gradient descent
@@ -784,7 +902,8 @@ class PCgraph(torch.nn.Module):
                     parameter.data += learning_rate * delta
                 else:
                     
-                    parameter.data[nodes_or_edge2_update] += learning_rate * delta[nodes_or_edge2_update]
+                    # parameter.data[nodes_or_edge2_update] += learning_rate * delta[nodes_or_edge2_update]
+                    parameter.data[nodes_or_edge2_update] -= learning_rate * delta[nodes_or_edge2_update]
                 
     def get_trace(self, trace=False):
            
@@ -835,6 +954,8 @@ class PCgraph(torch.nn.Module):
         self.lst_sensor_error = []
         self.lst_internal_error = []
 
+        # At the start of update_xs()
+        self.values_dummy.data = self.values.data.clone().to(self.device)
 
         for t in range(T): 
          
@@ -845,47 +966,16 @@ class PCgraph(torch.nn.Module):
             with torch.no_grad():
                 self.w.copy_(self.adj * self.w)
 
-                # make weights[0:784, -10:] /= 2
-                # self.w[0:784, -10:] /= 2 
-                # self.w[-10:, 0:784] /= 2 
-                
-            # print("self.w", self.w.shape)
-            # print("self.values", self.values.shape)
-            self.mu = self.updates.pred(self.values.to(self.device), self.w.to(self.device))
-            # print("self.mu", self.mu.shape)
-            
-            # predicted_mpU = self.pred_mu_MP.forward(self.values.view(-1,1).to(DEVICE),
-            #                         self.batched_edge_index.to(DEVICE), 
-            #                         batched_weights.to(DEVICE))
-            # self.e = self.values - predicted_mpU
+            # self.mu = self.updates.pred(self.values.to(self.device), self.w.to(self.device))
+            self.mu = self.updates.pred(self.values_dummy, self.w.to(self.device))
 
-            # self.errors = self.errors.view(self.batch_size, self.num_vertices)
-            # self.x = self.values.view(self.batch_size, self.num_vertices)
-            
-           
-            # print(torch.allclose(mu_mp, mu, atol=1))  # Should be True
-            # print(torch.allclose(predicted_mpU, mu, atol=1))  # Should be True
-            
-            # self.e = self.x - mu_mp 
-            # print("predicted_mpU shape", predicted_mpU.shape)
-            # print("values shape", self.values.shape)
-
-            self.errors = self.values - self.mu
+            # self.errors = self.values - self.mu
+            self.errors = self.values_dummy - self.mu
         
-            # print("e1", torch.mean(self.e))
-            # TODO
-
-           
-            # total_mean_error = self.errors.mean()
-            # total_mean_error = torch.sum(self.errors**2).mean()
-
-            # total_internal_error = self.errors[self.internal_indices_batch].mean()
-            # self.history.append(total_mean_error.cpu().numpy())
-            
-
             if self.reshape:
+               
                 # BEFORE using use_input_error
-                total_sensor_error = torch.mean(self.errors[:,:di]**2).item()
+                total_sensor_error = torch.mean(self.errors[:,:784]**2).item()
                 total_internal_error = torch.mean(self.errors[:, 784:-10]**2).item()    
 
                 self.lst_sensor_error.append(total_sensor_error)
@@ -897,9 +987,6 @@ class PCgraph(torch.nn.Module):
                     elif self.task in ["generation", "reconstruction", "denoising", "occlusion"]:
                         self.errors[:,-10:] = 0
                         # self.errors[:,di:upper] = 0
-
-                # print("self.errors", self.errors.shape)
-                # self.history.append(self.errors.cpu().mean().numpy()**2)
 
             else:
                 
@@ -918,7 +1005,6 @@ class PCgraph(torch.nn.Module):
                         # self.errors[self.sensory_indices_batch] = 0
 
              
-
             if self.wandb_logging:
                 if train:
                     wandb.log({
@@ -937,45 +1023,56 @@ class PCgraph(torch.nn.Module):
             # x = self.x.T.contiguous().view(-1, 1).to(DEVICE)  # Shape: [num_nodes, batch_size]
             # error = self.e.T.contiguous().view(-1, 1).to(DEVICE)  # Shape: [num_nodes, batch_size]
             
-            dEdx = self.updates.grad_x(self.values, self.errors, self.w)
+            # dEdx = self.updates.grad_x(self.values, self.errors, self.w)
+            dEdx = self.updates.grad_x(self.values_dummy, self.errors, self.w)
+
             # clipped_dEdx = torch.clamp(dEdx, -1, 1)
 
-            if self.reshape:
+
+            # if self.reshape:
                 
-                dEdx = dEdx[:, di:upper]
-                # print("dEdx", dEdx.shape)
+            #     dEdx = dEdx[:, di:upper]
+            #     # print("dEdx", dEdx.shape)
 
-                # dEdx = self.structure.grad_x(self.x, self.e, self.w, self.b,train=train) # only hidden nodes
-                self.values[:,di:upper] -= self.lr_x*dEdx 
+            #     # dEdx = self.structure.grad_x(self.x, self.e, self.w, self.b,train=train) # only hidden nodes
+            #     self.values[:,di:upper] -= self.lr_x*dEdx 
+            # else:
+            #     dEdx = dEdx[update_mask]
+
+            #     # clipped_dEdx = torch.clamp(dEdx, -1, 1)
+            #     clipped_dEdx = dEdx
+            #     self.values[update_mask] -= self.lr_x * clipped_dEdx
+        
+
+        
+            # Use the gradient descent update for updating values
+            self.gradient_descent_update_values(
+                grad_type="values",
+                parameter=self.values_dummy,  # Assuming values are in self.data.x[:, 0]
+                delta=dEdx,
+                learning_rate=self.lr_values,
+
+                # nodes_or_edge2_update=self.nodes_2_update,  # Mandatory
+                nodes_or_edge2_update=update_mask,  # Mandatory
+
+                optimizer=self.optimizer_values if self.use_learning_optimizer else None,
+                use_optimizer=self.use_learning_optimizer
+            )
+
+
+            ## Copy updated dummy values back into self.values
+            if self.reshape:
+                self.values[:, :] = self.values_dummy.data
             else:
-                dEdx = dEdx[update_mask]
+                self.values[:] = self.values_dummy.data
 
-                # clipped_dEdx = torch.clamp(dEdx, -1, 1)
-                clipped_dEdx = dEdx
-                self.values[update_mask] -= self.lr_x * clipped_dEdx
+            # self.get_dw()
 
-            # # Use the gradient descent update for updating values
-            # self.gradient_descent_update(
-            #     grad_type="values",
-            #     parameter=self.values_dummy,  # Assuming values are in self.data.x[:, 0]
-            #     delta=dEdx,
-            #     learning_rate=self.lr_values,
-            #     nodes_or_edge2_update=self.nodes_2_update,  # Mandatory
-
-            #     optimizer=self.optimizer_values if self.use_learning_optimizer else None,
-            #     use_optimizer=self.use_learning_optimizer
-            # )
-
-
-            
             if train and self.incremental and self.dw is not None:
             # if train and self.incremental:
 
-           
-                # self.dw = torch.clamp(self.dw, -1, 1)
-
-                self.w.grad = self.dw
-                self.optimizer_weights.step()
+                self.update_w()
+                
                 # self.optimizer.step(self.params, self.grads, batch_size=self.batch_size)
             # if self.early_stop:
             #     if early_stopper.early_stop( self.get_energy() ):
@@ -1004,7 +1101,142 @@ class PCgraph(torch.nn.Module):
     #         print("optimizer step end ")
     #         self.optimizer.step(self.params, self.grads, batch_size=X_batch.shape[0])
 
-    
+
+
+
+    def log_node_connectivity_distribution_to_wandb(self, direction="both"):
+        """
+        Logs a histogram of node degree counts to Weights & Biases (wandb).
+        For each degree (how many connections), shows how many nodes have it.
+        
+        direction: 'in', 'out', or 'both' degrees (default is total degree).
+        """
+        
+        # Get edge indices
+        src, dst = self.edge_index
+        num_nodes = int(torch.max(self.edge_index)) + 1
+
+        # Calculate degrees
+        in_degree = torch.bincount(dst, minlength=num_nodes)
+        out_degree = torch.bincount(src, minlength=num_nodes)
+
+        # Total degree (in + out)
+        if direction == "in":
+            degree_per_node = in_degree
+            label = "In-degree"
+        elif direction == "out":
+            degree_per_node = out_degree
+            label = "Out-degree"
+        elif direction == "both":
+            degree_per_node = in_degree + out_degree
+            label = "Total-degree"
+        else:
+            raise ValueError("Direction must be 'in', 'out', or 'both'")
+
+        degree_distribution = torch.bincount(degree_per_node.cpu())
+
+        # Convert to WandB table (swap Degree and Num_Nodes in the table to switch axes)
+        data = []
+        for degree, count in enumerate(degree_distribution):
+            data.append([count.item(), degree])  # Swapped here!
+
+        # Create a wandb Table for horizontal bar chart
+        table = wandb.Table(data=data, columns=["Num_Nodes", "Degree"])
+
+        # Log horizontal bar chart (x = num_nodes, y = degree)
+        wandb.log({
+            f"Weights/{label}_Distribution_Horizontal": wandb.plot.bar(
+                table,
+                "Num_Nodes",  # X-axis: how many nodes
+                "Degree",     # Y-axis: degree level
+                title=f"{label} Distribution (Nodes per Degree)"
+            )
+        })
+        
+        # Optional print
+        print(f"Logged {label} Distribution to wandb!")
+        self.plot_and_log_degree_distribution()
+
+
+
+
+    def plot_and_log_degree_distribution(self, save_path="trained_models/degree_distribution.png", wandb_folder="Graph/Structure"):
+        """
+        Generates degree distribution plots:
+            - Regular degree distribution
+            - Log-log scale degree distribution
+
+        Args:
+            edge_index (torch.Tensor): shape [2, num_edges], PyG style.
+            save_path (str): where to save the plot.
+            wandb_logging (bool): whether to log to wandb.
+            wandb_folder (str): wandb folder/tag name.
+        """
+
+        # 1. Compute node degrees
+        src, dst = self.edge_index
+        num_nodes = int(torch.max(self.edge_index)) + 1
+
+        in_degree = torch.bincount(dst, minlength=num_nodes)
+        out_degree = torch.bincount(src, minlength=num_nodes)
+
+        total_degree = (in_degree + out_degree).cpu().numpy()
+
+        # 2. Compute histogram: counts of how many nodes have degree = k
+        degree_values, node_counts = np.unique(total_degree, return_counts=True)
+
+        # Avoid log(0) issues
+        degree_values_safe = np.where(degree_values == 0, 1, degree_values)
+        node_counts_safe = np.where(node_counts == 0, 1, node_counts)
+
+        # 3. Plotting
+        fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+
+        # ----- Left: Regular plot -----
+        axes[0].plot(degree_values, node_counts, marker='o')
+        axes[0].set_xlabel("Degree (j)")
+        axes[0].set_ylabel("Number of nodes (m)")
+        axes[0].set_title("Degree Distribution")
+
+        # ----- Right: Log-Log plot -----
+        axes[1].plot(np.log10(degree_values_safe), np.log10(node_counts_safe), marker='o')
+        axes[1].set_xlabel("Degree (j) [log scale]")
+        axes[1].set_ylabel("Number of nodes (m) [log scale]")
+        axes[1].set_title("Log-Log Degree Distribution")
+
+        plt.tight_layout()
+
+        # 4. Save the plot locally
+        plt.savefig(save_path)
+        print(f"Degree distribution plot saved to: {save_path}")
+
+        # 5. Log to wandb (optional)
+        wandb.log({
+            f"Weights/Degree_Distribution": wandb.Image(fig, caption="Degree Distribution + Log-Log")
+        })
+        print(f"Logged degree distribution to wandb: Degree_Distribution")
+
+        plt.close(fig)
+
+
+
+
+
+
+    def log_edge_weight_distribution_to_wandb(self, step=None):
+        """
+        Logs a histogram of edge weights to wandb.
+        """
+        # Get weights of existing edges only
+        edge_weights = self.w[self.edge_index[0], self.edge_index[1]].detach().cpu().numpy()
+
+        wandb.log({
+            f"Weights/Edge_Weight_Distribution": wandb.Histogram(edge_weights)
+        }, step=step)
+
+        print(f"Edge Weights - Min: {edge_weights.min()}, Max: {edge_weights.max()}, Mean: {edge_weights.mean():.4f}")
+
+
     def unpack_features(self, batch, reshape=False):
         """Unpack values, errors, and predictions from the batched graph."""
         # values, errors, predictions = batch[:, 0, :].to(self.device), batch[:, 1, :].to(self.device),  None
@@ -1019,12 +1251,40 @@ class PCgraph(torch.nn.Module):
 
         return values, None, None
 
+    def update_w(self):
+
+        # print("mean w 1 ", self.w.mean())
+        # print("update_w")
+        
+
+        # self.optimizer_weights.zero_grad()
+        self.w.grad = self.dw
+
+        self.optimizer_weights.step()
+
+        # self.edges_2_update = None 
+        # self.gradient_descent_update_w(
+        #     grad_type="weights",
+        #     parameter=self.w,
+        #     delta=self.dw,
+        #     learning_rate=self.lr_weights,
+      
+        #     # error= self.errors if self.optimizer_values else None,
+        #     nodes_or_edge2_update=self.edges_2_update,
+        #     # optimizer=self.optimizer_weights if self.use_learning_optimizer else None,
+        #     optimizer=self.optimizer_weights,
+        #     use_optimizer=self.use_learning_optimizer, 
+        # )
+
+        # print("mean w 2", self.w.mean())
+
+
 
     def train_supervised(self, data):
         # edge_index = data.edge_index.to(self.device)
         self.history = []
 
-        self.optimizer_weights.zero_grad()
+        # self.optimizer_weights.zero_grad()
         # self.data_ptr = data.ptr
         # self.batch_size = data.x.shape[0] // self.num_vertices
         self.batch_size = data.shape[0]
@@ -1036,21 +1296,17 @@ class PCgraph(torch.nn.Module):
         if self.reshape:
             self.values[:, :] = data.clone()
         else:
-            data = data.view(self.batch_size * self.num_vertices, 1)
-            # print("data", data.shape)
-            # print("self.values", self.values.shape)
-            self.values = data
+            self.values = data.view(self.batch_size * self.num_vertices, 1)
 
         # self.values, _ , _ = self.unpack_features(data.x, reshape=False)
         
         self.update_xs(train=True)
-        self.update_w()
+        self.get_dw()
 
         if not self.incremental:
-            self.w.grad = self.dw
-            self.optimizer_weights.step()
-            # self.optimizer.step(self.params, self.grads, batch_size=self.batch_size)
+            self.update_w()
 
+          
         # print("w mean", self.w.mean())
 
         return self.history
@@ -1514,8 +1770,9 @@ class PCgraph(torch.nn.Module):
             # Figure size scales with number of snapshots
             fig_trace, ax = plt.subplot_mosaic(mosaic_rows, figsize=(num_snapshots * 3, 6))
 
+            label = labels[0].item() if labels is not None else "digit Unknown"
             # Add the main title, showing whether images are normalized or raw
-            fig_trace.suptitle(f"Trace over T Steps ({norm_status})", fontsize=16, fontweight='bold')
+            fig_trace.suptitle(f"Trace over T Steps ({norm_status}) {label}", fontsize=16, fontweight='bold')
 
             fig_trace.text(0.02, 0.67, "Values [0-T]", ha='center', va='center', fontsize=12, rotation='vertical', fontweight='bold')
 
@@ -1571,7 +1828,6 @@ class PCgraph(torch.nn.Module):
 
 
         return True 
-
 
 
     def test_iterative(self, data, eval_types=None, remove_label=True):

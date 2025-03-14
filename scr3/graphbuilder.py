@@ -10,6 +10,10 @@ import numpy as np
 import torch 
 import random 
 
+# import os
+# os.environ['NX_CUGRAPH_AUTOCONFIG'] = 'True'
+
+
 graph_type_options = {
         "fully_connected": {
             "params": {
@@ -49,8 +53,8 @@ graph_type_options = {
         
         "stochastic_block": {
             "params": {
-                "num_communities": 50,      # Number of communities
-                "community_size": 40,       # Size of each community
+                "num_communities": 250,      # Number of communities (50)
+                "community_size": 50,       # Size of each community (40)
                 "p_intra": 0.3,             # Probability of edges within the same community
                 "p_inter": 0.1,             # Probability of edges between different communities
                 "full_con_last_cluster_w_sup": True,
