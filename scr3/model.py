@@ -563,18 +563,33 @@ class PCgraph(torch.nn.Module):
         self.errors = self.errors.view(self.batch_size, self.num_vertices)
 
         # self.x = self.values.view(self.batch_size, self.num_vertices)
-        self.x = self.values_dummy.view(self.batch_size, self.num_vertices)
+        self.x = self.values_dummy.data.clone().view(self.batch_size, self.num_vertices)
+        # self.x = 
 
         out = -torch.matmul(self.errors.T, self.f(self.x))
-        # out = -torch.sparse.mm(self.errors.T, self.f(self.x))
+
+        # x_dum = self.values_dummy.view(self.batch_size, self.num_vertices)
+
+
+        # assert allclose self.x and x_dum
+        # assert torch.allclose(self.x, x_dum, atol=1e-6)
+
+        # assert allclose self.errors and errors_dum
+        # assert torch.allclose(self.errors, self.errors_dum, atol=1e-6)
+
+        # out_dum = -torch.matmul(self.errors_dum.T, self.f(x_dum))
 
         if self.mask is not None:
             out *= self.mask
 
+
         # grad clipping 
         # delta_w = torch.clamp(delta_w, min=-1, max=1)
 
-        self.dw = out 
+        # self.dw = out 
+        self.dw = out
+        # self.dw = out_dum.float()
+
 
         # if self.structure.use_bias:
         #     self.db = self.structure.grad_b(x=self.x, e=self.e, w=self.w, b=self.b)
@@ -728,94 +743,17 @@ class PCgraph(torch.nn.Module):
     #     filtered_weights = batched_weights[mask]
     #     pass
 
-    def ensure_grad(self, param):
-        if param.grad is None:
-            param.grad = torch.zeros_like(param)
-        else:
-            param.grad.zero_()
+    # def ensure_grad(self, param):
+    #     if param.grad is None:
+    #         param.grad = torch.zeros_like(param)
+    #     else:
+    #         param.grad.zero_()
 
     # Then use it:
 
 
-    def gradient_descent_update_values(self, grad_type, parameter, delta, learning_rate, nodes_or_edge2_update,
-                                            optimizer=None, use_optimizer=False):
-        
-        di = 784
-        upper = -10
-        dEdx = delta 
-        
-        # if self.use_learning_optimizer:
-                
-        #     self.ensure_grad(self.values_dummy)
 
-        #     self.optimizer_values.zero_grad()
 
-        #     if self.values_dummy.grad is None:
-        #         self.values_dummy.grad = torch.zeros_like(self.values_dummy)
-        #     else:
-        #         self.values_dummy.grad.zero_()
-
-        #     if self.reshape:
-        #         self.values_dummy.grad[:, di:upper] = delta[:, di:upper]
-        #     else:
-        #         self.values_dummy.grad[nodes_or_edge2_update] = delta[nodes_or_edge2_update]
-
-        #     self.optimizer_values.step()
-
-        # else:
-
-        if self.reshape:
-            
-            dEdx = delta[:, di:upper]
-            # print("dEdx", dEdx.shape)
-
-            # dEdx = self.structure.grad_x(self.x, self.e, self.w, self.b,train=train) # only hidden nodes
-            # self.values[:,di:upper] -= self.lr_x*dEdx 
-            self.values_dummy.data[:,di:upper] -= self.lr_x*dEdx 
-    
-        else:
-            dEdx = dEdx[nodes_or_edge2_update]
-
-            # clipped_dEdx = torch.clamp(dEdx, -1, 1)
-            clipped_dEdx = dEdx
-            # self.values[nodes_or_edge2_update] -= self.lr_x * clipped_dEdx
-            self.values_dummy.data[nodes_or_edge2_update] -= self.lr_x * clipped_dEdx
-    
-
-        
-
-        # if self.reshape:
-            
-        #     # dEdx = dEdx[:, di:upper]
-        #     dEdx = delta[:, di:upper]
-
-        #     # parameter[:,di:upper] -= self.lr_x*dEdx 
-        #     parameter.data[:,di:upper] -= self.lr_x*dEdx
-
-        # else:
-        #     update_mask = nodes_or_edge2_update
-        #     dEdx = delta[update_mask]
-
-        #     # clipped_dEdx = torch.clamp(dEdx, -1, 1)
-        #     clipped_dEdx = dEdx
-        #     parameter[update_mask] -= self.lr_x * clipped_dEdx
-    
-        # return True
-
-    #   if self.reshape:
-            
-    #         dEdx = dEdx[:, di:upper]
-    #         # print("dEdx", dEdx.shape)
-
-    #         # dEdx = self.structure.grad_x(self.x, self.e, self.w, self.b,train=train) # only hidden nodes
-    #         self.values[:,di:upper] -= self.lr_x*dEdx 
-    #     else:
-    #         dEdx = dEdx[update_mask]
-
-    #         # clipped_dEdx = torch.clamp(dEdx, -1, 1)
-    #         clipped_dEdx = dEdx
-    #         self.values[update_mask] -= self.lr_x * clipped_dEdx
-    
 
     def gradient_descent_update_w(self, grad_type, parameter, delta, learning_rate, nodes_or_edge2_update, 
                                 optimizer=None, use_optimizer=False):
@@ -936,7 +874,70 @@ class PCgraph(torch.nn.Module):
 
                 self.trace_data.append(x_batch)
 
+
+
+    def gradient_descent_update_values(self, grad_type, parameter, delta, learning_rate, nodes_or_edge2_update,
+                                       optimizer, use_optimizer, train):
+
+             # if self.use_learning_optimizer:
+                
+        #     self.ensure_grad(self.values_dummy)
+
+        #     self.optimizer_values.zero_grad()
+
+        #     if self.values_dummy.grad is None:
+        #         self.values_dummy.grad = torch.zeros_like(self.values_dummy)
+        #     else:
+        #         self.values_dummy.grad.zero_()
+
+        #     if self.reshape:
+        #         self.values_dummy.grad[:, di:upper] = delta[:, di:upper]
+        #     else:
+        #         self.values_dummy.grad[nodes_or_edge2_update] = delta[nodes_or_edge2_update]
+
+        #     self.optimizer_values.step()
         
+        di = 784
+        upper = -10 if train else self.num_vertices
+        update_mask = self.internal_mask_train if train else self.update_mask_test
+
+        self.use_learning_optimizer = True  
+        # self.use_learning_optimizer = False 
+        
+        if self.use_learning_optimizer and optimizer:
+
+            self.optimizer_values.zero_grad()
+
+            # Ensure parameter has grad attribute (always true for nn.Parameter)
+            if self.values_dummy.grad is None:
+                self.values_dummy.grad = torch.zeros_like(self.values_dummy)
+
+            self.values_dummy.grad.zero_()  # Clear previous grad values
+
+            if self.reshape:
+                # Update only internal nodes: [di:upper]
+                self.values_dummy.grad[:, di:upper] = delta[:, di:upper]
+            else:
+                # Update nodes or edges specified by nodes_or_edge2_update
+                self.values_dummy.grad[update_mask] = delta[update_mask]
+
+            self.optimizer_values.step()
+
+        else:
+            # Manually update the parameter using gradient descent
+            if self.reshape:
+                # Internal node updates only
+                dEdx_internal = delta[:, di:upper]
+
+                # self.values[:, di:upper] -= self.lr_x * dEdx_internal
+                self.values_dummy.data[:, di:upper] -= self.lr_x * dEdx_internal  # force sync
+            else:
+                dEdx_internal = delta[self.internal_mask_train]
+
+                # self.values[self.internal_mask_train] -= self.lr_x * dEdx_internal
+                self.values_dummy.data[self.internal_mask_train] -= self.lr_x * dEdx_internal
+
+
 
     def update_xs(self, train=True, trace=False):
 
@@ -955,7 +956,8 @@ class PCgraph(torch.nn.Module):
         self.lst_internal_error = []
 
         # At the start of update_xs()
-        self.values_dummy.data = self.values.data.clone().to(self.device)
+        self.values_dummy.data = self.values.data.clone().to(self.device).contiguous()
+        # print("self.values_dummy", self.values_dummy.shape)
 
         for t in range(T): 
          
@@ -969,9 +971,10 @@ class PCgraph(torch.nn.Module):
             # self.mu = self.updates.pred(self.values.to(self.device), self.w.to(self.device))
             self.mu = self.updates.pred(self.values_dummy, self.w.to(self.device))
 
-            # self.errors = self.values - self.mu
-            self.errors = self.values_dummy - self.mu
+            self.errors = self.values - self.mu
+            # self.errors_dum = self.values_dummy - self.mu_dum
         
+
             if self.reshape:
                
                 # BEFORE using use_input_error
@@ -1019,48 +1022,36 @@ class PCgraph(torch.nn.Module):
                                 "Validation/sensory_energy_mean": total_sensor_error,
                                 })
                     
-            #             
+                         
             # x = self.x.T.contiguous().view(-1, 1).to(DEVICE)  # Shape: [num_nodes, batch_size]
             # error = self.e.T.contiguous().view(-1, 1).to(DEVICE)  # Shape: [num_nodes, batch_size]
             
+            # print("-------------------")
+            # print("self.values", self.values.shape)
+            # print("self.errors", self.errors.shape)
+
             # dEdx = self.updates.grad_x(self.values, self.errors, self.w)
             dEdx = self.updates.grad_x(self.values_dummy, self.errors, self.w)
+         
+            # dEdx = self.updates.grad_x(self.values_dummy, self.errors_dum, self.w)
+            # dEdx_dum = self.updates.grad_x(self.values_dummy, self.errors_dum, self.w)
+            # print("dEdx_dum", dEdx_dum.shape)
 
-            # clipped_dEdx = torch.clamp(dEdx, -1, 1)
-
-
-            # if self.reshape:
-                
-            #     dEdx = dEdx[:, di:upper]
-            #     # print("dEdx", dEdx.shape)
-
-            #     # dEdx = self.structure.grad_x(self.x, self.e, self.w, self.b,train=train) # only hidden nodes
-            #     self.values[:,di:upper] -= self.lr_x*dEdx 
-            # else:
-            #     dEdx = dEdx[update_mask]
-
-            #     # clipped_dEdx = torch.clamp(dEdx, -1, 1)
-            #     clipped_dEdx = dEdx
-            #     self.values[update_mask] -= self.lr_x * clipped_dEdx
-        
-
-        
-            # Use the gradient descent update for updating values
             self.gradient_descent_update_values(
                 grad_type="values",
-                parameter=self.values_dummy,  # Assuming values are in self.data.x[:, 0]
+                parameter=self.values_dummy,  
                 delta=dEdx,
                 learning_rate=self.lr_values,
 
                 # nodes_or_edge2_update=self.nodes_2_update,  # Mandatory
                 nodes_or_edge2_update=update_mask,  # Mandatory
 
-                optimizer=self.optimizer_values if self.use_learning_optimizer else None,
-                use_optimizer=self.use_learning_optimizer
-            )
+                optimizer=self.optimizer_values,
+                # optimizer=self.optimizer_values if self.use_learning_optimizer else None,
+                use_optimizer=self.use_learning_optimizer,
+                train=train)
 
-
-            ## Copy updated dummy values back into self.values
+            ## Copy updated dummy values back into self.values; also needed for testing()
             if self.reshape:
                 self.values[:, :] = self.values_dummy.data
             else:
@@ -1079,28 +1070,6 @@ class PCgraph(torch.nn.Module):
             #         break            
 
            
-            
-
-
-    # def train_supervised(self, X_batch, y_batch): 
-
-    #     # X_batch = to_vector(X_batch)                  # makes e.g. 28*28 -> 784
-    #     # y_batch = onehot(y_batch, N=self.structure.shape[2])    # makes e.g. 3 -> [0,0,0,1,0,0,0,0,0,0]
-
-    #     # self.reset_nodes(batch_size=X_batch.shape[0])        
-    #     # self.clamp_input(X_batch)
-    #     # # self.init_hidden()
-    #     # # print("ommit init hidden")
-    #     # self.clamp_target(y_batch)
-
-    #     self.update_xs(train=True)
-    #     self.update_w()
-
-    #     if not self.incremental:
-    #         # self.update_w()
-    #         print("optimizer step end ")
-    #         self.optimizer.step(self.params, self.grads, batch_size=X_batch.shape[0])
-
 
 
 
@@ -1256,10 +1225,9 @@ class PCgraph(torch.nn.Module):
         # print("mean w 1 ", self.w.mean())
         # print("update_w")
         
-
         # self.optimizer_weights.zero_grad()
         self.w.grad = self.dw
-
+        
         self.optimizer_weights.step()
 
         # self.edges_2_update = None 

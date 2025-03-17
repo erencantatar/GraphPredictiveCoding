@@ -825,7 +825,8 @@ model_params = {
     "T": (args.T_train, args.T_test),  # Number of iterations for gradient descent. (T_train, T_test)
 
     "incremental_learning": True if args.model_type == "IPC" else False, 
-    "use_input_error": False,
+    "use_input_error": False if args.graph_type == "single_hidden_layer" else True,  # "use_input_error": True,
+    # "use_input_error": True,
 
     "update_rules": args.update_rules,  # "Van_Zwol" or "salvatori", "vectorized"
     "weight_init": args.weight_init,   # xavier, 'uniform', 'based_on_f', 'zero', 'kaiming'
@@ -896,9 +897,9 @@ num_epochs = 40
 
 # break_num = 1200
 # break_num = 200
-break_num = 500
-# break_num = 100
-break_num = 50
+# break_num = 500
+# break_num = 200
+break_num = 100
 # break_num = 20
 
 DEVICE = device 
@@ -914,6 +915,8 @@ TASK_config = {
 model.log_node_connectivity_distribution_to_wandb(direction="both")
 
 # model.log_edge_weight_distribution_to_wandb()
+
+accuracy_means = []
 
 with torch.no_grad():
 
@@ -961,6 +964,9 @@ with torch.no_grad():
         break_num_eval = 10
         if "generation" in TASK:
             break_num_eval = 1
+
+        if TASK == ["classification"]:
+            break_num_eval = len(val_loader)
         # break_num_eval = 10
             
         print("\n----test_iterative-----")
@@ -995,10 +1001,11 @@ with torch.no_grad():
         if "classification" in TASK:
             accuracy_mean = (sum(accs) / len(accs)) if accs else 0
             val_acc.append(accuracy_mean)
+            accuracy_means.append(accuracy_mean)
 
             print("epoch", epoch, "accuracy_mean", accuracy_mean)
 
-            if epoch % 10 == 0:
+            if epoch % 10 == 0 or accuracy_mean > 0.90:
                 print("delta pred ", y_pred - y_batch)
 
             wandb.log({
@@ -1053,6 +1060,8 @@ with torch.no_grad():
         # plt.close()
 
 
-
+print("done training")
+print(max(accuracy_means))
+print(accuracy_means)
 
 

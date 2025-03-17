@@ -53,7 +53,7 @@ graph_type_options = {
         
         "stochastic_block": {
             "params": {
-                "num_communities": 250,      # Number of communities (50)
+                "num_communities": 100,      # Number of communities (50)
                 "community_size": 50,       # Size of each community (40)
                 "p_intra": 0.3,             # Probability of edges within the same community
                 "p_inter": 0.1,             # Probability of edges between different communities
