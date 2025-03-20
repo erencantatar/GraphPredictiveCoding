@@ -607,6 +607,7 @@ class PCgraph(torch.nn.Module):
         self.dw = None 
         self.trace = False
         self.epoch = epoch
+        self.do_gen = True 
 
         # self.update_mask = self.update_mask_train
 
@@ -879,7 +880,10 @@ class PCgraph(torch.nn.Module):
     def gradient_descent_update_values(self, grad_type, parameter, delta, learning_rate, nodes_or_edge2_update,
                                        optimizer, use_optimizer, train):
 
-             # if self.use_learning_optimizer:
+     
+        dEdx = delta 
+        
+        # if self.use_learning_optimizer:
                 
         #     self.ensure_grad(self.values_dummy)
 
@@ -896,46 +900,111 @@ class PCgraph(torch.nn.Module):
         #         self.values_dummy.grad[nodes_or_edge2_update] = delta[nodes_or_edge2_update]
 
         #     self.optimizer_values.step()
+
+        # else:
+
+        if self.reshape:
+            # if self.task == "classification":
+            #     di = 784
+            #     upper = -10 if train else self.num_vertices
+            # if self.task in ["generation", "reconstruction", "denoising", "occlusion"]:
+            # if train:
+            #     di = 784
+            #     upper = -10
+            # else:
+            #     di = 0
+            #     upper = 784
+
+
+            dEdx = delta.flatten()[nodes_or_edge2_update]
+            # print("dEdx", dEdx.shape)
+
+            # dEdx = self.structure.grad_x(self.x, self.e, self.w, self.b,train=train) # only hidden nodes
+            # self.values[:,di:upper] -= self.lr_x*dEdx 
+            tmp = self.values_dummy.data.flatten()
+            tmp[nodes_or_edge2_update] -= self.lr_x*dEdx
+            self.values_dummy.data = tmp.reshape(self.values_dummy.shape) 
         
-        di = 784
-        upper = -10 if train else self.num_vertices
-        update_mask = self.internal_mask_train if train else self.update_mask_test
+            
+            # if train or self.train:
+            #     di = 784
+            #     upper = -10 
+            # else:
+            #     if self.task == "classification":
+            #         di = 784
+            #         upper = -10
+                
+            #     if self.task in ["generation", "reconstruction", "denoising", "occlusion"]:
+            #         di = 0
+            #         upper = 784
 
-        self.use_learning_optimizer = True  
-        # self.use_learning_optimizer = False 
-        
-        if self.use_learning_optimizer and optimizer:
+            # dEdx = delta[:, di:upper]
+            # # print("dEdx", dEdx.shape)
 
-            self.optimizer_values.zero_grad()
-
-            # Ensure parameter has grad attribute (always true for nn.Parameter)
-            if self.values_dummy.grad is None:
-                self.values_dummy.grad = torch.zeros_like(self.values_dummy)
-
-            self.values_dummy.grad.zero_()  # Clear previous grad values
-
-            if self.reshape:
-                # Update only internal nodes: [di:upper]
-                self.values_dummy.grad[:, di:upper] = delta[:, di:upper]
-            else:
-                # Update nodes or edges specified by nodes_or_edge2_update
-                self.values_dummy.grad[update_mask] = delta[update_mask]
-
-            self.optimizer_values.step()
-
+            # # dEdx = self.structure.grad_x(self.x, self.e, self.w, self.b,train=train) # only hidden nodes
+            # # self.values[:,di:upper] -= self.lr_x*dEdx 
+            # self.values_dummy.data[:,di:upper] -= self.lr_x*dEdx 
+    
         else:
-            # Manually update the parameter using gradient descent
-            if self.reshape:
-                # Internal node updates only
-                dEdx_internal = delta[:, di:upper]
+            dEdx = dEdx[nodes_or_edge2_update]
 
-                # self.values[:, di:upper] -= self.lr_x * dEdx_internal
-                self.values_dummy.data[:, di:upper] -= self.lr_x * dEdx_internal  # force sync
-            else:
-                dEdx_internal = delta[self.internal_mask_train]
+            # clipped_dEdx = torch.clamp(dEdx, -1, 1)
+            clipped_dEdx = dEdx
+            # self.values[nodes_or_edge2_update] -= self.lr_x * clipped_dEdx
+            self.values_dummy.data[nodes_or_edge2_update] -= self.lr_x * clipped_dEdx
+    
 
-                # self.values[self.internal_mask_train] -= self.lr_x * dEdx_internal
-                self.values_dummy.data[self.internal_mask_train] -= self.lr_x * dEdx_internal
+
+        
+        # if self.task == "classification":
+        #     di = 784
+        #     upper = -10 if train else self.num_vertices
+        # if self.task in ["generation", "reconstruction", "denoising", "occlusion"]:
+        #     if train:
+        #         di = 784
+        #         upper = -10
+        #     else:
+        #         di = 0
+        #         upper = 784
+        
+        # update_mask = self.internal_mask_train if train else self.update_mask_test
+
+        # # self.use_learning_optimizer = True  
+        # self.use_learning_optimizer = False 
+        # # delta = -delta
+        
+        # if self.use_learning_optimizer and optimizer:
+
+        #     self.optimizer_values.zero_grad()
+
+        #     # Ensure parameter has grad attribute (always true for nn.Parameter)
+        #     if self.values_dummy.grad is None:
+        #         self.values_dummy.grad = torch.zeros_like(self.values_dummy)
+
+        #     self.values_dummy.grad.zero_()  # Clear previous grad values
+
+        #     if self.reshape:
+        #         # Update only internal nodes: [di:upper]
+        #         self.values_dummy.grad[:, di:upper] = delta[:, di:upper]
+        #     else:
+        #         # Update nodes or edges specified by nodes_or_edge2_update
+        #         self.values_dummy.grad[update_mask] = delta[update_mask]
+
+        #     self.optimizer_values.step()
+
+        # else:
+        #     # Manually update the parameter using gradient descent
+        #     if self.reshape:
+        #         # Internal node updates only
+        #         dEdx_internal = delta[:, di:upper]
+
+        #         # self.values[:, di:upper] -= self.lr_x * dEdx_internal
+        #         self.values_dummy.data[:, di:upper] -= self.lr_x * dEdx_internal  # force sync
+        #     else:
+        #         dEdx_internal = delta[self.internal_mask_train]
+
+        #         # self.values[self.internal_mask_train] -= self.lr_x * dEdx_internal
+        #         self.values_dummy.data[self.internal_mask_train] -= self.lr_x * dEdx_internal
 
 
 
@@ -961,6 +1030,8 @@ class PCgraph(torch.nn.Module):
 
         for t in range(T): 
          
+            self.t = t  
+
             self.get_trace(trace=trace)
 
             # self.w = self.adj * self.w 
@@ -971,8 +1042,9 @@ class PCgraph(torch.nn.Module):
             # self.mu = self.updates.pred(self.values.to(self.device), self.w.to(self.device))
             self.mu = self.updates.pred(self.values_dummy, self.w.to(self.device))
 
-            self.errors = self.values - self.mu
+            # self.errors = self.values - self.mu
             # self.errors_dum = self.values_dummy - self.mu_dum
+            self.errors = self.values_dummy - self.mu
         
 
             if self.reshape:
@@ -1014,12 +1086,15 @@ class PCgraph(torch.nn.Module):
                                 "epoch": self.epoch,
                                 "Training/internal_energy_mean": total_internal_error,
                                 "Training/sensory_energy_mean": total_sensor_error,
+                                "step": self.t
                                 })
                 else:
                     wandb.log({
                                 "epoch": self.epoch,
                                 "Validation/internal_energy_mean": total_internal_error,
                                 "Validation/sensory_energy_mean": total_sensor_error,
+                                "step": self.t
+
                                 })
                     
                          
@@ -1574,19 +1649,19 @@ class PCgraph(torch.nn.Module):
 
     def test_generative(self, data, labels, remove_label=False, save_imgs=True, wandb_logging=False):
         """
-        Runs a generative test on a batch, processes the batch, and plots 10 random samples.
+        Runs a generative test on a batch, processes the batch, and plots:
+            - 10 random generated images
+            - Trace over time + sensory/internal energy (in a mosaic layout)
         """
         import os
         import matplotlib.pyplot as plt
         import numpy as np
         import wandb
 
-        # IF task generation --> "Generation/Images"
-        # if task occlusion --> "Occlusion/Images"
-        # --> use self.task
-
-        folder = self.task 
-
+        # Directory for saving outputs
+        folder = self.task
+        save_dir = f"trained_models/gen_test"
+        # os.makedirs(save_dir, exist_ok=True)
 
         DEVICE = self.device
         input_size = 784
@@ -1595,167 +1670,117 @@ class PCgraph(torch.nn.Module):
         self.batch_size = data.shape[0]
         self.reset_nodes(batch_size=self.batch_size)
 
-        data = data.clone()
-        data = data.view(self.batch_size, self.num_vertices)
+        data = data.clone().view(self.batch_size, self.num_vertices)
 
-        
+        # ===== PREPARE GENERATION INPUT =====
         if self.task == "generation":
             if self.reshape:
                 self.values[:, :] = data
-
-                # Zero or randomize sensory nodes
-                # self.values[:, 0:input_size] = torch.zeros_like(self.values[:, 0:input_size])
                 self.values[:, 0:input_size] = torch.randn_like(self.values[:, 0:input_size])
-                # self.values[:, 0:input_size] = torch.rand_like(self.values[:, 0:input_size])
-                # self.values[:, 0:input_size] = 0
 
-                # if remove_label:
-                #     self.values[:, -output_size:] = 0.0
-                
-                # assert onehot equal to label 
-                # print("labels", labels)
-                # print("self.values[:, -output_size:]", self.values[:, -output_size:].argmax(dim=1))
                 assert (self.values[:, -output_size:].argmax(dim=1) == labels).all()
-
             else:
-                data = data.view(self.batch_size, self.num_vertices)
-
-                # Zero or randomize sensory nodes
-                # data[:, 0:input_size] = torch.zeros_like(data[:, 0:input_size])
                 data[:, 0:input_size] = torch.randn_like(data[:, 0:input_size])
-                # data[:, 0:input_size] = torch.rand_like(data[:, 0:input_size])
-
-                # if remove_label:
-                #     data[:, -output_size:] = 0.0
-
                 self.values = data.view(self.batch_size * self.num_vertices, 1)
-                # self.values[self.sensory_indices_batch] = 0.0
 
-
-        # Run inference
+        # ===== INFERENCE =====
         self.trace_data = []
         self.trace = True
         self.update_xs(train=False, trace=True)
 
+        logits = self.values.view(self.batch_size, self.num_vertices)
+        generated_imgs = logits[:, :784].view(self.batch_size, 28, 28)
 
-        # if self.reshape:
-        #     generated_imgs = self.values.view(self.batch_size, -1)   # batch,10
-        #     generated_imgs = generated_imgs[:, :784] # batch,10
-        #     generated_imgs = generated_imgs.view(self.batch_size, 28, 28)   # batch,10
+        # ====== 1. PLOT 10 RANDOM GENERATED IMAGES ======
 
-        # else:   
-        #     # generated_imgs_test = self.values.view(self.batch_size, -1)   # batch,10
-        #     # print("generated_imgs_test", generated_imgs_test.shape) 
+        n_images = min(10, len(generated_imgs))  # Don't plot more images than exist
 
-        #     # Select final reconstructions from the sensory nodes
-        #     generated_imgs = self.values[self.sensory_indices_batch]
-        #     generated_imgs = generated_imgs.view(self.batch_size, 28, 28)
-
-
-        # generated_imgs = self.values[self.sensory_indices_batch]   # batch,10
-        # generated_imgs = generated_imgs.view(self.batch_size, 28, 28)   # batch,10
-
-        logits = self.values.view(self.batch_size, self.num_vertices)   # batch,10
-        generated_imgs = logits[:, :784] # batch,10
-        generated_imgs = generated_imgs.view(self.batch_size, 28, 28)   # batch,10
-
-        # Pick 10 random images from the batch
-        num_to_show = 10
-        if self.batch_size <= num_to_show:
-            indices_to_plot = list(range(self.batch_size))
+        # Random offset: between 0 and (len - n_images), ensuring we stay within bounds
+        if len(generated_imgs) > n_images:
+            random_offset = np.random.randint(0, len(generated_imgs) - n_images + 1)
         else:
-            random_offset = np.random.randint(0, self.batch_size - num_to_show + 1)
-            indices_to_plot = list(range(random_offset, random_offset + num_to_show))
+            random_offset = 0
 
-        fig, axs = plt.subplots(1, num_to_show, figsize=(num_to_show * 2, 2))
-        for idx, img_idx in enumerate(indices_to_plot):
+        print(f"Plotting {n_images} images starting from index {random_offset}")
+
+        fig_gen, axs = plt.subplots(1, n_images, figsize=(n_images * 2, 2))
+
+        # If there's only 1 image, axs is not iterable, so force it into a list
+        if n_images == 1:
+            axs = [axs]
+
+        # Iterate over the selected image indices
+        for idx in range(n_images):
+            img_idx = random_offset + idx
+
             axs[idx].imshow(generated_imgs[img_idx].cpu().detach().numpy(), cmap='gray')
             axs[idx].axis("off")
-            axs[idx].set_title(f"{labels[img_idx].item()}")
+
+            # If labels available, use label index; fallback to image index
+            if labels is not None and len(labels) > img_idx:
+                axs[idx].set_title(f"{labels[img_idx].item()}")
+            else:
+                axs[idx].set_title(f"Img {img_idx}")
 
         plt.tight_layout()
 
-        # Save image grid
-        # if save_imgs:
-        #     save_dir = f"trained_models/{self.task}/"
-        #     os.makedirs(save_dir, exist_ok=True)
-        #     filename = f"{save_dir}/generated_imgs_{self.epoch}.png"
-        #     plt.savefig(filename)
-        #     print(f"Saved generated image grid to: {filename}")
+        save_imgs = True  ## overrride save_imgs
+        if save_imgs:
+            img_path = os.path.join(save_dir, f"generated_imgs_epoch_{self.epoch}.png")
+            plt.savefig(img_path)
+            print(f"Saved generated image grid to: {img_path}")
 
-        # Optionally log to Weights & Biases
         if wandb_logging:
             wandb.log({
-                f"{folder}/Images": wandb.Image(
-                    fig, caption=f"Generated Images at Epoch {self.epoch}"
-                )
+                f"{folder}/Images": wandb.Image(fig_gen, caption=f"Generated Images at Epoch {self.epoch}")
             })
-            print(f"Logged generated images to WandB under '{self.task}/Images' at epoch {self.epoch}")
 
-        plt.close(fig)
-        print("test_generative() complete!\n")
+        plt.close(fig_gen)
 
-        # plot trace
-        # ----- Plot TRACE over time -----
-        # ----- Plot TRACE over time -----
+        # ====== 2. TRACE + ENERGY MOSAIC ======
         if self.trace_data and len(self.trace_data) > 0:
             trace_steps = len(self.trace_data)
+            # normalize_trace_images = True
+            normalize_trace_images = False 
 
-            # ====== Toggle normalization on/off ======
-            normalize_trace_images = True  # <<< ---- Toggle this to False if you don't want normalization
-            norm_status = "Normalized" if normalize_trace_images else "Raw"
-
-            # ====== Create snapshot indices ======
+            # ====== SNAPSHOT INDICES ======
             snapshot_indices = []
-
-            # Dense at start (first 20% of T)
-            early_steps = list(range(min(trace_steps, 5)))  # E.g., 0,1,2,3,4
+            early_steps = list(range(min(trace_steps, 5)))
             snapshot_indices.extend(early_steps)
 
-            # Sparse in middle (20% - 80% of T)
             middle_start = early_steps[-1] + 1 if early_steps else 0
             middle_end = int(0.8 * trace_steps)
-            middle_steps = list(range(middle_start, middle_end, max((middle_end - middle_start) // 4, 1)))  # 4 middle points
+            middle_steps = list(range(middle_start, middle_end, max((middle_end - middle_start) // 4, 1)))
             snapshot_indices.extend(middle_steps)
 
-            # Dense at end (last 20% of T)
             late_steps = list(range(max(middle_end, trace_steps - 5), trace_steps))
             snapshot_indices.extend(late_steps)
 
-            # Ensure uniqueness and sorted order
             snapshot_indices = sorted(set(snapshot_indices))
-
-            print(f"Trace steps: {trace_steps}")
-            print(f"Snapshot indices: {snapshot_indices}")
-
-            # ====== Build subplot layout ======
             num_snapshots = len(snapshot_indices)
+
+            # ====== CREATE MOSAIC ======
             mosaic_rows = [
-                [str(i) for i in range(num_snapshots)],  # Snapshot row
-                ["F"] * (num_snapshots // 2) + ["G"] * (num_snapshots - num_snapshots // 2),  # Energy + final value
+                [str(i) for i in range(num_snapshots)],  # Top: Trace snapshots
+                ["E"] * num_snapshots,                  # Bottom: Energy plot spanning all columns
             ]
 
-            # Figure size scales with number of snapshots
-            fig_trace, ax = plt.subplot_mosaic(mosaic_rows, figsize=(num_snapshots * 3, 6))
-
+            fig_mosaic, ax = plt.subplot_mosaic(mosaic_rows, figsize=(num_snapshots * 3, 6))
             label = labels[0].item() if labels is not None else "digit Unknown"
-            # Add the main title, showing whether images are normalized or raw
-            fig_trace.suptitle(f"Trace over T Steps ({norm_status}) {label}", fontsize=16, fontweight='bold')
 
-            fig_trace.text(0.02, 0.67, "Values [0-T]", ha='center', va='center', fontsize=12, rotation='vertical', fontweight='bold')
+            fig_mosaic.suptitle(f"Trace & Energy (Digit: {label}) - Epoch {self.epoch}", fontsize=16, fontweight='bold')
 
-            # ====== Normalize function ======
+            # ====== Normalize Function ======
             def normalize_image(img):
                 img_min = img.min()
                 img_max = img.max()
                 if img_max - img_min < 1e-8:
-                    return img * 0  # If constant image, return zeros to avoid NaNs
+                    return img * 0
                 return (img - img_min) / (img_max - img_min)
 
-            # ====== Plot snapshots from trace_data ======
+            # ====== TOP ROW: TRACE SNAPSHOTS ======
             for idx, t_idx in enumerate(snapshot_indices):
                 img = self.trace_data[t_idx][0]
-
                 if normalize_trace_images:
                     img = normalize_image(img)
 
@@ -1763,39 +1788,38 @@ class PCgraph(torch.nn.Module):
                 ax[str(idx)].set_title(f"T = {t_idx}")
                 ax[str(idx)].axis('off')
 
-            # ====== Plot Energy (optional) ======
-            if sum(self.lst_internal_error) > 0 and sum(self.lst_sensor_error) > 0:
-                ax["F"].plot(self.lst_internal_error, label="Internal Energy")
-                ax["F"].plot(self.lst_sensor_error, label="Sensory Energy")
-                ax["F"].legend()
+            # ====== BOTTOM ROW: ENERGY LINE PLOT ======
+            ax_energy = ax["E"]
 
-            # ====== Final Value State ======
-            final_img = self.trace_data[-1][0]
+            steps = list(range(trace_steps))
 
-            if normalize_trace_images:
-                final_img = normalize_image(final_img)
+            ax_energy.plot(steps, self.lst_internal_error, label="Internal Energy", color="tab:red")
+            ax_energy.plot(steps, self.lst_sensor_error, label="Sensory Energy", color="tab:blue")
 
-            ax["G"].imshow(final_img, cmap='gray')
-            ax["G"].set_title(f"Final Values T={trace_steps - 1}")
-            ax["G"].axis('off')
+            ax_energy.set_xlabel("Time Step")
+            ax_energy.set_ylabel("Energy")
+            ax_energy.set_title("Energy over Time")
+            ax_energy.legend()
 
             plt.tight_layout()
 
-            # if save_imgs:
-            #     filename_trace = f"{save_dir}/trace_{self.epoch}.png"
-            #     fig_trace.savefig(filename_trace)
-            #     print(f"Saved trace plot to: {filename_trace}")
+            # ====== SAVE MOSAIC LOCALLY ======
+            if save_imgs:
+                trace_path = os.path.join(save_dir, f"trace_and_energy_epoch_{self.epoch}.png")
+                fig_mosaic.savefig(trace_path)
+                print(f"Saved trace & energy mosaic to: {trace_path}")
 
+            # ====== LOG TO WANDB ======
             if wandb_logging:
                 wandb.log({
-                    f"{folder}/Trace": wandb.Image(fig_trace, caption=f"Trace Images at Epoch {self.epoch}")
+                    f"{folder}/Trace_Energy_Mosaic": wandb.Image(fig_mosaic, caption=f"Trace & Energy Mosaic at Epoch {self.epoch}")
                 })
+                print(f"Logged trace & energy mosaic to WandB under {folder}/Trace_Energy_Mosaic")
 
-            plt.close(fig_trace)
-      
+            plt.close(fig_mosaic)
 
-
-        return True 
+        print("test_generative() complete!\n")
+        return True
 
 
     def test_iterative(self, data, eval_types=None, remove_label=True):
@@ -1815,13 +1839,15 @@ class PCgraph(torch.nn.Module):
         if "generation" in eval_types:
             self.set_task("generation")       # not update the supervised nodes, only sensory nodes
 
-            self.trace_data = []
-            self.trace = True 
+            if self.do_gen:
+                self.trace_data = []
+                self.trace = True 
 
-            self.test_generative(graph.clone().to(self.device), 
-                                 label.clone().to(self.device),
-                                 remove_label=False, save_imgs=False, wandb_logging=True)
-            
+                self.test_generative(graph.clone().to(self.device), 
+                                    label.clone().to(self.device),
+                                    remove_label=False, save_imgs=True, wandb_logging=True)
+                self.do_gen = False 
+
             return 0 # Placeholder ""
         
         if "occlusion" in eval_types:

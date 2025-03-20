@@ -47,7 +47,7 @@ module load Anaconda3/2022.05
 cd /home/etatar/GraphPredCod2/scr
 source activate PredCod
 
-module purge
+module purge  
 module load 2022
 module load Anaconda3/2022.05
 cd /home/etatar/GraphPredCod2/scr2

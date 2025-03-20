@@ -123,15 +123,24 @@ parser.add_argument('--update_rules', type=str, default="vanZwol_AMB", choices=[
 parser.add_argument('--delta_w_selection', type=str, required=True, choices=["all", "internal_only"], help="Which weights to optimize in delta_w")
 parser.add_argument('--use_grokfast', type=str, default="False", choices=["True", "False"], help="GroKfast fast and slow weights before using the optimizer")
 
+
+
+# -----pre-training----- 
+# TODO find appropriate  lr_values and lr_weights giv
+
+
 # -----training----- 
 parser.add_argument('--epochs', type=int, default=5, help='Number of epochs to train.')
 parser.add_argument('--batch_size', type=int, default=1, help='Batch size.')
 parser.add_argument('--seed', type=int, default=42, help='Random seed.')
 parser.add_argument('--use_learning_optimizer', '--optimizer', type=true_with_float, default=False,
                     help="Either False or, if set to True, requires a float value for weight decay.") 
+parser.add_argument('--break_num_train', type=int, default=50,
+                    help='Max number of training steps per epoch. If set to 0, runs for the full length of the train_loader.')
 
-# ---after training-----
-parser.add_argument('--set_abs_small_w_2_zero',  choices=['True', 'False'], required=True, help="....")
+
+# ---post-training-----
+parser.add_argument('--set_abs_small_w_2_zero',  choices=['True', 'False'], required=True, help="Remove edges with small weights in the graph before eval on test set")
 
 # logging 
 import wandb
@@ -792,7 +801,9 @@ adj_matrix_pyg = to_dense_adj(graph.edge_index)[0]
 
 print("adj_matrix_pyg", adj_matrix_pyg.shape)
 
-from model import PCgraph
+# from model_latest import PCgraph
+from model_latest2 import PCgraph
+# from model import PCgraph
 
 model_params = {
     "delta_w_selection": args.delta_w_selection,  # "all" or "internal_only"
@@ -825,7 +836,8 @@ model_params = {
     "T": (args.T_train, args.T_test),  # Number of iterations for gradient descent. (T_train, T_test)
 
     "incremental_learning": True if args.model_type == "IPC" else False, 
-    "use_input_error": False if args.graph_type == "single_hidden_layer" else True,  # "use_input_error": True,
+    "use_input_error": False,
+    # "use_input_error": False if args.graph_type == "single_hidden_layer" else True,  # "use_input_error": True,
     # "use_input_error": True,
 
     "update_rules": args.update_rules,  # "Van_Zwol" or "salvatori", "vectorized"
@@ -899,8 +911,14 @@ num_epochs = 40
 # break_num = 200
 # break_num = 500
 # break_num = 200
-break_num = 100
+# break_num = 100
 # break_num = 20
+# break_num = 80
+
+if args.break_num_train == 0:
+    break_num = len(train_loader)
+else:
+    break_num = args.break_num_train
 
 DEVICE = device 
 
@@ -961,12 +979,15 @@ with torch.no_grad():
         model.test_()
         cntr = 0
 
-        break_num_eval = 10
-        if "generation" in TASK:
-            break_num_eval = 1
+        break_num_eval = 20
+        # break_num_eval = len(val_loader)
 
-        if TASK == ["classification"]:
-            break_num_eval = len(val_loader)
+        if TASK == ["generation"]:
+            break_num_eval = 1
+        #     break_num_eval = 1
+
+        # if TASK == ["classification"]:
+
         # break_num_eval = 10
             
         print("\n----test_iterative-----")
@@ -984,7 +1005,7 @@ with torch.no_grad():
                 y_pred = PCG.test_iterative( (X_batch, y_batch), 
                                             eval_types=[task], remove_label=True)
 
-            # do generation once
+            # # do generation once
             if "generation" in TASK_copy and "classification" in TASK_copy:
                 TASK_copy = ["classification"]
 
@@ -1020,8 +1041,8 @@ with torch.no_grad():
         if not os.path.exists(f"trained_models/{args.graph_type}/weights/"):
             os.makedirs(f"trained_models/{args.graph_type}/weights/")
         
-        if epoch % 10 == 0:
-            plot_model_weights(model, args.graph_type, model_dir=None, save_wandb=str(epoch))
+        # if epoch % 10 == 0:
+        #     plot_model_weights(model, args.graph_type, model_dir=None, save_wandb=str(epoch))
 
         # # save weights
         # w = PCG.w.detach().cpu().numpy()
