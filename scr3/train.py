@@ -123,7 +123,8 @@ parser.add_argument('--update_rules', type=str, default="vanZwol_AMB", choices=[
 parser.add_argument('--delta_w_selection', type=str, required=True, choices=["all", "internal_only"], help="Which weights to optimize in delta_w")
 parser.add_argument('--use_grokfast', type=str, default="False", choices=["True", "False"], help="GroKfast fast and slow weights before using the optimizer")
 
-
+# required use_input_error False or True 
+parser.add_argument('--use_input_error', type=str, default="False", choices=["True", "False"], help="Use input error in the model")
 
 # -----pre-training----- 
 # TODO find appropriate  lr_values and lr_weights giv
@@ -135,7 +136,7 @@ parser.add_argument('--batch_size', type=int, default=1, help='Batch size.')
 parser.add_argument('--seed', type=int, default=42, help='Random seed.')
 parser.add_argument('--use_learning_optimizer', '--optimizer', type=true_with_float, default=False,
                     help="Either False or, if set to True, requires a float value for weight decay.") 
-parser.add_argument('--break_num_train', type=int, default=50,
+parser.add_argument('--break_num_train', type=int, default=200,
                     help='Max number of training steps per epoch. If set to 0, runs for the full length of the train_loader.')
 
 
@@ -166,6 +167,19 @@ print(f'Using device: {device}')
 print(f"Seed used", random_seed)
 if torch.cuda.is_available():
     print("Device name: ", torch.cuda.get_device_name(0))
+
+import os
+os.environ["NETWORKX_AUTOMATIC_BACKENDS"] = "cugraph"
+import networkx as nx
+
+if hasattr(nx, "__backend__"):
+    print(f"NetworkX backend in use: {nx.__backend__.__name__}")
+    if "cugraph" in nx.__backend__.__name__.lower():
+        print("✅ NetworkX is using the CuGraph (GPU) backend.")
+    else:
+        print("⚠️ NetworkX is NOT using the CuGraph backend.")
+else:
+    print("❌ NetworkX backend attribute not found. You're likely not using a version with backend support (3.2+ required).")
 
 
 
@@ -666,7 +680,6 @@ DATASET_PATH = "../data"
 
 from torch.utils.data import DataLoader, random_split
 
-batch_size = args.batch_size
 
 # Define dataset sizes
 input_size = 784  # Flattened MNIST image
@@ -700,9 +713,11 @@ train_set, val_set = random_split(train_dataset, [50000, 10000])
 
 
 # Create DataLoaders
+val_loader_batch_size = (args.batch_size if args.batch_size > 10 else 20)
+
 train_loader = DataLoader(train_set, batch_size=args.batch_size, drop_last=False, num_workers=4, pin_memory=True)
-val_loader = DataLoader(val_set, batch_size=args.batch_size, shuffle=False, drop_last=False, num_workers=4, pin_memory=True)
-test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, drop_last=False, num_workers=4, pin_memory=True)
+val_loader = DataLoader(val_set, batch_size=val_loader_batch_size, shuffle=False, drop_last=False, num_workers=4, pin_memory=True)
+test_loader = DataLoader(test_dataset, batch_size=val_loader_batch_size, shuffle=False, drop_last=False, num_workers=4, pin_memory=True)
 
 
 # graph_type [FC, generative, discriminative, SBM, (SBM_hierarchy, custom_two_branch, two_branch_graph) ]
@@ -741,14 +756,12 @@ print("done dataloader")
 
 
 # Inference
-f = "tanh"
+# f = "tanh"
 # f = "relu"
 lr_x = 0.5                  # inference rate                   # inference rate 
 T_train = 5                 # inference time scale
 T_test = 10              # unused for hierarchical model
 incremental = True          # whether to use incremental EM or not
-use_input_error = False     # whether to use errors in the input layer or not
-# use_input_error = True      # whether to use errors in the input layer or not
 
 # Learning
 lr_w = 0.00001      
@@ -772,7 +785,6 @@ lr_w = 0.00001
 # # T_train = 50                 # inference time scale
 # T_test = 15              # unused for hierarchical model
 # incremental = True          # whether to use incremental EM or not
-# use_input_error = False     # whether to use errors in the input layer or not
 
 # # Learning
 # lr_w = 0.00001      
@@ -808,16 +820,10 @@ from model_latest2 import PCgraph
 model_params = {
     "delta_w_selection": args.delta_w_selection,  # "all" or "internal_only"
     "use_bias": args.use_bias,
-    "lr_params": (args.lr_values, args.lr_weights),
-    #   (args.lr_gamma, args.lr_alpha), 
     "batch_size": train_loader.batch_size, 
  
  }
 
-
-# use_learning_optimizer = True if args.use_learning_optimizer else False
-# use_learning_optimizer = False  
-# use_learning_optimizer = True  
 
 model_params = {
 
@@ -830,13 +836,16 @@ model_params = {
     "num_internal": sum(graph.internal_indices),
     "adj": adj_matrix_pyg,             # 2d Adjacency matrix
     "edge_index": graph.edge_index,    # [2, num_edges] edge index
-    "batch_size": batch_size,
+    "batch_size": args.batch_size,
     # "learning_rates": (lr_x, lr_w),
     "learning_rates": (args.lr_values, args.lr_weights),
     "T": (args.T_train, args.T_test),  # Number of iterations for gradient descent. (T_train, T_test)
 
     "incremental_learning": True if args.model_type == "IPC" else False, 
-    "use_input_error": False,
+    
+    
+    "use_input_error": args.use_input_error,
+    # "use_input_error": False,
     # "use_input_error": False if args.graph_type == "single_hidden_layer" else True,  # "use_input_error": True,
     # "use_input_error": True,
 
@@ -935,12 +944,13 @@ model.log_node_connectivity_distribution_to_wandb(direction="both")
 # model.log_edge_weight_distribution_to_wandb()
 
 accuracy_means = []
+training_error_means = []
 
 with torch.no_grad():
 
     epoch_history = []
 
-    for epoch in tqdm(range(num_epochs), desc="Epoch Progress"):
+    for epoch in tqdm(range(args.epochs), desc="Epoch Progress"):
         model.train_(epoch)
         model.epoch = epoch
         total_loss = 0
@@ -976,10 +986,10 @@ with torch.no_grad():
     
         #### 
         loss, acc = 0, 0
-        model.test_()
+        model.test_(epoch)
         cntr = 0
 
-        break_num_eval = 20
+        break_num_eval = 10
         # break_num_eval = len(val_loader)
 
         if TASK == ["generation"]:
@@ -1040,9 +1050,10 @@ with torch.no_grad():
         import os 
         if not os.path.exists(f"trained_models/{args.graph_type}/weights/"):
             os.makedirs(f"trained_models/{args.graph_type}/weights/")
+
         
-        # if epoch % 10 == 0:
-        #     plot_model_weights(model, args.graph_type, model_dir=None, save_wandb=str(epoch))
+        if epoch % 10 == 1:
+            plot_model_weights(model, args.graph_type, model_dir=None, save_wandb=str(epoch))
 
         # # save weights
         # w = PCG.w.detach().cpu().numpy()
@@ -1085,4 +1096,51 @@ print("done training")
 print(max(accuracy_means))
 print(accuracy_means)
 
+
+if max(accuracy_means) > 0.90 or accuracy_means[-1] > 0.90:
+
+    # save weights; TODO
+
+    # eval on test set
+
+    
+    # for batch_no, batch in enumerate(tqdm(val_loader, total=min(len(val_loader)), desc=f"Epoch {epoch+1} - Validation", leave=False)):
+    for batch_no, (X_batch, y_batch)  in enumerate(tqdm(test_loader, total=len(test_loader), desc=f"Epoch {epoch+1} - Test Eval. | {TASK}", leave=False)):
+    
+        X_batch, y_batch = X_batch.to(DEVICE), y_batch.to(DEVICE)  # Move to GPU
+        
+        # y_pred = PCG.test_iterative(batch, eval_types=TASK_copy, remove_label=True)
+
+        for task in TASK_copy:
+            y_pred = PCG.test_iterative( (X_batch, y_batch), 
+                                        eval_types=[task], remove_label=True)
+
+        # # do generation once
+        if "generation" in TASK_copy and "classification" in TASK_copy:
+            TASK_copy = ["classification"]
+
+        # print("y_pred", y_pred.shape)
+        # print("y_pred", y_batch.shape)
+        if "classification" in TASK_copy:
+            mean_correct = torch.mean((y_pred == y_batch).float()).item()
+            acc += mean_correct
+            accs.append(mean_correct)
+        
+    print("Done test eval")
+
+    if "classification" in TASK:
+        accuracy_mean = (sum(accs) / len(accs)) if accs else 0
+        val_acc.append(accuracy_mean)
+        accuracy_means.append(accuracy_mean)
+
+        print("epoch", epoch, "accuracy_mean", accuracy_mean, "on size test set", len(accs) * args.batch_size)
+
+        # if epoch % 10 == 0 or accuracy_mean > 0.90:
+        #     print("delta pred ", y_pred - y_batch)
+
+        wandb.log({
+            "epoch": epoch,
+            "classification_test/accuracy_mean": accuracy_mean,
+            "classification_test/size":  len(accs) * args.batch_size,
+        })
 

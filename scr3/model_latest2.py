@@ -332,15 +332,19 @@ class PCgraph(torch.nn.Module):
         self._reset_params()
 
         self.use_learning_optimizer = use_learning_optimizer
+        self.weight_decay = use_learning_optimizer if type(use_learning_optimizer) == float else 0.0
+
         self.use_grokfast = use_grokfast    
         self.grads = None
         self.grokfast_type = "ema"  # "ema" or "ma"
         self.avg_grad = None
 
+        print("self.use_grokfast", self.use_grokfast)
+        print("use_learning_optimizer", self.use_learning_optimizer)
 
-        self.optimizer_weights = torch.optim.Adam([self.w], lr=self.lr_w, betas=(0.9, 0.999), eps=1e-7, weight_decay=0)
+        self.optimizer_weights = torch.optim.Adam([self.w], lr=self.lr_w, betas=(0.9, 0.999), eps=1e-7, weight_decay=self.weight_decay)
         # self.optimizer_values = torch.optim.Adam([self.values_dummy], lr=self.lr_x, betas=(0.9, 0.999), eps=1e-7, weight_decay=0)
-        self.optimizer_values = torch.optim.SGD([self.values_dummy], lr=self.lr_x)
+        self.optimizer_values = torch.optim.SGD([self.values_dummy], lr=self.lr_x, weight_decay=self.weight_decay, momentum=0, nesterov=False) # nestrov only for momentum > 0
 
         if self.use_learning_optimizer:
 
@@ -367,19 +371,9 @@ class PCgraph(torch.nn.Module):
      
 
         self.test_supervised = self.test_iterative
+        self.mu = 0 
 
-    # @property
-    # def hparams(self):
-    #     return {"lr_x": self.lr_x, "T_train": self.T_train, "T_test": self.T_test, "incremental": self.incremental,
-    #              "min_delta": self.min_delta,"early_stop": self.early_stop, "use_input_error": self.use_input_error, "node_init_std": self.node_init_std}
-
-    # @property
-    # def params(self):
-    #     return {"w": self.w, "b": self.b, "use_bias": self.use_bias}
     
-    # @property
-    # def grads(self):
-    #     return {"w": self.dw, "b": self.db}
 
     # def w_to_dense(self, w_sparse):
     #     # Convert 1D sparse weights back to dense (N, N) matrix
@@ -522,13 +516,17 @@ class PCgraph(torch.nn.Module):
         self.dw, self.db = None, None
 
     def reset_nodes(self, batch_size=1):
+        self.t = 0 
         if self.reshape:
             self.errors = torch.empty(batch_size, self.num_vertices, device=DEVICE)
             self.values = torch.zeros(batch_size, self.num_vertices, device=DEVICE)
+            # self.mu     = torch.zeros(batch_size, self.num_vertices, device=DEVICE)
         else:
             num_features = 1
-            self.errors = torch.empty(batch_size * self.num_vertices, num_features, device=DEVICE)
             self.values = torch.zeros(batch_size * self.num_vertices, num_features, device=DEVICE)
+            self.errors = torch.empty(batch_size * self.num_vertices, num_features, device=DEVICE)
+            # self.mu =   torch.zeros(batch_size * self.num_vertices, num_features, device=DEVICE)
+
 
     # def clamp_input(self, inp):
     #     di = self.structure.shape[0]
@@ -590,6 +588,10 @@ class PCgraph(torch.nn.Module):
         self.dw = out
         # self.dw = out_dum.float()
 
+        if self.dw is not None:
+            norm = torch.norm(self.dw).item()
+            wandb.log({"Monitoring/delta_w_norm": norm, "epoch": self.epoch, "step": self.t})
+
 
         # if self.structure.use_bias:
         #     self.db = self.structure.grad_b(x=self.x, e=self.e, w=self.w, b=self.b)
@@ -608,12 +610,19 @@ class PCgraph(torch.nn.Module):
         self.trace = False
         self.epoch = epoch
         self.do_gen = True 
+        self.train = True
+
+        # self.nodes_or_edge2_update_single is only internal nodes during training
+        self.nodes_or_edge2_update_single = torch.tensor(sorted(self.base_internal_indices), device=self.device)
+        
 
         # self.update_mask = self.update_mask_train
 
-    def test_(self):
+    def test_(self, epoch=0):
         self.mode = "test"
         # self.trace = True 
+        self.epoch = epoch
+        self.train = False 
 
         print(self.mode)
 
@@ -676,49 +685,48 @@ class PCgraph(torch.nn.Module):
             task = task[0]
 
         self.task = task
+      
+        if self.mode == "test":
 
-        # --- Automatically populate nodes_or_edge2_update_single ---
-        if task == "classification":
-            # Update internal + supervised nodes during testing
-            self.nodes_or_edge2_update_single = torch.tensor(
-                sorted(self.base_internal_indices + self.base_supervised_labels), device=self.device
-            )
-            # Batch indices for reshape == False mode
-            self.update_mask_test = torch.tensor(
-                sorted(self.internal_indices_batch + self.supervised_labels_batch), device=self.device
-            )
-            print("[Task] Classification -> Updating Internal + Supervised nodes")
+            # --- Automatically populate nodes_or_edge2_update_single ---
+            if task == "classification":
+                # Update internal + supervised nodes during testing
+                self.nodes_or_edge2_update_single = torch.tensor(
+                    sorted(self.base_internal_indices + self.base_supervised_labels), device=self.device
+                )
+                # Batch indices for reshape == False mode
+                self.update_mask_test = torch.tensor(
+                    sorted(self.internal_indices_batch + self.supervised_labels_batch), device=self.device
+                )
+                # print("[Task] Classification -> Updating Internal + Supervised nodes")
 
-        elif task in ["generation", "reconstruction", "denoising"]:
-            # Update internal + sensory nodes during testing
-            self.nodes_or_edge2_update_single = torch.tensor(
-                sorted(self.base_internal_indices + self.base_sensory_indices), device=self.device
-            )
-            self.update_mask_test = torch.tensor(
-                sorted(self.internal_indices_batch + self.sensory_indices_batch), device=self.device
-            )
-            print(f"[Task] {task} -> Updating Internal + Sensory nodes")
+            elif task in ["generation", "reconstruction", "denoising"]:
+                # Update internal + sensory nodes during testing
+                self.nodes_or_edge2_update_single = torch.tensor(
+                    sorted(self.base_internal_indices + self.base_sensory_indices), device=self.device
+                )
+                self.update_mask_test = torch.tensor(
+                    sorted(self.internal_indices_batch + self.sensory_indices_batch), device=self.device
+                )
+                # print(f"[Task] {task} -> Updating Internal + Sensory nodes")
 
-        elif task == "occlusion":
-            # Example: occlude half of sensory nodes (adjust as needed)
-            occluded_indices = list(range(392, 784))
+            elif task == "occlusion":
+                # Example: occlude half of sensory nodes (adjust as needed)
+                occluded_indices = list(range(392, 784))
 
-            self.nodes_or_edge2_update_single = torch.tensor(
-                sorted(self.base_internal_indices + occluded_indices), device=self.device
-            )
-            self.update_mask_test = torch.tensor(
-                sorted(self.internal_indices_batch + [
-                    index + i * self.num_vertices for i in range(self.batch_size)
-                    for index in occluded_indices
-                ]), device=self.device
-            )
-            print("[Task] Occlusion -> Updating Internal + Occluded Sensory nodes")
+                self.nodes_or_edge2_update_single = torch.tensor(
+                    sorted(self.base_internal_indices + occluded_indices), device=self.device
+                )
+                self.update_mask_test = torch.tensor(
+                    sorted(self.internal_indices_batch + [
+                        index + i * self.num_vertices for i in range(self.batch_size)
+                        for index in occluded_indices
+                    ]), device=self.device
+                )
+                # print("[Task] Occlusion -> Updating Internal + Occluded Sensory nodes")
 
-        else:
-            raise ValueError(f"Invalid task: {task}")
-
-        # Debug print
-        print(f"nodes_or_edge2_update_single ({len(self.nodes_or_edge2_update_single)} nodes):", self.nodes_or_edge2_update_single)
+            else:
+                raise ValueError(f"Invalid task: {task}")
 
 
 
@@ -776,25 +784,32 @@ class PCgraph(torch.nn.Module):
         # self.delta_w_selection = "all"
         self.delta_w_selection = "internal_only"
 
+        # print("---------------------TEST------------------------------------")
+        
+     
 
-        
-        # ✅ BEFORE applying Grokfast
-        delta_before = delta.clone().detach()
-        delta_before_norm = delta_before.norm().item()
-        delta_before_mean = delta_before.mean().item()
-        delta_before_std = delta_before.std().item()
-        
-        print(f"[{grad_type}] Δ BEFORE Grokfast | Norm: {delta_before_norm:.6f} | Mean: {delta_before_mean:.6f} | Std: {delta_before_std:.6f}")
-        
-        if self.wandb_logging:
-            wandb.log({
-                f"Grokfast/{grad_type}_Delta_Before_Norm": delta_before_norm,
-                f"Grokfast/{grad_type}_Delta_Before_Mean": delta_before_mean,
-                f"Grokfast/{grad_type}_Delta_Before_Std": delta_before_std
-            }, step=self.epoch)
-        
+      
         # ✅ GROKFAST PROCESSING
         if self.use_grokfast:
+
+            # ✅ BEFORE applying Grokfast
+            delta_before = delta.clone().detach()
+            delta_before_norm = delta_before.norm().item()
+            delta_before_mean = delta_before.mean().item()
+            delta_before_std = delta_before.std().item()
+            
+            # print(f"[{grad_type}] Δ BEFORE Grokfast | Norm: {delta_before_norm:.6f} | Mean: {delta_before_mean:.6f} | Std: {delta_before_std:.6f}")
+            # assert isinstance(self.epoch, int), f"self.epoch is not set correctly: {self.epoch}"
+            grad_type = "w"
+
+            wandb.log({
+                "epoch": self.epoch,
+                "step": self.t,
+                f"Grokfast/{grad_type}_Delta_Before_Norm": float(delta_before_norm),
+                f"Grokfast/{grad_type}_Delta_Before_Mean": float(delta_before_mean),
+                f"Grokfast/{grad_type}_Delta_Before_Std": float(delta_before_std)
+            })
+
             param_type = "weights"
             
             if self.grokfast_type == 'ema':
@@ -808,20 +823,19 @@ class PCgraph(torch.nn.Module):
             #     final_grad, self.avg_grad = gradfilter_ma(...)
             #     delta = final_grad
         
-        # ✅ AFTER Grokfast
-        delta_after = delta.clone().detach()
-        delta_after_norm = delta_after.norm().item()
-        delta_after_mean = delta_after.mean().item()
-        delta_after_std = delta_after.std().item()
-        
-        print(f"[{grad_type}] Δ AFTER Grokfast | Norm: {delta_after_norm:.6f} | Mean: {delta_after_mean:.6f} | Std: {delta_after_std:.6f}")
-
-        if self.wandb_logging:
+            # ✅ AFTER Grokfast
+            delta_after = delta.clone().detach()
+            delta_after_norm = delta_after.norm().item()
+            delta_after_mean = delta_after.mean().item()
+            delta_after_std = delta_after.std().item()
+            
             wandb.log({
-                f"Grokfast/{grad_type}_Delta_After_Norm": delta_after_norm,
-                f"Grokfast/{grad_type}_Delta_After_Mean": delta_after_mean,
-                f"Grokfast/{grad_type}_Delta_After_Std": delta_after_std
-            }, step=self.epoch)
+                "epoch": self.epoch,
+                "step": self.t,
+                f"Grokfast/{grad_type}_Delta_after_Norm": float(delta_after_norm),
+                f"Grokfast/{grad_type}_Delta_after_Mean": float(delta_after_mean),
+                f"Grokfast/{grad_type}_Delta_after_Std": float(delta_after_std)
+            })
         
         # ----------------------------------------------------------------------------
         # ✅ OPTIMIZER WEIGHT UPDATE (No change here)
@@ -920,13 +934,17 @@ class PCgraph(torch.nn.Module):
     def gradient_descent_update_values(self, grad_type, parameter, delta, learning_rate, 
                                    nodes_or_edge2_update, 
                                    nodes_or_edge2_update_single,
-                                   optimizer, use_optimizer, train):
+                                   optimizer, use_optimizer, train,
+                                   grad_clip=False):
         """
         Updates self.values_dummy using either optimizer or manual gradient descent.
 
         nodes_or_edge2_update: indices for non-reshape case (batched flat indices)
         nodes_or_edge2_update_single: node indices for a single graph, used in reshape case
         """
+
+        if grad_clip:
+            delta = torch.clamp(delta, min=-1, max=1)
 
         # --- Optimizer-based update ---
         if use_optimizer and optimizer:
@@ -954,6 +972,95 @@ class PCgraph(torch.nn.Module):
             self.values_dummy.data[nodes_or_edge2_update] -= learning_rate * delta[nodes_or_edge2_update]
 
 
+    def get_energy(self, first=False, last=False):
+
+        # self.errors = self.values - self.mu
+        # self.errors_dum = self.values_dummy - self.mu_dum
+        self.errors = self.values_dummy - self.mu
+    
+        if self.reshape:
+            
+            # BEFORE using use_input_error
+            total_sensor_error = torch.sum(self.errors[:,:784]**2).item()
+            total_internal_error = torch.sum(self.errors[:, 784:-10]**2).item()    
+
+            self.lst_sensor_error.append(total_sensor_error)
+            self.lst_internal_error.append(total_internal_error)
+
+            if not self.use_input_error:
+                if self.task == "classification":
+                    self.errors[:,:784] = 0 
+                elif self.task in ["generation", "reconstruction", "denoising", "occlusion"]:
+                    self.errors[:,-10:] = 0
+                    # self.errors[:,di:upper] = 0
+
+        else:
+            
+            total_sensor_error   = (self.errors[self.sensory_indices_batch]**2).sum().cpu().numpy()
+            total_internal_error = (self.errors[self.internal_indices_batch]**2).sum().cpu().numpy()
+            # self.history.append(total_internal_error)
+
+            self.lst_sensor_error.append(total_sensor_error)
+            self.lst_internal_error.append(total_internal_error)
+
+            if not self.use_input_error:
+                if self.task == "classification":
+                    self.errors[self.sensory_indices_batch] = 0
+                elif self.task in ["generation", "reconstruction", "denoising", "occlusion"]:
+                    self.errors[self.supervised_labels_batch] = 0
+                    # self.errors[self.sensory_indices_batch] = 0
+
+            
+        if self.train:
+            wandb.log({
+                        "epoch": self.epoch,
+                        "Training/internal_energy_sum": total_internal_error,
+                        "Training/sensory_energy_sum": total_sensor_error,
+                        "step": self.t
+                        })
+            
+            # wandb.log mean lst_sensor_error and lst_internal_error
+            mean_sensor_error = np.mean(self.lst_sensor_error)
+            mean_internal_error = np.mean(self.lst_internal_error)
+            wandb.log({
+                    "epoch": self.epoch,
+                    "Training/mean_internal_energy_sum": mean_internal_error,
+                    "Training/mean_sensory_energy_sum": mean_sensor_error,
+                    "step": self.t
+                    })
+        
+            if first:
+                # wandb.log mean lst_sensor_error and lst_internal_error
+                wandb.log({
+                            "epoch": self.epoch,
+                            "Training/first_internal_energy_sum": total_internal_error,
+                            "Training/first_sensory_energy_sum": total_sensor_error,
+                            "step": self.t
+                            })
+
+            if last:
+                
+                wandb.log({
+                        "epoch": self.epoch,
+                        "Training/last_internal_energy_sum": total_internal_error,
+                        "Training/last_sensory_energy_sum": total_sensor_error,
+                        "step": self.t
+                        })
+                    
+        else:
+            wandb.log({
+                        "epoch": self.epoch,
+                        "Validation/internal_energy_sum": total_internal_error,
+                        "Validation/sensory_energy_sum": total_sensor_error,
+                        "step": self.t
+
+                        })
+         
+
+        
+        return self.errors
+
+
     def update_xs(self, train=True, trace=False):
 
         # if self.early_stop:
@@ -973,6 +1080,7 @@ class PCgraph(torch.nn.Module):
         # At the start of update_xs()
         self.values_dummy.data = self.values.data.clone().to(self.device).contiguous()
         # print("self.values_dummy", self.values_dummy.shape)
+        self.get_energy(first=True, last=False)
 
         for t in range(T): 
          
@@ -988,61 +1096,7 @@ class PCgraph(torch.nn.Module):
             # self.mu = self.updates.pred(self.values.to(self.device), self.w.to(self.device))
             self.mu = self.updates.pred(self.values_dummy, self.w.to(self.device))
 
-            # self.errors = self.values - self.mu
-            # self.errors_dum = self.values_dummy - self.mu_dum
-            self.errors = self.values_dummy - self.mu
-        
-
-            if self.reshape:
-               
-                # BEFORE using use_input_error
-                total_sensor_error = torch.mean(self.errors[:,:784]**2).item()
-                total_internal_error = torch.mean(self.errors[:, 784:-10]**2).item()    
-
-                self.lst_sensor_error.append(total_sensor_error)
-                self.lst_internal_error.append(total_internal_error)
-    
-                if not self.use_input_error:
-                    if self.task == "classification":
-                        self.errors[:,:784] = 0 
-                    elif self.task in ["generation", "reconstruction", "denoising", "occlusion"]:
-                        self.errors[:,-10:] = 0
-                        # self.errors[:,di:upper] = 0
-
-            else:
-                
-                total_sensor_error   = (self.errors[self.sensory_indices_batch]**2).mean().cpu().numpy()
-                total_internal_error = (self.errors[self.internal_indices_batch]**2).mean().cpu().numpy()
-                # self.history.append(total_internal_error)
-
-                self.lst_sensor_error.append(total_sensor_error)
-                self.lst_internal_error.append(total_internal_error)
-
-                if not self.use_input_error:
-                    if self.task == "classification":
-                        self.errors[self.sensory_indices_batch] = 0
-                    elif self.task in ["generation", "reconstruction", "denoising", "occlusion"]:
-                        self.errors[self.supervised_labels_batch] = 0
-                        # self.errors[self.sensory_indices_batch] = 0
-
-             
-            if self.wandb_logging:
-                if train:
-                    wandb.log({
-                                "epoch": self.epoch,
-                                "Training/internal_energy_mean": total_internal_error,
-                                "Training/sensory_energy_mean": total_sensor_error,
-                                "step": self.t
-                                })
-                else:
-                    wandb.log({
-                                "epoch": self.epoch,
-                                "Validation/internal_energy_mean": total_internal_error,
-                                "Validation/sensory_energy_mean": total_sensor_error,
-                                "step": self.t
-
-                                })
-                    
+            self.get_energy(False, False)
                          
             # x = self.x.T.contiguous().view(-1, 1).to(DEVICE)  # Shape: [num_nodes, batch_size]
             # error = self.e.T.contiguous().view(-1, 1).to(DEVICE)  # Shape: [num_nodes, batch_size]
@@ -1058,6 +1112,10 @@ class PCgraph(torch.nn.Module):
             # dEdx_dum = self.updates.grad_x(self.values_dummy, self.errors_dum, self.w)
             # print("dEdx_dum", dEdx_dum.shape)
             
+
+            norm = torch.norm(dEdx).item()
+            wandb.log({"Monitoring/delta_x_norm": norm, "epoch": self.epoch, "step": self.t})
+                
             self.gradient_descent_update_values(
                 grad_type="values",
                 parameter=self.values_dummy,
@@ -1069,16 +1127,17 @@ class PCgraph(torch.nn.Module):
 
                 use_optimizer=self.use_learning_optimizer,
                 # optimizer=self.optimizer_values if self.use_learning_optimizer else None,
-                train=train
+                train=train,
+                grad_clip=False
             )
 
-            ## Copy updated dummy values back into self.values; also needed for testing()
+            # Copy updated dummy values back into self.values; also needed for testing()
             if self.reshape:
                 self.values[:, :] = self.values_dummy.data
             else:
                 self.values[:] = self.values_dummy.data
 
-            # self.get_dw()
+            ## for some reason breaks, but makes more sense self.get_dw()
 
             if train and self.incremental and self.dw is not None:
             # if train and self.incremental:
@@ -1089,6 +1148,12 @@ class PCgraph(torch.nn.Module):
             # if self.early_stop:
             #     if early_stopper.early_stop( self.get_energy() ):
             #         break            
+
+
+      
+
+
+        self.get_energy(False, True)
 
            
 
@@ -1247,23 +1312,26 @@ class PCgraph(torch.nn.Module):
         # print("update_w")
         
         # self.optimizer_weights.zero_grad()
-        self.w.grad = self.dw
-        
-        self.optimizer_weights.step()
+
+        # self.w.grad = self.dw
+        # self.optimizer_weights.step()
 
         # self.edges_2_update = None 
-        # self.gradient_descent_update_w(
-        #     grad_type="weights",
-        #     parameter=self.w,
-        #     delta=self.dw,
-        #     learning_rate=self.lr_weights,
+        self.gradient_descent_update_w(
+            grad_type="weights",
+            parameter=self.w,
+            delta=self.dw,
+            learning_rate=self.lr_weights,
       
-        #     # error= self.errors if self.optimizer_values else None,
-        #     nodes_or_edge2_update=self.edges_2_update,
-        #     # optimizer=self.optimizer_weights if self.use_learning_optimizer else None,
-        #     optimizer=self.optimizer_weights,
-        #     use_optimizer=self.use_learning_optimizer, 
-        # )
+            # error= self.errors if self.optimizer_values else None,
+            # update_mask,
+            # nodes_or_edge2_update_single=self.nodes_or_edge2_update_single,
+
+            nodes_or_edge2_update=self.nodes_or_edge2_update_single,
+            # optimizer=self.optimizer_weights if self.use_learning_optimizer else None,
+            optimizer=self.optimizer_weights,
+            use_optimizer=self.use_learning_optimizer, 
+        )
 
         # print("mean w 2", self.w.mean())
 
@@ -1277,7 +1345,6 @@ class PCgraph(torch.nn.Module):
         # self.data_ptr = data.ptr
         # self.batch_size = data.x.shape[0] // self.num_vertices
         self.batch_size = data.shape[0]
-
 
         self.reset_nodes(batch_size=data.shape[0])        
                 
@@ -1305,6 +1372,7 @@ class PCgraph(torch.nn.Module):
         # self.reset_nodes(batch_size=data.shape[0])
 
         # Set the graph data (flattened image + internal zeros + one-hot label)
+        self.reset_nodes(batch_size=self.batch_size)
 
         if self.reshape:
             self.values[:, :] = data.clone()
@@ -1638,58 +1706,91 @@ class PCgraph(torch.nn.Module):
 
         logits = self.values.view(self.batch_size, self.num_vertices)
         generated_imgs = logits[:, :784].view(self.batch_size, 28, 28)
+        generated_imgs_raw = generated_imgs.clone().detach()
 
         # ====== 1. PLOT 10 RANDOM GENERATED IMAGES ======
+        normalize_imgs = False 
+        clip_negatives = False   # new flag
+        clip_then_normalize = True  # New flag
 
-        n_images = min(10, len(generated_imgs))  # Don't plot more images than exist
+        # Normalize images if requested
+        # ==== Image postprocessing ====
 
-        # Random offset: between 0 and (len - n_images), ensuring we stay within bounds
-        if len(generated_imgs) > n_images:
-            random_offset = np.random.randint(0, len(generated_imgs) - n_images + 1)
-        else:
-            random_offset = 0
+        # ==== Post-process version ====
+        if clip_then_normalize:
+            generated_imgs = torch.clamp(generated_imgs, min=0.0)
+            gen_min = generated_imgs.min(dim=1, keepdim=True)[0].min(dim=2, keepdim=True)[0]
+            gen_max = generated_imgs.max(dim=1, keepdim=True)[0].max(dim=2, keepdim=True)[0]
+            generated_imgs = (generated_imgs - gen_min) / (gen_max - gen_min + 1e-8)
+        elif normalize_imgs:
+            gen_min = generated_imgs.min(dim=1, keepdim=True)[0].min(dim=2, keepdim=True)[0]
+            gen_max = generated_imgs.max(dim=1, keepdim=True)[0].max(dim=2, keepdim=True)[0]
+            generated_imgs = (generated_imgs - gen_min) / (gen_max - gen_min + 1e-8)
+        elif clip_negatives:
+            generated_imgs = torch.clamp(generated_imgs, min=0.0)
 
-        print(f"Plotting {n_images} images starting from index {random_offset}")
+        # ==== Choose images to display ====
+        n_images = min(10, len(generated_imgs))
+        random_offset = np.random.randint(0, len(generated_imgs) - n_images + 1) if len(generated_imgs) > n_images else 0
 
+        # ==== Plot postprocessed version ====
         fig_gen, axs = plt.subplots(1, n_images, figsize=(n_images * 2, 2))
+        axs = [axs] if n_images == 1 else axs
 
-        # If there's only 1 image, axs is not iterable, so force it into a list
-        if n_images == 1:
-            axs = [axs]
-
-        # Iterate over the selected image indices
         for idx in range(n_images):
             img_idx = random_offset + idx
-
-            axs[idx].imshow(generated_imgs[img_idx].cpu().detach().numpy(), cmap='gray')
+            axs[idx].imshow(generated_imgs[img_idx].cpu().numpy(), cmap='gray')
             axs[idx].axis("off")
+            axs[idx].set_title(f"{labels[img_idx].item()}" if labels is not None else f"Img {img_idx}")
 
-            # If labels available, use label index; fallback to image index
-            if labels is not None and len(labels) > img_idx:
-                axs[idx].set_title(f"{labels[img_idx].item()}")
-            else:
-                axs[idx].set_title(f"Img {img_idx}")
+        norm_status = (
+            "Clipped+Normalized" if clip_then_normalize else
+            "Normalized" if normalize_imgs else
+            "Clipped (neg=0)" if clip_negatives else
+            "Raw"
+        )
 
+        fig_gen.suptitle(f"Generated Images (Epoch {self.epoch}) [{norm_status}]")
         plt.tight_layout()
-
-        save_imgs = True  ## overrride save_imgs
-        if save_imgs:
-            img_path = os.path.join(save_dir, f"generated_imgs_epoch_{self.epoch}.png")
-            plt.savefig(img_path)
-            print(f"Saved generated image grid to: {img_path}")
+        # img_path = os.path.join(save_dir, f"generated_imgs_epoch_{self.epoch}.png")
+        # plt.savefig(img_path)
+        # print(f"Saved processed image grid to: {img_path}")
 
         if wandb_logging:
-            wandb.log({
-                f"{folder}/Images": wandb.Image(fig_gen, caption=f"Generated Images at Epoch {self.epoch}")
-            })
+            wandb.log({f"{folder}/Images": wandb.Image(fig_gen, caption=f"Generated Images at Epoch {self.epoch}")})
 
         plt.close(fig_gen)
+
+        # ==== Plot RAW version ====
+        fig_raw, axs_raw = plt.subplots(1, n_images, figsize=(n_images * 2, 2))
+        axs_raw = [axs_raw] if n_images == 1 else axs_raw
+
+        for idx in range(n_images):
+            img_idx = random_offset + idx
+            axs_raw[idx].imshow(generated_imgs_raw[img_idx].cpu().numpy(), cmap='gray')
+            axs_raw[idx].axis("off")
+            axs_raw[idx].set_title(f"{labels[img_idx].item()}" if labels is not None else f"Img {img_idx}")
+
+        fig_raw.suptitle(f"Generated Images (Epoch {self.epoch}) [Raw]", fontsize=12)
+        plt.tight_layout()
+        # img_path_raw = os.path.join(save_dir, f"generated_imgs_raw_epoch_{self.epoch}.png")
+        # plt.savefig(img_path_raw)
+        # print(f"Saved RAW image grid to: {img_path_raw}")
+
+        if wandb_logging:
+            wandb.log({f"{folder}/Images_RAW": wandb.Image(fig_raw, caption=f"RAW Generated Images at Epoch {self.epoch}")})
+
+        plt.close(fig_raw)
+
+
+
+
 
         # ====== 2. TRACE + ENERGY MOSAIC ======
         if self.trace_data and len(self.trace_data) > 0:
             trace_steps = len(self.trace_data)
-            # normalize_trace_images = True
-            normalize_trace_images = False 
+            normalize_trace_images = True
+            # normalize_trace_images = False 
 
             # ====== SNAPSHOT INDICES ======
             snapshot_indices = []
@@ -1708,10 +1809,17 @@ class PCgraph(torch.nn.Module):
             num_snapshots = len(snapshot_indices)
 
             # ====== CREATE MOSAIC ======
+            # ==== EXTEND MOSAIC ROWS FOR ENERGY AND HISTOGRAMS ====
+            bottom_row = (
+                ["E"] * (num_snapshots // 2) +
+                ["H0"] * (num_snapshots // 4) +
+                ["Hf"] * (num_snapshots - (num_snapshots // 2 + num_snapshots // 4))
+            )
             mosaic_rows = [
                 [str(i) for i in range(num_snapshots)],  # Top: Trace snapshots
-                ["E"] * num_snapshots,                  # Bottom: Energy plot spanning all columns
+                bottom_row,                              # Bottom: Energy + Histograms
             ]
+
 
             fig_mosaic, ax = plt.subplot_mosaic(mosaic_rows, figsize=(num_snapshots * 3, 6))
             label = labels[0].item() if labels is not None else "digit Unknown"
@@ -1739,15 +1847,36 @@ class PCgraph(torch.nn.Module):
             # ====== BOTTOM ROW: ENERGY LINE PLOT ======
             ax_energy = ax["E"]
 
-            steps = list(range(trace_steps))
+            # steps = list(range(trace_steps))
+            # using lst_internal_error and lst_sensor_error
+            x = list(range(len(self.lst_internal_error)))
 
-            ax_energy.plot(steps, self.lst_internal_error, label="Internal Energy", color="tab:red")
-            ax_energy.plot(steps, self.lst_sensor_error, label="Sensory Energy", color="tab:blue")
+            ax_energy.plot(x, self.lst_internal_error, label="Internal Energy", color="tab:red")
+            ax_energy.plot(x, self.lst_sensor_error, label="Sensory Energy", color="tab:blue")
 
             ax_energy.set_xlabel("Time Step")
             ax_energy.set_ylabel("Energy")
             ax_energy.set_title("Energy over Time")
             ax_energy.legend()
+
+            # ===== HISTOGRAMS: PIXEL DISTRIBUTIONS AT T=0 AND T=FINAL =====
+            first_img = self.trace_data[0][0].flatten()
+            final_img = self.trace_data[-1][0].flatten()
+
+            # Histogram at t=0
+            ax_hist0 = ax["H0"]
+            ax_hist0.hist(first_img, bins=30, color="gray")
+            ax_hist0.set_title("Pixel Dist. T=0")
+            ax_hist0.set_xlabel("Pixel Value")
+            ax_hist0.set_ylabel("Freq.")
+
+            # Histogram at t=final
+            ax_histf = ax["Hf"]
+            ax_histf.hist(final_img, bins=30, color="black")
+            ax_histf.set_title("Pixel Dist. T=final")
+            ax_histf.set_xlabel("Pixel Value")
+            ax_histf.set_ylabel("Freq.")
+
 
             plt.tight_layout()
 
@@ -1798,6 +1927,7 @@ class PCgraph(torch.nn.Module):
 
             return 0 # Placeholder ""
         
+        # TODO QUICK WORK AROUND 
         if "occlusion" in eval_types:
             self.set_task("occlusion")
 
@@ -1819,8 +1949,8 @@ class PCgraph(torch.nn.Module):
     
 
 
-    def get_energy(self):
-        return torch.sum(self.errors**2).item()
+    # def get_energy(self):
+    #     return torch.sum(self.errors**2).item()
 
     def get_errors(self):
         return self.e.clone()
@@ -1852,8 +1982,8 @@ class PCgraph(torch.nn.Module):
     def get_weights(self):
         return self.w.clone()
 
-    def get_energy(self):
-        return torch.sum(self.e**2).item()
+    # def get_energy(self):
+    #     return torch.sum(self.e**2).item()
 
     def get_errors(self):
         return self.e.clone()    

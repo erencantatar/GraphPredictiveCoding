@@ -53,11 +53,12 @@ graph_type_options = {
         
         "stochastic_block": {
             "params": {
-                "num_communities": 50,      # Number of communities (50)
-                "community_size": 40,       # Size of each community (40)
-                "p_intra": 0.3,             # Probability of edges within the same community
+                "num_communities": 3,      # Number of communities (50)
+                "community_size": 300,       # Size of each community (40)
+                "p_intra": 0.25,             # Probability of edges within the same community
                 "p_inter": 0.1,             # Probability of edges between different communities
                 "full_con_last_cluster_w_sup": True,
+                "min_full_con_last_cluster_w_sup": 2,
                 # "remove_sens_2_sens": False, 
                 # "remove_sens_2_sup": False, 
                 }
@@ -218,6 +219,10 @@ class GraphBuilder:
     def create_graph(self):
 
         self.edge_index = []
+        # time to create the graph
+        import time 
+        start = time.time()
+
 
         print(f"Creating graph structure for {self.graph_type['name']}")
         if self.graph_type["name"] == "fully_connected":
@@ -260,6 +265,11 @@ class GraphBuilder:
         else:
             raise ValueError(f"Invalid graph type: {self.graph_type['name']}")
         
+
+        end_time = time.time()
+        print(f"Graph creation time: {end_time - start:.2f} seconds")
+        print("Created graph type:", self.graph_type["name"])
+
         print("Recalculating the number of vertices after graph creation")
         self.num_vertices = len(self.sensory_indices) + len(self.internal_indices)
         if self.supervised_learning:
@@ -645,92 +655,88 @@ class GraphBuilder:
         self.edge_index = [[u, v] for u, v in G.edges()]
         print(f"Creating Barabási-Albert graph with {num_nodes} nodes and {m} edges to attach per new node")
 
-    
+
     def stochastic_block(self, no_sens2sens, no_sens2supervised):
+        import networkx as nx
+        import importlib
 
-# no_sens2sens=self.graph_params["remove_sens_2_sens"], 
-#                                  no_sens2supervised=self.graph_params["remove_sens_2_sup"])
+        # Check if GPU backend (nx-cugraph) is available
+        gpu_backend = False
+        try:
+            nxcg = importlib.import_module("nx_cugraph")
+            cugraph = importlib.import_module("cugraph")
+            gpu_backend = True
+            print("✅ Using GPU backend with nx-cugraph.")
+        except ImportError:
+            print("⚠️ nx-cugraph not found, using default NetworkX (CPU).")
 
-        # Given code parameters; else take default 40, 50
-        num_communities = self.graph_params.get("num_communities", 40)  # Example block sizes
-        community_size = self.graph_params.get("community_size",   50)
-        p_intra = self.graph_params.get("p_intra", 0.5)  # Probability of edges within the same community
-        p_inter = self.graph_params.get("p_inter", 0.1)  # Probability of edges between different communities
-        
-        print(num_communities, community_size,  len(self.num_internal_nodes) )
+        # Load params
+        num_communities = self.graph_params.get("num_communities", 40)
+        community_size = self.graph_params.get("community_size", 50)
+        p_intra = self.graph_params.get("p_intra", 0.5)
+        p_inter = self.graph_params.get("p_inter", 0.1)
 
         assert (num_communities * community_size) == self.NUM_INTERNAL_NODES, "must be equal"
-        # assert (num_communities * community_size) == len(self.num_internal_nodes), "must be equal"
 
-        # Sizes of communitieser
-        sizes = [community_size for _ in  range(num_communities)]
-        # SENSORY_NODES = range(0, range(self.SENSORY_NODES))
-        self.INTERNAL = range(self.SENSORY_NODES, (self.SENSORY_NODES+sum(sizes)))
+        sizes = [community_size] * num_communities
+        self.INTERNAL = range(self.SENSORY_NODES, self.SENSORY_NODES + sum(sizes))
         self.num_internal_nodes = sum(self.INTERNAL)
-        # SUPERVISED_NODES = range(self.SENSORY_NODES+sum(sizes), sum(sizes)+10)
-
 
         sizes.insert(0, self.SENSORY_NODES)
         sizes.append(10)
         community_sizes = sizes
-
         num_communities = len(community_sizes)
-  
-        # Create the stochastic block model graph
+
+        # Build connectivity matrix
         p = np.full((num_communities, num_communities), p_inter)
         np.fill_diagonal(p, p_intra)
 
-        # removing sensory to sensory connection
-        # if self.graph_params.get("remove_sens_2_sens", True):
         if no_sens2sens:
             p[0, 0] = 0
-        
-        # adding connections from community to community  
+
         for i in range(1, num_communities):
             p[0, i] = 0.1
             p[i, 0] = 0.1
 
-        # if self.graph_params.get("remove_sens_2_sup", True):
         if no_sens2supervised:
-            # remove sensory to supervised
-            p[0, -1] = 0 
-            p[-1, 0] = 0 
+            p[0, -1] = 0
+            p[-1, 0] = 0
 
+        # For the last z internal clusters, increase supervision connection strength
+        # z = 10
         fully_connect_last_cluster = self.graph_params.get("full_con_last_cluster_w_sup", False)
-        # If requested, fully connect the last community with the supervised nodes
-        if fully_connect_last_cluster and self.supervised_learning:
-
-            # for last 5 cluster make stronger connection
-            for i in range(2,10,1):
-                last_cluster_idx = num_communities - i  # Last internal community
-                supervision_cluster_idx = num_communities - 1  # Supervised nodes
-                p[last_cluster_idx, supervision_cluster_idx] = 0.7
-                p[supervision_cluster_idx, last_cluster_idx] = 0.7
-
-            # last_cluster_idx = num_communities - 2  # Last internal community
-            # supervision_cluster_idx = num_communities - 1  # Supervised nodes
-            # p[last_cluster_idx, supervision_cluster_idx] = 0.7
-            # p[supervision_cluster_idx, last_cluster_idx] = 0.7
-
-        print("Got the sizes", sizes)
-        G = nx.stochastic_block_model(sizes, p, directed=True, seed=self.seed)
+        z = self.graph_params.get("min_full_con_last_cluster_w_sup", 5)
         
-        print("Created the graph stochastic_block_model") 
+        if fully_connect_last_cluster and self.supervised_learning:
+            supervision_cluster_idx = num_communities - 1  # Supervision is the last cluster
+            first_internal_cluster_idx = 1  # Internal clusters start after sensory
+            last_internal_cluster_idx = num_communities - 2  # Before supervision
 
-        # Convert the graph to an adjacency matrix
-        # adj_matrix = nx.adjacency_matrix(G).todense()
+            # Clamp z if there are fewer than z internal clusters
+            z = min(z, last_internal_cluster_idx - first_internal_cluster_idx + 1)
 
-        # Convert the NetworkX graph to PyTorch Geometric format
+            # Apply stronger connection from last z internal clusters to supervision
+            for i in range(last_internal_cluster_idx, last_internal_cluster_idx - z, -1):
+                p[i, supervision_cluster_idx] = 0.7
+                p[supervision_cluster_idx, i] = 0.7
+
+
+        # Use GPU-based graph construction if possible
+        if gpu_backend:
+            # Use nx_cugraph's stochastic block model
+            G = nxcg.stochastic_block_model(sizes, p, directed=True, seed=self.seed)
+            print("✅ Created stochastic_block_model using GPU (nx-cugraph).")
+        else:
+            G = nx.stochastic_block_model(sizes, p, directed=True, seed=self.seed)
+            print("ℹ️ Created stochastic_block_model using CPU (networkx).")
+
+        # Convert to PyG format
+        from torch_geometric.utils import from_networkx
         data = from_networkx(G)
 
-        # Extract the edge_index tensor
-        self.edge_index = data.edge_index
-
-        # Initialize edge containers
         self.edge_index = []
         self.edge_type = []
 
-        # Assign edge types
         for u, v in G.edges():
             src_block = G.nodes[u]['block']
             dest_block = G.nodes[v]['block']
@@ -755,10 +761,10 @@ class GraphBuilder:
                 etype = "Inter2Inter"
 
             self.edge_index.append([u, v])
-            # self.edge_type.append(self.edge_type_map[etype])
             self.edge_type.append(etype)
-            
-        print("done creating Stochastic Block Model graph")
+
+        print("✅ Finished assigning edge types for SBM.")
+
 
 
     def custom_two_branch(self, sensory_nodes, branch1_config, branch2_config, supervision_nodes):
