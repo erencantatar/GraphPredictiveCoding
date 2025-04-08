@@ -610,7 +610,9 @@ class PCgraph(torch.nn.Module):
         self.trace = False
         self.epoch = epoch
         self.do_gen = True 
+
         self.train = True
+        # self.task = None
 
         # self.nodes_or_edge2_update_single is only internal nodes during training
         self.nodes_or_edge2_update_single = torch.tensor(sorted(self.base_internal_indices), device=self.device)
@@ -620,7 +622,6 @@ class PCgraph(torch.nn.Module):
 
     def test_(self, epoch=0):
         self.mode = "test"
-        # self.trace = True 
         self.epoch = epoch
         self.train = False 
 
@@ -987,6 +988,7 @@ class PCgraph(torch.nn.Module):
             self.lst_sensor_error.append(total_sensor_error)
             self.lst_internal_error.append(total_internal_error)
 
+            # if not self.train: 
             if not self.use_input_error:
                 if self.task == "classification":
                     self.errors[:,:784] = 0 
@@ -1002,6 +1004,8 @@ class PCgraph(torch.nn.Module):
 
             self.lst_sensor_error.append(total_sensor_error)
             self.lst_internal_error.append(total_internal_error)
+
+            # if not self.train: 
 
             if not self.use_input_error:
                 if self.task == "classification":
@@ -1709,9 +1713,9 @@ class PCgraph(torch.nn.Module):
         generated_imgs_raw = generated_imgs.clone().detach()
 
         # ====== 1. PLOT 10 RANDOM GENERATED IMAGES ======
-        normalize_imgs = False 
+        normalize_imgs = True 
         clip_negatives = False   # new flag
-        clip_then_normalize = True  # New flag
+        clip_then_normalize = False  # New flag
 
         # Normalize images if requested
         # ==== Image postprocessing ====

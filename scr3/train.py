@@ -945,6 +945,8 @@ model.log_node_connectivity_distribution_to_wandb(direction="both")
 
 accuracy_means = []
 training_error_means = []
+num_of_trained_imgs = 0
+
 
 with torch.no_grad():
 
@@ -980,16 +982,21 @@ with torch.no_grad():
 
             #     })
 
-
+            num_of_trained_imgs += X_batch.shape[0]
             if batch_no >= break_num:
                 break
+
+        wandb.log({
+            "epoch": epoch,
+            "Training/num_of_trained_imgs": num_of_trained_imgs,
+        })
     
         #### 
         loss, acc = 0, 0
         model.test_(epoch)
         cntr = 0
 
-        break_num_eval = 10
+        break_num_eval = 20
         # break_num_eval = len(val_loader)
 
         if TASK == ["generation"]:

@@ -139,6 +139,77 @@ model.query(method="pass",
 - https://github.com/bjornvz/PRECO/tree/main 
 - https://github.com/emptydiagram/pc-graphs 
 
+## TODO
+
+add 
+class TerminalColor:
+    """Provides ANSI escape codes for colored terminal output."""
+    RESET = '\033[0m'
+    BLACK = '\033[30m'
+    RED = '\033[31m'
+    GREEN = '\033[32m'
+    YELLOW = '\033[33m'
+    BLUE = '\033[34m'
+    MAGENTA = '\033[35m'
+    CYAN = '\033[36m'
+    WHITE = '\033[37m'
+    BRIGHT_BLACK = '\033[90m'
+    BRIGHT_RED = '\033[91m'
+    BRIGHT_GREEN = '\033[92m'
+    BRIGHT_YELLOW = '\033[93m'
+    BRIGHT_BLUE = '\033[94m'
+    BRIGHT_MAGENTA = '\033[95m'
+    BRIGHT_CYAN = '\033[96m'
+    BRIGHT_WHITE = '\033[97m'
+
+    # Background colors
+    BG_BLACK = '\033[40m'
+    BG_RED = '\033[41m'
+    BG_GREEN = '\033[42m'
+    BG_YELLOW = '\033[43m'
+    BG_BLUE = '\033[44m'
+    BG_MAGENTA = '\033[45m'
+    BG_CYAN = '\033[46m'
+    BG_WHITE = '\033[47m'
+    BG_BRIGHT_BLACK = '\033[100m'
+    BG_BRIGHT_RED = '\033[101m'
+    BG_BRIGHT_GREEN = '\033[102m'
+    BG_BRIGHT_YELLOW = '\033[103m'
+    BG_BRIGHT_BLUE = '\033[104m'
+    BG_BRIGHT_MAGENTA = '\033[105m'
+    BG_BRIGHT_CYAN = '\033[106m'
+    BG_BRIGHT_WHITE = '\033[107m'
+
+    # Text styles
+    BOLD = '\033[1m'
+    DIM = '\033[2m'
+    ITALIC = '\033[3m'
+    UNDERLINE = '\033[4m'
+    BLINK = '\033[5m'
+    REVERSE = '\033[7m'
+    HIDDEN = '\033[8m'
+    STRIKETHROUGH = '\033[9m'
+
+
+tc = TerminalColor()
+
+print(f"{tc.RED}This text is red.{tc.RESET}")
+print(f"{tc.GREEN}{tc.BOLD}This text is bold green.{tc.RESET}")
+print(f"{tc.BLUE}{tc.UNDERLINE}This text is blue and underlined.{tc.RESET}")
+print(f"{tc.YELLOW}{tc.BG_BLACK}Yellow text on black background.{tc.RESET}")
+print(f"{tc.BRIGHT_MAGENTA}Bright magenta text.{tc.RESET}")
+print(f"{tc.CYAN}{tc.ITALIC}{tc.BG_WHITE}Cyan italic text on white background.{tc.RESET}")
+
+# You can also combine styles and colors:
+error_message = f"{tc.RED}{tc.BOLD}ERROR:{tc.RESET} {tc.RED}Something went wrong!{tc.RESET}"
+print(error_message)
+
+warning_message = f"{tc.YELLOW}{tc.BOLD}WARNING:{tc.RESET} {tc.YELLOW}Proceed with caution.{tc.RESET}"
+print(warning_message)
+
+success_message = f"{tc.GREEN}{tc.BOLD}SUCCESS:{tc.RESET} {tc.GREEN}Operation completed.{tc.RESET}"
+print(success_message)
+
 
 
 ## Optimzation for later:
