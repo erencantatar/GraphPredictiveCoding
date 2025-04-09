@@ -164,9 +164,7 @@ class GraphBuilder:
         self.create_new_graph = True   
         self.save_graph = True 
         self.dir = f"graphs/{self.graph_type['name']}/"
-
-
-        print("Doing edge index creation, where we do src --> dest")
+    
 
 
         # Modify the path based on the graph configuration (removing sens2sens or sens2sup)
@@ -378,7 +376,7 @@ class GraphBuilder:
         )
 
         # ------------ Generative -----------------
-        # # Connect sensory -> first generative hidden layer
+        # Connect sensory -> first generative hidden layer
         # for sensory_node in num_sensor_nodes:
         #     for hidden_node in generative_layers[0]:
         #         self.edge_index.append([hidden_node, sensory_node])  # Direction: hidden -> sensory
@@ -397,6 +395,8 @@ class GraphBuilder:
         #     for sup_node in supervision_indices:
         #         self.edge_index.append([sup_node, hidden_node])  # Direction: supervision -> last generative hidden
         #         self.edge_type.append("Sup2Inter")
+
+
 
         # ------------ Generative -----------------
         # Connect first generative hidden layer -> sensory (parent to child)
@@ -417,7 +417,6 @@ class GraphBuilder:
             for hidden_node in generative_layers[-1]:
                 self.edge_index.append([sup_node, hidden_node])  # supervision sends signal to generative layer
                 self.edge_type.append("Sup2Inter")
-
 
 
 

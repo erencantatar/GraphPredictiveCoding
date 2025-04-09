@@ -6,6 +6,8 @@ from torch_geometric.loader import DataLoader  # PyG's DataLoader
 
 import matplotlib.pyplot as plt
 from helper.plot import plot_model_weights, plot_energy_graphs
+from helper.log import TerminalColor
+
 
 
 # args = {
@@ -725,78 +727,10 @@ test_loader = DataLoader(test_dataset, batch_size=val_loader_batch_size, shuffle
 
 
 
-
-
-
-
-print("done dataloader")
-
-
-# for batch in train_loader:
-
-#     # --- 🔹 Load a Batch ---
-#     # batch = next(iter(graph_loader))
-#     print("Batch Shapes:")
-#     print("x shape:", batch.x.shape)  # (total_nodes_in_batch, 1)
-#     # print("Edge Index shape:", batch.edge_index.shape)  # (2, total_edges)
-#     # print("y shape:", batch.y.shape)  # (batch_size, 10)
-
-#     test_img = batch.x[0:784].view(28, 28).detach().cpu().numpy()
-#     plt.imshow(test_img, cmap='gray')
-#     plt.title(f"digit: {batch.y[0].item()}")
-#     plt.savefig("test_img.png")
-#     break 
-
-
-
 # from helper.vanZwol_optim import *
 
 ################################# discriminative model lr         ##########################################
 ################################# generative model lr         ##########################################
-
-
-# Inference
-# f = "tanh"
-# f = "relu"
-lr_x = 0.5                  # inference rate                   # inference rate 
-T_train = 5                 # inference time scale
-T_test = 10              # unused for hierarchical model
-incremental = True          # whether to use incremental EM or not
-
-# Learning
-lr_w = 0.00001      
-# Learning
-# lr_w = 0.00001              # learning rate hierarchial model
-# lr_w = 0.000001              # learning rate generative model
-
-
-
-################################# fully connected model lr         ##########################################
-
-# # GOOD FOR CLASSIFCATION
-# lr_x = 0.01                  # inference rate                   # inference rate 
-# lr_w = 0.00001              # learning rate hierarchial model
-# lr_w = 0.0001      
-
-# # # OKAY FOR GENRATION
-# # lr_x = 0.5                  # inference rate                   # inference rate 
-# # lr_x = 1                 # inference rate                   # inference rate 
-# T_train = 10                 # inference time scale
-# # T_train = 50                 # inference time scale
-# T_test = 15              # unused for hierarchical model
-# incremental = True          # whether to use incremental EM or not
-
-# # Learning
-# lr_w = 0.00001      
-# # Learning
-# lr_w = 0.00001              # learning rate hierarchial model
-# # lr_w = 0.000001              # learning rate generative model
-# weight_decay = 0             
-# grad_clip = 1
-# batch_scale = False
-
-# lr_x = 0.1                  # inference rate                   # inference rate 
-# lr_w = 0.000001              # learning rate hierarchial model
 
 
 weight_decay = 0             
@@ -938,14 +872,20 @@ TASK_config = {
         {"batch_break": 100, "wandb": eval_classification},
 }
 
-# model.log_edge_connectivity_distribution_to_wandb(direction="both")
-model.log_node_connectivity_distribution_to_wandb(direction="both")
+if args.graph_type in ["SBM", "stochastic_block", "scalable_barabasi", "scale_free_barabasi"]:
+    # model.log_edge_connectivity_distribution_to_wandb(direction="both")
+    model.log_node_connectivity_distribution_to_wandb(direction="both")
 
 # model.log_edge_weight_distribution_to_wandb()
 
 accuracy_means = []
 training_error_means = []
 num_of_trained_imgs = 0
+
+
+tc = TerminalColor()
+
+print(f"{tc.RED} ---------- Training ------- .{tc.RESET}")
 
 
 with torch.no_grad():
@@ -1059,7 +999,7 @@ with torch.no_grad():
             os.makedirs(f"trained_models/{args.graph_type}/weights/")
 
         
-        if epoch % 10 == 1:
+        if epoch % 10 == 1 and args.use_wandb in ['online', 'run']:
             plot_model_weights(model, args.graph_type, model_dir=None, save_wandb=str(epoch))
 
         # # save weights

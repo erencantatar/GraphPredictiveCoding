@@ -48,55 +48,6 @@ from helper.grokfast import gradfilter_ema, gradfilter_ma, gradfilter_ema_adjust
 
 
 
-# OLD 
-# relu = torch.nn.ReLU()
-# tanh = torch.nn.Tanh()
-# sigmoid = torch.nn.Sigmoid()
-# silu = torch.nn.SiLU()
-# linear = torch.nn.Identity()
-# leaky_relu = torch.nn.LeakyReLU()
-
-# @torch.jit.script
-# def sigmoid_derivative(x):
-#     return torch.exp(-x)/((1.+torch.exp(-x))**2)
-
-# @torch.jit.script
-# def relu_derivative(x):
-#     return torch.heaviside(x, torch.tensor(0.))
-
-# @torch.jit.script
-# def tanh_derivative(x):
-#     return 1-tanh(x)**2
-
-# @torch.jit.script
-# def silu_derivative(x):
-#     return silu(x) + torch.sigmoid(x)*(1.0-silu(x))
-
-# @torch.jit.script
-# def leaky_relu_derivative(x):
-#     return torch.where(x > 0, torch.tensor(1.), torch.tensor(0.01))
-
-# def get_derivative(f):
-
-
-#     print("f", f)
-
-#     if f == "sigmoid":
-#         f, f_prime = sigmoid, sigmoid_derivative
-#     elif f == "relu":
-#         f, f_prime = relu, relu_derivative
-#     elif f == "tanh":
-#         f, f_prime = tanh, tanh_derivative
-#     elif f == "silu":
-#         f, f_prime = silu, silu_derivative
-#     elif f == "linear":
-#         f, f_prime = 1, 1
-#     elif f == "leaky_relu":
-#         f, f_prime = leaky_relu, leaky_relu_derivative
-#     else:
-#         raise NotImplementedError(f"Derivative of {f} not implemented")
-
-#     return f, f_prime
 
 # Message passing layer
 class PredictionMessagePassing(MessagePassing):
@@ -363,36 +314,11 @@ class PCgraph(torch.nn.Module):
             #     self.scheduler_weights = torch.optim.lr_scheduler.ReduceLROnPlateau(self.optimizer_weights, mode='min', patience=10, factor=0.1)
 
 
-        # self.MP = PredictiveCodingLayer(f=self.structure.f, 
-        #                                 f_prime=self.structure.dfdx)
-
-        # update_rule = "vanZwol_AMB"
-        # update_rule = "MP_AMB"
-     
 
         self.test_supervised = self.test_iterative
         self.mu = 0 
 
-    
 
-    # def w_to_dense(self, w_sparse):
-    #     # Convert 1D sparse weights back to dense (N, N) matrix
-    #     adj_dense = torch.zeros((self.num_vertices, self.num_vertices), device=DEVICE)
-    #     adj_dense[self.edge_index[0], self.edge_index[1]] = w_sparse
-    #     return adj_dense
-
-   
-    # def w_to_sparse(self, w_sparse):
-    #     # Convert sparse weights to dense (on GPU) before finding non-zero indices
-    #     w_dense = w_sparse.to_dense().to(DEVICE)
-
-    #     # Find non-zero indices
-    #     # edge_index_sparse = torch.nonzero(w_dense, as_tuple=False).t()
-
-    #     # Retrieve the corresponding weights
-    #     edge_weights_sparse = w_dense[self.edge_index[0], self.edge_index[1]]
-
-    #     return edge_weights_sparse.to(DEVICE)
 
 
         
@@ -408,7 +334,6 @@ class PCgraph(torch.nn.Module):
         # Convert parsed values to appropriate types
         m = float(m)
         std_val = float(std_val)
-
 
         # init_type = "type" "mean" "std"
         # normal 0.001 0.02
@@ -588,9 +513,11 @@ class PCgraph(torch.nn.Module):
         self.dw = out
         # self.dw = out_dum.float()
 
-        if self.dw is not None:
-            norm = torch.norm(self.dw).item()
-            wandb.log({"Monitoring/delta_w_norm": norm, "epoch": self.epoch, "step": self.t})
+        norm = torch.norm(self.dw).item()
+        mean_dw = self.dw.mean().item()
+        wandb.log({"Monitoring/delta_w_norm": norm, 
+                    "Monitoring/delta_w_mean": mean_dw,
+                    "epoch": self.epoch, "step": self.t})
 
 
         # if self.structure.use_bias:
@@ -732,42 +659,6 @@ class PCgraph(torch.nn.Module):
 
 
 
-
-    # def get_filtered_batched_w_and_edge_index(self):
-        
-    #     # update_mask = self.internal_mask_train if train else self.update_mask_test  # Select appropriate mask
-
-    #     self.w = self.adj * self.w
-
-    #     batch_size = self.x.size(0)
-    #     num_nodes = self.num_vertices
-
-    #     # Offset edge_index for batched graphs
-    #     batched_edge_index = torch.cat(
-    #         [self.edge_index + i * num_nodes for i in range(batch_size)], dim=1
-    #     )
-
-    #     weights_1d = self.w[self.edge_index[0], self.edge_index[1]]
-    #     batched_weights = weights_1d.repeat(batch_size)
-
-    #     # **Filter edge index using internal_indices_batch**
-    #     internal_nodes_tensor = self.internal_indices_batch  # Already defined in init_modes()
-
-    #     # Mask: Keep only edges where both source and target are in `internal_indices_batch`
-    #     mask = torch.isin(batched_edge_index[0], internal_nodes_tensor) & torch.isin(batched_edge_index[1], internal_nodes_tensor)
-
-    #     # Apply mask to edge index and weights
-    #     filtered_edge_index = batched_edge_index[:, mask]
-    #     filtered_weights = batched_weights[mask]
-    #     pass
-
-    # def ensure_grad(self, param):
-    #     if param.grad is None:
-    #         param.grad = torch.zeros_like(param)
-    #     else:
-    #         param.grad.zero_()
-
-    # Then use it:
 
 
 
@@ -1116,9 +1007,9 @@ class PCgraph(torch.nn.Module):
             # dEdx_dum = self.updates.grad_x(self.values_dummy, self.errors_dum, self.w)
             # print("dEdx_dum", dEdx_dum.shape)
             
-
-            norm = torch.norm(dEdx).item()
-            wandb.log({"Monitoring/delta_x_norm": norm, "epoch": self.epoch, "step": self.t})
+            wandb.log({"Monitoring/delta_x_norm": torch.norm(dEdx).item(), 
+                       "Monitoring/delta_x_mean": dEdx.mean().item(),
+                       "epoch": self.epoch, "step": self.t})
                 
             self.gradient_descent_update_values(
                 grad_type="values",
@@ -1399,270 +1290,6 @@ class PCgraph(torch.nn.Module):
         # print("y_pred ", y_pred.shape)
         return y_pred
     
-
-
-    # def test_generative(self, data, labels, remove_label=True, save_imgs=False, wandb_logging=False):
-        
-    #     print("self.reshape", self.reshape)
-    #     # remove one_hot
-    #     # if remove_label:
-    #     #     for i in range(len(data)):
-    #     #         sub_graph = data[i]  # Access the subgraph
-
-    #     #         # set sensory indices to zero / random noise
-    #     #         sub_graph.x[sub_graph.sensory_indices, 0] = torch.zeros_like(sub_graph.x[sub_graph.sensory_indices, 0])  # Check all feature dimensions
-    #     #         # random noise
-    #     #         # sub_graph.x[sub_graph.sensory_indices, 0] = torch.randn_like(sub_graph.x[sub_graph.sensory_indices, 0])  # Check all feature dimensions
-    #     #         # sub_graph.x[sub_graph.sensory_indices, 0] = torch.clamp(torch.randn_like(sub_graph.x[sub_graph.sensory_indices, 0]), min=0, max=1)
-
-    #     # control_img = data[0].x[0:784].cpu().detach().numpy().reshape(28, 28)
-    #     # label_true = data[0].y[0].item()
-    #     # label_ = data[0].x[-10:].cpu().detach().numpy()
-    #     # assert label_true == np.argmax(label_)
-    #     # plt.imshow(control_img)
-    #     # plt.savefig(f"trained_models/{self.task}/control_img_{label_true}.png")
-    #     # plt.close()
-
-    #     # ------------------------
-
-    #     # Set the graph data (flattened image + internal zeros + one-hot label)
-
-    #     self.reset_nodes(batch_size=data.shape[0])        
-
-       
-    #     if self.reshape:
-    #         self.values[:, :] = data.clone()
-
-    #         # Zero out the imgae vector 
-    #         # self.values[:, 0:784] = 0
-    #         self.values[:, 0:784] = torch.randn_like(self.values[:, 0:784])  # Check all feature dimensions
-    #     else:
-    #         tmp = data.clone().view(self.batch_size, self.num_vertices)
-    #         tmp[:, 0:784] = torch.randn_like(tmp[:, 0:784])  # Check all feature dimensions
-
-    #         data = tmp.view(self.batch_size * self.num_vertices, 1)
-    #         self.values = data
-    #         self.values[self.sensory_indices_batch] = 0
-
-
-    #     self.update_xs(train=False)
-
-    #     # generated_imgs = self.values[:, :784]   # batch,10
-    #     # generated_imgs = generated_imgs.view(self.batch_size, 28, 28)   # batch,10
-
-    #     # # generated_imgs = self.values.view(self.batch_size, self.num_vertices)   # batch,10
-    #     # # generated_imgs = generated_imgs[self.batch_size, :784] # batch,10
-    #     # # generated_imgs = generated_imgs.view(self.batch_size, 28, 28)   # batch,10
-
-    #     # # save img inside 1 big plt imshow plot; take first 10 images
-    #     # import matplotlib.pyplot as plt
-
-    #     # # random_offset between 0 and batch_size
-    #     # random_offset = np.random.randint(0, self.batch_size-10)
-
-    #     # fig, axs = plt.subplots(1, 10, figsize=(20, 2))
-    #     # for i in range(10):
-
-    #     #     axs[i].imshow(generated_imgs[i+random_offset].cpu().detach().numpy())
-    #     #     axs[i].axis("off")
-    #     #     # use label from data.y
-    #     #     axs[i].set_title(labels[i+random_offset].item())
-
-    #     # # plt.show()
-    #     # # save 
-    #     # plt.savefig(f"trained_models/{self.task}/generated_imgs_{self.epoch}.png")
-    #     # plt.close()
-       
-
-    #     generated_imgs = self.values.view(self.batch_size, self.num_vertices)   # batch,10
-    #     print("generated_imgs", generated_imgs.shape)
-    #     generated_imgs = generated_imgs[:, :784] # batch,10
-    #     generated_imgs = generated_imgs.view(self.batch_size, 28, 28)   # batch,10
-
-    #     generated_imgs = generated_imgs - generated_imgs.min(dim=-1, keepdim=True)[0].min(dim=-2, keepdim=True)[0]
-    #     generated_imgs = generated_imgs / generated_imgs.max(dim=-1, keepdim=True)[0].max(dim=-2, keepdim=True)[0]
-
-    #     # Ensure no NaNs appear (in case min=max for some images)
-    #     generated_imgs = torch.nan_to_num(generated_imgs, nan=0.0)
-
-    #     # save img inside 1 big plt imshow plot; take first 10 images
-    #     if save_imgs or wandb_logging:
-
-    #         fig, axs = plt.subplots(1, 10, figsize=(20, 2))
-
-    #         # random_offset between 0 and batch_size
-    #         random_offset = np.random.randint(0, self.batch_size-10)
-
-    #         ims = []
-    #         for i in range(10):
-    #             im = axs[i].imshow(generated_imgs[i + random_offset].cpu().detach().numpy(), cmap='viridis')
-    #             ims.append(im)  # Store the imshow object for colorbar
-    #             axs[i].axis("off")
-    #             axs[i].set_title(labels[i + random_offset].item())
-
-    #         # Add colorbar (one for all images, linked to the first one)
-    #         cbar = fig.colorbar(ims[0], ax=axs, orientation='vertical', fraction=0.02, pad=0.04)
-
-    #         if save_imgs:
-    #             plt.savefig(f"trained_models/{self.graph_type}/generated_imgs_{self.epoch}.png")
-    #             # plt.savefig(f"trained_models/{self.graph_type}/{self.task}/generated_imgs_{self.epoch}.png")
-    #             plt.close()
-
-    #             print("len of trace_data", len(self.trace_data))
-    #             # plot self.trace_data
-    #             if self.trace:
-    #                 fig, axs = plt.subplots(1, self.T_test, figsize=(20, 2))
-    #                 for i in range(len(self.trace_data)):
-    #                     axs[i].imshow(self.trace_data[i])
-    #                     axs[i].axis("off")
-    #                     axs[i].set_title(labels[self.epoch].item())
-
-    #                 # plt.show()
-    #                 # save 
-    #                 plt.savefig(f"trained_models/{self.task}/trace_data_{self.epoch}.png")
-    #                 plt.close()
-
-    #         if wandb_logging:
-    #             wandb.log({f"Generation/Generated_Images_{self.epoch}": [wandb.Image(generated_imgs, caption="Generated Images")]})
-       
-    #     return 0
-        
-    # def test_generative(self, data, labels, remove_label=False, save_imgs=False, wandb_logging=False):
-    #     """
-    #     Runs a generative test where the model reconstructs digits over T_test time steps.
-    #     Creates a grid matrix: digits (rows) x time steps (columns).
-
-    #     Args:
-    #         data (torch.Tensor): Batch of graph data.
-    #         labels (torch.Tensor): Corresponding labels (digits 0-9).
-    #         remove_label (bool): Whether to zero out the label during generation.
-    #         save_imgs (bool): Whether to save the resulting grid image locally.
-    #         wandb_logging (bool): Whether to log the grid to Weights & Biases.
-    #     """
-    #     import os
-    #     import matplotlib.pyplot as plt
-    #     import numpy as np
-    #     import wandb
-
-    #     DEVICE = self.device
-    #     T = self.T_test
-    #     input_size = 784
-    #     output_size = 10
-    #     num_digits_in_batch = data.shape[0]
-
-    #     print("Running test_generative()...")
-    #     print("self.reshape:", self.reshape)
-
-    #     # --- Select up to 10 distinct digits, or all available samples if less ---
-    #     selected_indices = []
-    #     selected_digits = set()
-
-    #     for idx, label in enumerate(labels):
-    #         digit = label.item()
-    #         if digit not in selected_digits:
-    #             selected_digits.add(digit)
-    #             selected_indices.append(idx)
-    #         if len(selected_digits) >= min(10, num_digits_in_batch):
-    #             break
-
-    #     # Get selected data and labels
-    #     selected_data = data[selected_indices]  # Shape: [N, total_size]
-    #     selected_labels = labels[selected_indices]
-
-    #     num_selected = selected_data.shape[0]
-    #     print(f"Selected {num_selected} digits for generation grid.")
-
-    #     # --- Reset nodes for batch of selected digits ---
-    #     self.reset_nodes(batch_size=num_selected)
-
-    #     # --- Initialize values with random noise on sensory inputs ---
-    #     if self.reshape:
-    #         self.values[:, :] = selected_data.clone()
-
-    #         # Zero or randomize the sensory nodes (first 784)
-    #         # self.values[:, 0:input_size] = torch.randn_like(self.values[:, 0:input_size])
-    #         self.values[:, 0:input_size] = torch.zeros_like(self.values[:, 0:input_size])
-
-    #         # Optionally remove label (zero out one-hot)
-    #         if remove_label:
-    #             self.values[:, -output_size:] = 0
-    #     else:
-    #         tmp = selected_data.clone().view(num_selected, self.num_vertices)
-    #         tmp[:, 0:input_size] = torch.randn_like(tmp[:, 0:input_size])
-    #         tmp[:, 0:input_size] = torch.zeros_like(tmp[:, 0:input_size])
-
-    #         if remove_label:
-    #             tmp[:, -output_size:] = 0
-
-    #         selected_data = tmp.view(num_selected * self.num_vertices, 1)
-    #         self.values = selected_data
-    #         self.values[self.sensory_indices_batch] = 0
-
-    #     # --- Prepare grid storage: [num_selected_digits, T_test, 28, 28] ---
-    #     grid_images = torch.zeros(num_selected, T, 28, 28)
-
-    #     # --- Iterative inference over T_test steps ---
-    #     for t in range(T):
-    #         self.update_xs(train=False, trace=True)
-
-    #         reconstructed_imgs = self.values.view(num_selected, self.num_vertices)
-    #         reconstructed_imgs = reconstructed_imgs[:, :input_size].view(num_selected, 28, 28)
-
-    #         # Normalize per image
-    #         imgs = reconstructed_imgs - reconstructed_imgs.min(dim=-1, keepdim=True)[0].min(dim=-2, keepdim=True)[0]
-    #         imgs = imgs / (imgs.max(dim=-1, keepdim=True)[0].max(dim=-2, keepdim=True)[0] + 1e-8)
-
-    #         imgs = torch.nan_to_num(imgs, nan=0.0)
-
-    #         # Store images for current time step
-    #         grid_images[:, t] = imgs.detach().cpu()
-
-    #     # --- Create a single 2D matrix for the entire grid ---
-    #     # grid_images shape: [num_selected, T, 28, 28]
-    #     rows = []
-    #     for row in range(num_selected):
-    #         # Concatenate images horizontally for each time step
-    #         img_row = torch.cat([grid_images[row, t] for t in range(T)], dim=1)  # [28, T*28]
-    #         rows.append(img_row)
-
-    #     # Stack all rows vertically
-    #     full_grid = torch.cat(rows, dim=0)  # [num_selected*28, T*28]
-
-    #     # Convert to numpy for saving
-    #     full_grid_np = full_grid.numpy()
-
-    #     # --- Plot the full grid ---
-    #     fig, ax = plt.subplots(figsize=(T * 2, num_selected * 2))
-    #     ax.imshow(full_grid_np, cmap='gray')
-    #     ax.axis('off')
-
-    #     # Add labels on Y-axis (digit labels)
-    #     tick_positions = [(i * 28) + 14 for i in range(num_selected)]
-    #     tick_labels = [f'Digit {label.item()}' for label in selected_labels]
-
-    #     ax.set_yticks(tick_positions)
-    #     ax.set_yticklabels(tick_labels, fontsize=12)
-    #     ax.set_xticks([])
-
-    #     plt.tight_layout()
-
-    #     # --- Save the figure locally ---
-    #     if save_imgs:
-    #         save_dir = f"trained_models/{self.graph_type}/generative_grid/"
-    #         os.makedirs(save_dir, exist_ok=True)
-    #         filename = f"{save_dir}/generative_grid_epoch_{self.epoch}.png"
-    #         plt.savefig(filename)
-    #         print(f"Saved generative grid image to: {filename}")
-
-    #     # --- Log the figure to WandB ---
-    #     if wandb_logging:
-    #         wandb.log({f"Generation/Trace_Grid_Epoch_{self.epoch}": wandb.Image(fig, caption=f"Trace Grid Epoch {self.epoch}")})
-    #         print(f"Logged grid image to Weights & Biases at epoch {self.epoch}")
-
-    #     plt.close(fig)
-
-    #     print("test_generative() complete!\n")
-    #     return grid_images
 
 
     def test_generative(self, data, labels, remove_label=False, save_imgs=True, wandb_logging=False):
@@ -1956,10 +1583,6 @@ class PCgraph(torch.nn.Module):
     # def get_energy(self):
     #     return torch.sum(self.errors**2).item()
 
-    def get_errors(self):
-        return self.e.clone()
-
-
     def test_feedforward(self, X_batch):
         pass
         # X_batch = to_vector(X_batch)     # makes e.g. 28*28 -> 784
@@ -1994,3 +1617,328 @@ class PCgraph(torch.nn.Module):
 
 
 ##############################
+
+
+    
+
+    # def w_to_dense(self, w_sparse):
+    #     # Convert 1D sparse weights back to dense (N, N) matrix
+    #     adj_dense = torch.zeros((self.num_vertices, self.num_vertices), device=DEVICE)
+    #     adj_dense[self.edge_index[0], self.edge_index[1]] = w_sparse
+    #     return adj_dense
+
+   
+    # def w_to_sparse(self, w_sparse):
+    #     # Convert sparse weights to dense (on GPU) before finding non-zero indices
+    #     w_dense = w_sparse.to_dense().to(DEVICE)
+
+    #     # Find non-zero indices
+    #     # edge_index_sparse = torch.nonzero(w_dense, as_tuple=False).t()
+
+    #     # Retrieve the corresponding weights
+    #     edge_weights_sparse = w_dense[self.edge_index[0], self.edge_index[1]]
+
+    #     return edge_weights_sparse.to(DEVICE)
+
+
+
+    # def test_generative(self, data, labels, remove_label=True, save_imgs=False, wandb_logging=False):
+        
+    #     print("self.reshape", self.reshape)
+    #     # remove one_hot
+    #     # if remove_label:
+    #     #     for i in range(len(data)):
+    #     #         sub_graph = data[i]  # Access the subgraph
+
+    #     #         # set sensory indices to zero / random noise
+    #     #         sub_graph.x[sub_graph.sensory_indices, 0] = torch.zeros_like(sub_graph.x[sub_graph.sensory_indices, 0])  # Check all feature dimensions
+    #     #         # random noise
+    #     #         # sub_graph.x[sub_graph.sensory_indices, 0] = torch.randn_like(sub_graph.x[sub_graph.sensory_indices, 0])  # Check all feature dimensions
+    #     #         # sub_graph.x[sub_graph.sensory_indices, 0] = torch.clamp(torch.randn_like(sub_graph.x[sub_graph.sensory_indices, 0]), min=0, max=1)
+
+    #     # control_img = data[0].x[0:784].cpu().detach().numpy().reshape(28, 28)
+    #     # label_true = data[0].y[0].item()
+    #     # label_ = data[0].x[-10:].cpu().detach().numpy()
+    #     # assert label_true == np.argmax(label_)
+    #     # plt.imshow(control_img)
+    #     # plt.savefig(f"trained_models/{self.task}/control_img_{label_true}.png")
+    #     # plt.close()
+
+    #     # ------------------------
+
+    #     # Set the graph data (flattened image + internal zeros + one-hot label)
+
+    #     self.reset_nodes(batch_size=data.shape[0])        
+
+       
+    #     if self.reshape:
+    #         self.values[:, :] = data.clone()
+
+    #         # Zero out the imgae vector 
+    #         # self.values[:, 0:784] = 0
+    #         self.values[:, 0:784] = torch.randn_like(self.values[:, 0:784])  # Check all feature dimensions
+    #     else:
+    #         tmp = data.clone().view(self.batch_size, self.num_vertices)
+    #         tmp[:, 0:784] = torch.randn_like(tmp[:, 0:784])  # Check all feature dimensions
+
+    #         data = tmp.view(self.batch_size * self.num_vertices, 1)
+    #         self.values = data
+    #         self.values[self.sensory_indices_batch] = 0
+
+
+    #     self.update_xs(train=False)
+
+    #     # generated_imgs = self.values[:, :784]   # batch,10
+    #     # generated_imgs = generated_imgs.view(self.batch_size, 28, 28)   # batch,10
+
+    #     # # generated_imgs = self.values.view(self.batch_size, self.num_vertices)   # batch,10
+    #     # # generated_imgs = generated_imgs[self.batch_size, :784] # batch,10
+    #     # # generated_imgs = generated_imgs.view(self.batch_size, 28, 28)   # batch,10
+
+    #     # # save img inside 1 big plt imshow plot; take first 10 images
+    #     # import matplotlib.pyplot as plt
+
+    #     # # random_offset between 0 and batch_size
+    #     # random_offset = np.random.randint(0, self.batch_size-10)
+
+    #     # fig, axs = plt.subplots(1, 10, figsize=(20, 2))
+    #     # for i in range(10):
+
+    #     #     axs[i].imshow(generated_imgs[i+random_offset].cpu().detach().numpy())
+    #     #     axs[i].axis("off")
+    #     #     # use label from data.y
+    #     #     axs[i].set_title(labels[i+random_offset].item())
+
+    #     # # plt.show()
+    #     # # save 
+    #     # plt.savefig(f"trained_models/{self.task}/generated_imgs_{self.epoch}.png")
+    #     # plt.close()
+       
+
+    #     generated_imgs = self.values.view(self.batch_size, self.num_vertices)   # batch,10
+    #     print("generated_imgs", generated_imgs.shape)
+    #     generated_imgs = generated_imgs[:, :784] # batch,10
+    #     generated_imgs = generated_imgs.view(self.batch_size, 28, 28)   # batch,10
+
+    #     generated_imgs = generated_imgs - generated_imgs.min(dim=-1, keepdim=True)[0].min(dim=-2, keepdim=True)[0]
+    #     generated_imgs = generated_imgs / generated_imgs.max(dim=-1, keepdim=True)[0].max(dim=-2, keepdim=True)[0]
+
+    #     # Ensure no NaNs appear (in case min=max for some images)
+    #     generated_imgs = torch.nan_to_num(generated_imgs, nan=0.0)
+
+    #     # save img inside 1 big plt imshow plot; take first 10 images
+    #     if save_imgs or wandb_logging:
+
+    #         fig, axs = plt.subplots(1, 10, figsize=(20, 2))
+
+    #         # random_offset between 0 and batch_size
+    #         random_offset = np.random.randint(0, self.batch_size-10)
+
+    #         ims = []
+    #         for i in range(10):
+    #             im = axs[i].imshow(generated_imgs[i + random_offset].cpu().detach().numpy(), cmap='viridis')
+    #             ims.append(im)  # Store the imshow object for colorbar
+    #             axs[i].axis("off")
+    #             axs[i].set_title(labels[i + random_offset].item())
+
+    #         # Add colorbar (one for all images, linked to the first one)
+    #         cbar = fig.colorbar(ims[0], ax=axs, orientation='vertical', fraction=0.02, pad=0.04)
+
+    #         if save_imgs:
+    #             plt.savefig(f"trained_models/{self.graph_type}/generated_imgs_{self.epoch}.png")
+    #             # plt.savefig(f"trained_models/{self.graph_type}/{self.task}/generated_imgs_{self.epoch}.png")
+    #             plt.close()
+
+    #             print("len of trace_data", len(self.trace_data))
+    #             # plot self.trace_data
+    #             if self.trace:
+    #                 fig, axs = plt.subplots(1, self.T_test, figsize=(20, 2))
+    #                 for i in range(len(self.trace_data)):
+    #                     axs[i].imshow(self.trace_data[i])
+    #                     axs[i].axis("off")
+    #                     axs[i].set_title(labels[self.epoch].item())
+
+    #                 # plt.show()
+    #                 # save 
+    #                 plt.savefig(f"trained_models/{self.task}/trace_data_{self.epoch}.png")
+    #                 plt.close()
+
+    #         if wandb_logging:
+    #             wandb.log({f"Generation/Generated_Images_{self.epoch}": [wandb.Image(generated_imgs, caption="Generated Images")]})
+       
+    #     return 0
+        
+    # def test_generative(self, data, labels, remove_label=False, save_imgs=False, wandb_logging=False):
+    #     """
+    #     Runs a generative test where the model reconstructs digits over T_test time steps.
+    #     Creates a grid matrix: digits (rows) x time steps (columns).
+
+    #     Args:
+    #         data (torch.Tensor): Batch of graph data.
+    #         labels (torch.Tensor): Corresponding labels (digits 0-9).
+    #         remove_label (bool): Whether to zero out the label during generation.
+    #         save_imgs (bool): Whether to save the resulting grid image locally.
+    #         wandb_logging (bool): Whether to log the grid to Weights & Biases.
+    #     """
+    #     import os
+    #     import matplotlib.pyplot as plt
+    #     import numpy as np
+    #     import wandb
+
+    #     DEVICE = self.device
+    #     T = self.T_test
+    #     input_size = 784
+    #     output_size = 10
+    #     num_digits_in_batch = data.shape[0]
+
+    #     print("Running test_generative()...")
+    #     print("self.reshape:", self.reshape)
+
+    #     # --- Select up to 10 distinct digits, or all available samples if less ---
+    #     selected_indices = []
+    #     selected_digits = set()
+
+    #     for idx, label in enumerate(labels):
+    #         digit = label.item()
+    #         if digit not in selected_digits:
+    #             selected_digits.add(digit)
+    #             selected_indices.append(idx)
+    #         if len(selected_digits) >= min(10, num_digits_in_batch):
+    #             break
+
+    #     # Get selected data and labels
+    #     selected_data = data[selected_indices]  # Shape: [N, total_size]
+    #     selected_labels = labels[selected_indices]
+
+    #     num_selected = selected_data.shape[0]
+    #     print(f"Selected {num_selected} digits for generation grid.")
+
+    #     # --- Reset nodes for batch of selected digits ---
+    #     self.reset_nodes(batch_size=num_selected)
+
+    #     # --- Initialize values with random noise on sensory inputs ---
+    #     if self.reshape:
+    #         self.values[:, :] = selected_data.clone()
+
+    #         # Zero or randomize the sensory nodes (first 784)
+    #         # self.values[:, 0:input_size] = torch.randn_like(self.values[:, 0:input_size])
+    #         self.values[:, 0:input_size] = torch.zeros_like(self.values[:, 0:input_size])
+
+    #         # Optionally remove label (zero out one-hot)
+    #         if remove_label:
+    #             self.values[:, -output_size:] = 0
+    #     else:
+    #         tmp = selected_data.clone().view(num_selected, self.num_vertices)
+    #         tmp[:, 0:input_size] = torch.randn_like(tmp[:, 0:input_size])
+    #         tmp[:, 0:input_size] = torch.zeros_like(tmp[:, 0:input_size])
+
+    #         if remove_label:
+    #             tmp[:, -output_size:] = 0
+
+    #         selected_data = tmp.view(num_selected * self.num_vertices, 1)
+    #         self.values = selected_data
+    #         self.values[self.sensory_indices_batch] = 0
+
+    #     # --- Prepare grid storage: [num_selected_digits, T_test, 28, 28] ---
+    #     grid_images = torch.zeros(num_selected, T, 28, 28)
+
+    #     # --- Iterative inference over T_test steps ---
+    #     for t in range(T):
+    #         self.update_xs(train=False, trace=True)
+
+    #         reconstructed_imgs = self.values.view(num_selected, self.num_vertices)
+    #         reconstructed_imgs = reconstructed_imgs[:, :input_size].view(num_selected, 28, 28)
+
+    #         # Normalize per image
+    #         imgs = reconstructed_imgs - reconstructed_imgs.min(dim=-1, keepdim=True)[0].min(dim=-2, keepdim=True)[0]
+    #         imgs = imgs / (imgs.max(dim=-1, keepdim=True)[0].max(dim=-2, keepdim=True)[0] + 1e-8)
+
+    #         imgs = torch.nan_to_num(imgs, nan=0.0)
+
+    #         # Store images for current time step
+    #         grid_images[:, t] = imgs.detach().cpu()
+
+    #     # --- Create a single 2D matrix for the entire grid ---
+    #     # grid_images shape: [num_selected, T, 28, 28]
+    #     rows = []
+    #     for row in range(num_selected):
+    #         # Concatenate images horizontally for each time step
+    #         img_row = torch.cat([grid_images[row, t] for t in range(T)], dim=1)  # [28, T*28]
+    #         rows.append(img_row)
+
+    #     # Stack all rows vertically
+    #     full_grid = torch.cat(rows, dim=0)  # [num_selected*28, T*28]
+
+    #     # Convert to numpy for saving
+    #     full_grid_np = full_grid.numpy()
+
+    #     # --- Plot the full grid ---
+    #     fig, ax = plt.subplots(figsize=(T * 2, num_selected * 2))
+    #     ax.imshow(full_grid_np, cmap='gray')
+    #     ax.axis('off')
+
+    #     # Add labels on Y-axis (digit labels)
+    #     tick_positions = [(i * 28) + 14 for i in range(num_selected)]
+    #     tick_labels = [f'Digit {label.item()}' for label in selected_labels]
+
+    #     ax.set_yticks(tick_positions)
+    #     ax.set_yticklabels(tick_labels, fontsize=12)
+    #     ax.set_xticks([])
+
+    #     plt.tight_layout()
+
+    #     # --- Save the figure locally ---
+    #     if save_imgs:
+    #         save_dir = f"trained_models/{self.graph_type}/generative_grid/"
+    #         os.makedirs(save_dir, exist_ok=True)
+    #         filename = f"{save_dir}/generative_grid_epoch_{self.epoch}.png"
+    #         plt.savefig(filename)
+    #         print(f"Saved generative grid image to: {filename}")
+
+    #     # --- Log the figure to WandB ---
+    #     if wandb_logging:
+    #         wandb.log({f"Generation/Trace_Grid_Epoch_{self.epoch}": wandb.Image(fig, caption=f"Trace Grid Epoch {self.epoch}")})
+    #         print(f"Logged grid image to Weights & Biases at epoch {self.epoch}")
+
+    #     plt.close(fig)
+
+    #     print("test_generative() complete!\n")
+    #     return grid_images
+
+
+
+    # def get_filtered_batched_w_and_edge_index(self):
+        
+    #     # update_mask = self.internal_mask_train if train else self.update_mask_test  # Select appropriate mask
+
+    #     self.w = self.adj * self.w
+
+    #     batch_size = self.x.size(0)
+    #     num_nodes = self.num_vertices
+
+    #     # Offset edge_index for batched graphs
+    #     batched_edge_index = torch.cat(
+    #         [self.edge_index + i * num_nodes for i in range(batch_size)], dim=1
+    #     )
+
+    #     weights_1d = self.w[self.edge_index[0], self.edge_index[1]]
+    #     batched_weights = weights_1d.repeat(batch_size)
+
+    #     # **Filter edge index using internal_indices_batch**
+    #     internal_nodes_tensor = self.internal_indices_batch  # Already defined in init_modes()
+
+    #     # Mask: Keep only edges where both source and target are in `internal_indices_batch`
+    #     mask = torch.isin(batched_edge_index[0], internal_nodes_tensor) & torch.isin(batched_edge_index[1], internal_nodes_tensor)
+
+    #     # Apply mask to edge index and weights
+    #     filtered_edge_index = batched_edge_index[:, mask]
+    #     filtered_weights = batched_weights[mask]
+    #     pass
+
+    # def ensure_grad(self, param):
+    #     if param.grad is None:
+    #         param.grad = torch.zeros_like(param)
+    #     else:
+    #         param.grad.zero_()
+
+    # Then use it:
