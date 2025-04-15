@@ -68,3 +68,4 @@ scr3/graphs/**/
 scr3/graphs/*/*/
 scr3/trained_models/**/
 
+scr3/trained_models/degree_distribution.png

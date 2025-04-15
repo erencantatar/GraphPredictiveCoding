@@ -53,8 +53,8 @@ graph_type_options = {
         
         "stochastic_block": {
             "params": {
-                "num_communities": 3,      # Number of communities (50)
-                "community_size": 300,       # Size of each community (40)
+                "num_communities": 20,      # Number of communities (50)
+                "community_size": 50,       # Size of each community (40)
                 "p_intra": 0.25,             # Probability of edges within the same community
                 "p_inter": 0.1,             # Probability of edges between different communities
                 "full_con_last_cluster_w_sup": True,
@@ -376,47 +376,47 @@ class GraphBuilder:
         )
 
         # ------------ Generative -----------------
-        # Connect sensory -> first generative hidden layer
-        # for sensory_node in num_sensor_nodes:
-        #     for hidden_node in generative_layers[0]:
-        #         self.edge_index.append([hidden_node, sensory_node])  # Direction: hidden -> sensory
-        #         self.edge_type.append("Inter2Sens")
+        ## Connect sensory -> first generative hidden layer
+        for sensory_node in num_sensor_nodes:
+            for hidden_node in generative_layers[0]:
+                self.edge_index.append([hidden_node, sensory_node])  # Direction: hidden -> sensory
+                self.edge_type.append("Inter2Sens")
 
-        # # Connect generative layers sequentially (Reverse direction: hidden_n+1 -> hidden_n)
-        # for i in range(len(generative_layers) - 1):
-        #     for idx, node_from in enumerate(generative_layers[i]):
-        #         # if idx % 2 == 0:  # Keep half the connections to ensure direction
-        #         for node_to in generative_layers[i + 1]:
-        #             self.edge_index.append([node_to, node_from])
-        #             self.edge_type.append("Inter2Inter")
+        # Connect generative layers sequentially (Reverse direction: hidden_n+1 -> hidden_n)
+        for i in range(len(generative_layers) - 1):
+            for idx, node_from in enumerate(generative_layers[i]):
+                # if idx % 2 == 0:  # Keep half the connections to ensure direction
+                for node_to in generative_layers[i + 1]:
+                    self.edge_index.append([node_to, node_from])
+                    self.edge_type.append("Inter2Inter")
 
-        # # Connect last generative layer -> supervision
-        # for hidden_node in generative_layers[-1]:
-        #     for sup_node in supervision_indices:
-        #         self.edge_index.append([sup_node, hidden_node])  # Direction: supervision -> last generative hidden
-        #         self.edge_type.append("Sup2Inter")
+        # Connect last generative layer -> supervision
+        for hidden_node in generative_layers[-1]:
+            for sup_node in supervision_indices:
+                self.edge_index.append([sup_node, hidden_node])  # Direction: supervision -> last generative hidden
+                self.edge_type.append("Sup2Inter")
 
 
 
         # ------------ Generative -----------------
         # Connect first generative hidden layer -> sensory (parent to child)
-        for hidden_node in generative_layers[0]:
-            for sensory_node in num_sensor_nodes:
-                self.edge_index.append([hidden_node, sensory_node])  # hidden predicts sensory
-                self.edge_type.append("Inter2Sens")
+        # for hidden_node in generative_layers[0]:
+        #     for sensory_node in num_sensor_nodes:
+        #         self.edge_index.append([hidden_node, sensory_node])  # hidden predicts sensory
+        #         self.edge_type.append("Inter2Sens")
 
-        # Connect generative layers sequentially (Top-down: layer_n -> layer_n+1)
-        for i in range(len(generative_layers) - 1):
-            for node_from in generative_layers[i]:
-                for node_to in generative_layers[i + 1]:
-                    self.edge_index.append([node_from, node_to])  # parent to child
-                    self.edge_type.append("Inter2Inter")
+        # # Connect generative layers sequentially (Top-down: layer_n -> layer_n+1)
+        # for i in range(len(generative_layers) - 1):
+        #     for node_from in generative_layers[i]:
+        #         for node_to in generative_layers[i + 1]:
+        #             self.edge_index.append([node_from, node_to])  # parent to child
+        #             self.edge_type.append("Inter2Inter")
 
-        # Connect supervision -> top generative layer (to keep consistent with backward correction)
-        for sup_node in supervision_indices:
-            for hidden_node in generative_layers[-1]:
-                self.edge_index.append([sup_node, hidden_node])  # supervision sends signal to generative layer
-                self.edge_type.append("Sup2Inter")
+        # # Connect supervision -> top generative layer (to keep consistent with backward correction)
+        # for sup_node in supervision_indices:
+        #     for hidden_node in generative_layers[-1]:
+        #         self.edge_index.append([sup_node, hidden_node])  # supervision sends signal to generative layer
+        #         self.edge_type.append("Sup2Inter")
 
 
 

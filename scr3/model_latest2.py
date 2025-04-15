@@ -359,7 +359,6 @@ class PCgraph(torch.nn.Module):
             value = float(m) if m else 0.1
             self.w.data.fill_(value)
 
-
             # noise_std = 0.005  # Standard deviation of the noise
             # noise_std = 0  # Standard deviation of the noise
 
@@ -369,8 +368,6 @@ class PCgraph(torch.nn.Module):
             # Add small random noise
             noise = torch.randn_like(self.w) * std_val
             self.w.data.add_(noise)
-
-        
 
         # Perform the operation and reassign self.w as a Parameter
         with torch.no_grad():
@@ -493,13 +490,10 @@ class PCgraph(torch.nn.Module):
 
         # x_dum = self.values_dummy.view(self.batch_size, self.num_vertices)
 
-
         # assert allclose self.x and x_dum
         # assert torch.allclose(self.x, x_dum, atol=1e-6)
-
         # assert allclose self.errors and errors_dum
         # assert torch.allclose(self.errors, self.errors_dum, atol=1e-6)
-
         # out_dum = -torch.matmul(self.errors_dum.T, self.f(x_dum))
 
         if self.mask is not None:
@@ -863,13 +857,20 @@ class PCgraph(torch.nn.Module):
         else:
             self.values_dummy.data[nodes_or_edge2_update] -= learning_rate * delta[nodes_or_edge2_update]
 
+        # return self.values_dummy.data
+        return True
+
 
     def get_energy(self, first=False, last=False):
 
         # self.errors = self.values - self.mu
         # self.errors_dum = self.values_dummy - self.mu_dum
         self.errors = self.values_dummy - self.mu
-    
+
+        if first or last:
+            self.log_error_map(self.errors)
+
+
         if self.reshape:
             
             # BEFORE using use_input_error
@@ -951,9 +952,95 @@ class PCgraph(torch.nn.Module):
 
                         })
          
+  
 
         
         return self.errors
+
+
+
+
+    def log_error_map(self, errors):
+        import numpy as np
+        import math
+
+        if self.reshape:
+            mean_error = errors.mean(dim=0).cpu().numpy()
+        else:
+            errors = errors.view(self.batch_size, self.num_vertices)
+            mean_error = errors.mean(dim=0).cpu().numpy()
+
+        # Calculate the smallest square size that can accommodate the data
+        current_size = mean_error.size
+        side_length = math.ceil(math.sqrt(current_size))
+        desired_size = side_length ** 2
+
+        # Pad with zeros if necessary
+        if current_size < desired_size:
+            padded = np.pad(mean_error, (0, desired_size - current_size), mode='constant')
+        else:
+            padded = mean_error[:desired_size]
+
+        # Reshape to the desired 2D square shape
+        # reshaped = padded.reshape((side_length, side_length))
+
+        # Define indices for splitting
+        sensory_end = 784
+        label_start = current_size - 10
+        internal_end = label_start
+
+        # Ensure indices are within bounds
+        if current_size < 794:
+            raise ValueError("Not enough data to split into sensory (784), internal, and label (10) parts.")
+
+        # Split the mean_error into three parts
+        error_map_sensory = mean_error[:sensory_end]
+        error_map_internal = mean_error[sensory_end:internal_end]
+        error_map_label = mean_error[internal_end:]
+
+        # Function to reshape and pad each part into a square
+        def reshape_to_square(data):
+            size = data.size
+            side = math.ceil(math.sqrt(size))
+            desired = side ** 2
+            if size < desired:
+                data = np.pad(data, (0, desired - size), mode='constant')
+            else:
+                data = data[:desired]
+            return data.reshape((side, side))
+
+        # Reshape each part
+        mean_map_sensory = reshape_to_square(error_map_sensory)
+        mean_map_internal = reshape_to_square(error_map_internal)
+        mean_map_label = reshape_to_square(error_map_label)
+
+            
+        def plot_with_colorbar(data, title):
+            fig, ax = plt.subplots()
+            cax = ax.imshow(data, cmap='viridis')  # or any colormap you like
+            fig.colorbar(cax, ax=ax)
+            ax.set_title(title)
+            ax.axis('off')  # optional, to hide axis
+            return fig
+
+        # Create matplotlib figures with colorbars
+        fig_sensory = plot_with_colorbar(mean_map_sensory, f"Mean Map Sensory (Epoch {self.epoch}, Step {self.t})")
+        fig_internal = plot_with_colorbar(mean_map_internal, f"Mean Map Internal (Epoch {self.epoch}, Step {self.t})")
+        fig_label = plot_with_colorbar(mean_map_label, f"Mean Map Label (Epoch {self.epoch}, Step {self.t})")
+
+        # Log the images to Weights & Biases
+        wandb.log({
+            "Monitoring/Mean_Map_Sensory": wandb.Image(fig_sensory),
+            "Monitoring/Mean_Map_Internal": wandb.Image(fig_internal),
+            "Monitoring/Mean_Map_Label": wandb.Image(fig_label)
+        })
+
+        # Close figures to avoid memory leaks
+        plt.close(fig_sensory)
+        plt.close(fig_internal)
+        plt.close(fig_label)
+
+
 
 
     def update_xs(self, train=True, trace=False):
@@ -1024,6 +1111,7 @@ class PCgraph(torch.nn.Module):
                 # optimizer=self.optimizer_values if self.use_learning_optimizer else None,
                 train=train,
                 grad_clip=False
+                # grad_clip=True,
             )
 
             # Copy updated dummy values back into self.values; also needed for testing()
@@ -1313,9 +1401,18 @@ class PCgraph(torch.nn.Module):
         output_size = 10
 
         self.batch_size = data.shape[0]
+
         self.reset_nodes(batch_size=self.batch_size)
 
-        data = data.clone().view(self.batch_size, self.num_vertices)
+        data = data.clone().view(-1, self.num_vertices)
+
+        # REPLACE WITH OWN DATA 
+        # Ensure we only use 10 samples and replace the label part with our own one-hot vectors
+        labels = torch.arange(10, device=data.device)  # 0–9 digits
+
+        # Replace label part of each sample with one-hot vector
+        one_hot_labels = F.one_hot(labels, num_classes=10).float()
+        data[0:10, -output_size:] = one_hot_labels
 
         # ===== PREPARE GENERATION INPUT =====
         if self.task == "generation":
@@ -1324,7 +1421,7 @@ class PCgraph(torch.nn.Module):
                 # self.values[:, 0:input_size] = torch.randn_like(self.values[:, 0:input_size])
                 self.values[:, 0:input_size] = torch.rand_like(self.values[:, 0:input_size])
 
-                assert (self.values[:, -output_size:].argmax(dim=1) == labels).all()
+                # assert (self.values[:, -output_size:].argmax(dim=1) == labels).all()
             else:
                 # data[:, 0:input_size] = torch.randn_like(data[:, 0:input_size])
                 data[:, 0:input_size] = torch.rand_like(data[:, 0:input_size])
@@ -1362,7 +1459,8 @@ class PCgraph(torch.nn.Module):
 
         # ==== Choose images to display ====
         n_images = min(10, len(generated_imgs))
-        random_offset = np.random.randint(0, len(generated_imgs) - n_images + 1) if len(generated_imgs) > n_images else 0
+        # random_offset = np.random.randint(0, len(generated_imgs) - n_images + 1) if len(generated_imgs) > n_images else 0
+        random_offset = 0
 
         # ==== Plot postprocessed version ====
         fig_gen, axs = plt.subplots(1, n_images, figsize=(n_images * 2, 2))

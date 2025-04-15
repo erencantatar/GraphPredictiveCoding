@@ -1044,7 +1044,7 @@ print(max(accuracy_means))
 print(accuracy_means)
 
 
-if max(accuracy_means) > 0.90 or accuracy_means[-1] > 0.90:
+if max(accuracy_means) > 0.90 or accuracy_means[-1] >= 0.85:
 
     # save weights; TODO
 
