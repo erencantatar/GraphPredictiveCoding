@@ -126,6 +126,13 @@ class UpdateRule:
         #     out *= self.mask
         # return out 
 
+
+
+
+
+
+
+
 class vanZwol_AMB(UpdateRule):
     def __init__(self, update_type, batch_size, f, dfdx):
         super().__init__(update_type, batch_size, f, dfdx)
@@ -141,6 +148,39 @@ class vanZwol_AMB(UpdateRule):
 
         return dEdx 
 
+class vanZwol_AMB_withAttention(UpdateRule):
+    def __init__(self, update_type, batch_size, f, dfdx, num_vertices, device, adj, lr_attn):
+        super().__init__(update_type, batch_size, f, dfdx)
+        self.batch_size = batch_size
+        self.num_vertices = num_vertices
+        self.device = device
+        self.lr_attn = lr_attn
+
+        # Attention is a fixed mask where adj == 1 → attention = 1
+        self.alpha = adj.float().to(device).fill_(1.0)  # [N, N]
+
+    def pred(self, values, weights):
+        values = values.view(self.batch_size, self.num_vertices)  # [B, N]
+        fx = self.f(values)  # [B, N]
+
+        # Apply attention to weights (just elementwise mask)
+        weighted = weights * self.alpha  # [N, N]
+
+        mu = torch.matmul(fx, weighted.T)  # [B, N] x [N, N] → [B, N]
+        return mu
+
+    def grad_x(self, values, errors, weights):
+        values = values.view(self.batch_size, self.num_vertices)
+        errors = errors.view(self.batch_size, self.num_vertices)
+
+        dfdx_vals = self.dfdx(values)  # [B, N]
+
+        # Apply attention to weights
+        weighted = weights * self.alpha  # [N, N]
+
+        # [B, N] - ([B, N] * ([B, N] x [N, N])) → [B, N]
+        dEdx = errors - dfdx_vals * torch.matmul(errors, weighted)
+        return dEdx
 
 
 class MP_AMB(UpdateRule):
@@ -253,10 +293,38 @@ class PCgraph(torch.nn.Module):
         self.wandb_logging = wandb_logging
         
 
+        self.do_log_error_map = False
+        print("---do_log_error_map------", self.do_log_error_map)
+
+        use_attention = True
+        # use_attention = False
+        self.lr_attn = 10  # or another small value
+
+        # use_attention = True 
+        wandb.log({"use_attention": use_attention})
+
+
+
         if self.update_rules in ["vectorized", "vanZwol_AMB"]:
-            print("--------------Using vanZwol_AMB------------")
             self.reshape = True
-            self.updates = vanZwol_AMB(update_type=self.update_rules, batch_size=self.batch_size, f=self.f, dfdx=self.dfdx)
+
+            if use_attention:
+                print("--------------Using vanZwol_AMB_withAttention------------")
+                self.reshape = True
+                self.updates = vanZwol_AMB_withAttention(update_type=self.update_rules,
+                                             batch_size=self.batch_size,
+                                             f=self.f, dfdx=self.dfdx,
+                                             num_vertices=self.num_vertices,
+                                             device=self.device,
+                                             adj=self.adj,
+                                             lr_attn=self.lr_attn)
+                
+                if hasattr(self.updates, "attn_proj"):
+                    self.attn_proj = self.updates.attn_proj  # Register for optimizer
+            else:
+                print("--------------Using vanZwol_AMB (no attention) ------------")                
+                self.updates = vanZwol_AMB(update_type=self.update_rules, batch_size=self.batch_size, f=self.f, dfdx=self.dfdx)
+        
         elif self.update_rules in ["MP", "MP_AMB"]:
             print("-------Using MP_AMB-------------")
             self.reshape = False
@@ -296,6 +364,9 @@ class PCgraph(torch.nn.Module):
         self.optimizer_weights = torch.optim.Adam([self.w], lr=self.lr_w, betas=(0.9, 0.999), eps=1e-7, weight_decay=self.weight_decay)
         # self.optimizer_values = torch.optim.Adam([self.values_dummy], lr=self.lr_x, betas=(0.9, 0.999), eps=1e-7, weight_decay=0)
         self.optimizer_values = torch.optim.SGD([self.values_dummy], lr=self.lr_x, weight_decay=self.weight_decay, momentum=0, nesterov=False) # nestrov only for momentum > 0
+
+        # if hasattr(self, "attn_proj"):
+        #     self.optimizer_weights.add_param_group({'params': [self.attn_proj]})
 
         if self.use_learning_optimizer:
 
@@ -867,7 +938,7 @@ class PCgraph(torch.nn.Module):
         # self.errors_dum = self.values_dummy - self.mu_dum
         self.errors = self.values_dummy - self.mu
 
-        if first or last:
+        if self.do_log_error_map and (first or last):
             self.log_error_map(self.errors)
 
 
@@ -1079,7 +1150,9 @@ class PCgraph(torch.nn.Module):
             self.mu = self.updates.pred(self.values_dummy, self.w.to(self.device))
 
             self.get_energy(False, False)
-                         
+
+          
+                        
             # x = self.x.T.contiguous().view(-1, 1).to(DEVICE)  # Shape: [num_nodes, batch_size]
             # error = self.e.T.contiguous().view(-1, 1).to(DEVICE)  # Shape: [num_nodes, batch_size]
             
@@ -1113,6 +1186,10 @@ class PCgraph(torch.nn.Module):
                 grad_clip=False
                 # grad_clip=True,
             )
+
+            # update attention AFTER self.values update
+            if hasattr(self.updates, "update_attention"):
+                self.updates.update_attention(self.values_dummy, self.errors)
 
             # Copy updated dummy values back into self.values; also needed for testing()
             if self.reshape:

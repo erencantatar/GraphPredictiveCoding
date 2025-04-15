@@ -1002,6 +1002,28 @@ with torch.no_grad():
         if epoch % 10 == 1 and args.use_wandb in ['online', 'run']:
             plot_model_weights(model, args.graph_type, model_dir=None, save_wandb=str(epoch))
 
+
+
+        if hasattr(model, "attn_proj"):
+            # plot model weights attn_proj
+            with torch.no_grad():
+                attn_matrix = model.updates.compute_attention_matrix(model.values[0].detach().unsqueeze(0))  # [1, N, N]
+                attn_matrix = attn_matrix.squeeze(0).cpu().numpy()  # [N, N]
+
+                print("mean attn_matrix", attn_matrix.mean())
+
+            plt.figure(figsize=(6, 5))
+            plt.imshow(attn_matrix, cmap="viridis")
+            plt.title("Attention Map")
+            plt.colorbar()
+            plt.xlabel("Source Nodes (j)")
+            plt.ylabel("Target Nodes (i)")
+            # plt.show()
+            plt.savefig(f"attn_proj_{epoch}.png")
+            plt.close()
+       
+
+
         # # save weights
         # w = PCG.w.detach().cpu().numpy()
         # print("mean w", w.mean())
