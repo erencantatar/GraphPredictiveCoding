@@ -69,3 +69,5 @@ scr3/graphs/*/*/
 scr3/trained_models/**/
 
 scr3/trained_models/degree_distribution.png
+scr3/attention/*
+scr3/attention/** */

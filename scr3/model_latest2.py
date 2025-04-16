@@ -148,7 +148,7 @@ class vanZwol_AMB(UpdateRule):
 
         return dEdx 
 
-class vanZwol_AMB_withAttention(UpdateRule):
+class vanZwol_AMB_withAttention0(UpdateRule):
     def __init__(self, update_type, batch_size, f, dfdx, num_vertices, device, adj, lr_attn):
         super().__init__(update_type, batch_size, f, dfdx)
         self.batch_size = batch_size
@@ -181,6 +181,269 @@ class vanZwol_AMB_withAttention(UpdateRule):
         # [B, N] - ([B, N] * ([B, N] x [N, N])) → [B, N]
         dEdx = errors - dfdx_vals * torch.matmul(errors, weighted)
         return dEdx
+
+
+class vanZwol_AMB_withAttention1(UpdateRule):
+    def __init__(self, update_type, batch_size, f, dfdx, num_vertices, device, adj, lr_attn, use_attention=True):
+        super().__init__(update_type, batch_size, f, dfdx)
+        self.batch_size = batch_size
+        self.num_vertices = num_vertices
+        self.device = device
+        self.lr_attn = lr_attn
+        self.use_attention = use_attention
+
+        self.adj = adj.float().to(device)  # [N, N]
+
+        print("using vanZwol_AMB_withAttention1")
+        print('using lr_attn', lr_attn)
+
+        # Learnable attention weights (mask shape)
+        self.alpha = self.adj.clone().to(device)
+        self.alpha.requires_grad = False  # We update manually, locally
+
+    def pred(self, values, weights):
+        values = values.view(self.batch_size, self.num_vertices)  # [B, N]
+        fx = self.f(values)  # [B, N]
+
+        if self.use_attention:
+            weighted = weights * self.alpha  # [N, N]
+        else:
+            weighted = weights
+
+        mu = torch.matmul(fx, weighted.T)  # [B, N] x [N, N]ᵀ → [B, N]
+        return mu
+
+    def grad_x(self, values, errors, weights):
+        values = values.view(self.batch_size, self.num_vertices)
+        errors = errors.view(self.batch_size, self.num_vertices)
+
+        dfdx_vals = self.dfdx(values)  # [B, N]
+
+        if self.use_attention:
+            weighted = weights * self.alpha  # [N, N]
+        else:
+            weighted = weights
+
+        dEdx = errors - dfdx_vals * torch.matmul(errors, weighted)
+        return dEdx
+
+    def update_attention(self, values, errors):
+        """
+        Hebbian-like local learning: Δα_ij ∝ e_j * f(x_i)
+        - values: [B, N]
+        - errors: [B, N]
+        """
+        if not self.use_attention:
+            return
+
+        values = values.view(self.batch_size, self.num_vertices)
+        errors = errors.view(self.batch_size, self.num_vertices)
+
+        fx = self.f(values)  # [B, N]
+
+        # Hebbian update: delta_alpha[i, j] ∝ e_j * f(x_i)
+        delta_alpha = torch.zeros_like(self.alpha)
+
+        for b in range(self.batch_size):
+            # outer = torch.ger(fx[b], errors[b])  # [N, N]
+            outer = torch.ger(fx[b], torch.relu(errors[b]))  # Only reinforce for positive prediction errors
+
+            delta_alpha += self.adj * outer  # Only update connected nodes
+
+        delta_alpha += self.adj * torch.ger(fx[b], errors[b])
+
+        # delta_alpha /= self.batch_size  # Average over batch
+        self.alpha += self.lr_attn * delta_alpha  # Local update
+
+        # Optional: clamp to [0, 1] or use softmax row-wise
+        self.alpha = self.alpha.clamp(min=-1, max=1.0)
+
+# class vanZwol_AMB_withLearnableAttention(UpdateRule):
+#     def __init__(self, update_type, batch_size, f, dfdx, num_vertices, device, adj, lr_attn, use_attention=True):
+#         super().__init__(update_type, batch_size, f, dfdx)
+#         self.batch_size = batch_size
+#         self.num_vertices = num_vertices
+#         self.device = device
+#         self.lr_attn = lr_attn
+#         self.use_attention = use_attention
+#         self.adj = adj.float().to(device)
+
+#         # Learnable scalar attention parameters per edge
+#         # Only store for existing edges (adj == 1)
+#         self.attn_param = torch.nn.Parameter(torch.randn_like(adj))  # [N, N]
+#         self.attn_param.data *= self.adj  # Mask out invalid edges
+
+#     def compute_attention_weights(self, values):
+#         """
+#         Compute attention weights using a simple MLP (or just sigmoid) on the sending node's value.
+#         Local information only.
+#         """
+#         values = values.view(self.batch_size, self.num_vertices)  # [B, N]
+
+#         # Compute attention logits using sender values only (local)
+#         attn_logits = torch.sigmoid(self.attn_param)  # [N, N], learnable per edge
+#         attn_logits = attn_logits * self.adj  # Ensure zero where no connection
+#         return attn_logits  # [N, N]
+
+#     def pred(self, values, weights):
+#         values = values.view(self.batch_size, self.num_vertices)  # [B, N]
+#         fx = self.f(values)  # [B, N]
+
+#         if self.use_attention:
+#             alpha = self.compute_attention_weights(values)  # [N, N]
+#             weighted = weights * alpha  # [N, N]
+#         else:
+#             weighted = weights * self.adj  # Use adjacency only
+
+#         mu = torch.matmul(fx, weighted.T)  # [B, N]
+#         return mu
+
+#     def grad_x(self, values, errors, weights):
+#         values = values.view(self.batch_size, self.num_vertices)
+#         errors = errors.view(self.batch_size, self.num_vertices)
+#         dfdx_vals = self.dfdx(values)  # [B, N]
+
+#         if self.use_attention:
+#             alpha = self.compute_attention_weights(values)  # [N, N]
+#             weighted = weights * alpha  # [N, N]
+#         else:
+#             weighted = weights * self.adj
+
+#         e_term = torch.matmul(errors, weighted)  # [B, N]
+#         dEdx = errors - dfdx_vals * e_term
+#         return dEdx
+
+#     def update_attention(self, values, errors):
+#         """
+#         Local Hebbian-like rule for updating attention weights using sending value and error.
+#         Only updates where adj == 1.
+#         """
+#         values = values.view(self.batch_size, self.num_vertices)  # [B, N]
+#         errors = errors.view(self.batch_size, self.num_vertices)  # [B, N]
+
+#         # Outer product: batch-wise interaction between receiving error and sending value
+#         delta_alpha = torch.einsum("bi,bj->bij", errors, self.f(values))  # [B, N, N]
+#         delta_alpha = delta_alpha.mean(dim=0)  # [N, N] mean over batch
+
+#         # Only update valid edges (where adj == 1)
+#         self.attn_param.data += self.lr_attn * delta_alpha * self.adj
+
+class vanZwol_AMB_withTransformerAttentionHebbian(UpdateRule):
+    def __init__(self, update_type, batch_size, f, dfdx, num_vertices, device, adj, lr_attn, d_qk=8, use_attention=True):
+        super().__init__(update_type, batch_size, f, dfdx)
+        self.batch_size = batch_size
+        self.num_vertices = num_vertices
+        self.device = device
+        self.adj = adj.float().to(device)  # [N, N]
+        self.lr_attn = lr_attn
+        self.use_attention = use_attention
+        self.d_qk = d_qk
+
+        print("⏎ using vanZwol_AMB_withTransformerAttentionHebbian")
+
+        # Each node has a d_qk-dimensional query/key vector
+        self.W_q = torch.randn(1, num_vertices, d_qk, device=device, requires_grad=False) * 0.01
+        self.W_k = torch.randn(1, num_vertices, d_qk, device=device, requires_grad=False) * 0.01
+
+        # For logging only
+        # attn_weights = torch.ones(B, N, N, device=device) / N
+
+        self.attn_param = torch.zeros(num_vertices, num_vertices, device=device)
+        self.attn_param = torch.ones(num_vertices, num_vertices, device=device)
+
+        self.force_identity_attention = False 
+
+    def compute_attention_weights(self, values):
+
+        if self.force_identity_attention:
+            attn_weights = torch.eye(self.num_vertices, device=self.device).unsqueeze(0).repeat(self.batch_size, 1, 1)
+            with torch.no_grad():
+                self.attn_param = attn_weights.mean(dim=0)
+            return attn_weights
+
+
+        values = values.view(self.batch_size, self.num_vertices)  # [B, N]
+        fx = self.f(values)  # [B, N]
+
+        # Project scalar values into d_qk-dim space using per-node query/key vectors
+        Q = fx.unsqueeze(-1) * self.W_q  # [B, N, d_qk]
+        K = fx.unsqueeze(-1) * self.W_k  # [B, N, d_qk]
+
+        # Scaled dot-product attention
+        attn_scores = torch.matmul(Q, K.transpose(1, 2)) / np.sqrt(self.d_qk)  # [B, N, N]
+        attn_scores = torch.clamp(attn_scores, min=-5, max=5)
+
+        # Mask non-edges
+        mask = self.adj[None] == 0
+        attn_scores = torch.where(mask, torch.full_like(attn_scores, -1e9), attn_scores)
+
+        # Softmax across source nodes
+        attn_weights = torch.softmax(attn_scores, dim=-1)  # [B, N, N]
+        attn_weights = torch.nan_to_num(attn_weights, nan=0.0)
+
+        # For logging
+        with torch.no_grad():
+            self.attn_param = attn_weights.mean(dim=0)  # [N, N]
+
+        return attn_weights
+
+    def pred(self, values, weights):
+        values = values.view(self.batch_size, self.num_vertices)  # [B, N]
+        fx = self.f(values)  # [B, N]
+
+        if self.use_attention:
+            alpha = self.compute_attention_weights(values)  # [B, N, N]
+            weighted = torch.einsum("bij,jk->bik", alpha, weights.T)  # [B, N, N]
+            mu = torch.bmm(fx.unsqueeze(1), weighted).squeeze(1)  # [B, N]
+        else:
+            mu = torch.matmul(fx, weights.T)
+
+        return mu
+
+    def grad_x(self, values, errors, weights):
+        values = values.view(self.batch_size, self.num_vertices)
+        errors = errors.view(self.batch_size, self.num_vertices)
+        dfdx_vals = self.dfdx(values)
+
+        if self.use_attention:
+            alpha = self.compute_attention_weights(values)  # [B, N, N]
+            weighted = torch.einsum("bij,jk->bik", alpha, weights)  # [B, N, N]
+            e_term = torch.bmm(errors.unsqueeze(1), weighted).squeeze(1)  # [B, N]
+        else:
+            e_term = torch.matmul(errors, weights)
+
+        return errors - dfdx_vals * e_term
+
+    def update_attention(self, values, errors):
+        values = values.view(self.batch_size, self.num_vertices)  # [B, N]
+        errors = errors.view(self.batch_size, self.num_vertices)  # [B, N]
+        fx = self.f(values)  # [B, N]
+
+        # Hebbian interactions: Δα_ij ∝ e_j * f(x_i)
+        delta_q = torch.einsum("bi,bj->ij", errors, fx) / self.batch_size  # [N, N]
+        delta_k = torch.einsum("bi,bj->ij", fx, errors) / self.batch_size  # [N, N]
+
+        delta_q *= self.adj  # Mask invalid edges
+        delta_k *= self.adj
+
+        # Project edge-wise outer product into update vector for each node
+        # dW_q = torch.matmul(delta_q.unsqueeze(-1), self.W_k[0].unsqueeze(0))  # [N, N, 1] x [1, N, d_qk] → [N, N, d_qk]
+        dW_q = torch.matmul(delta_q, self.W_k)  # [N, N] x [N, d_qk] → [N, d_qk]
+
+        dW_q = dW_q.sum(dim=1)  # [N, d_qk]
+
+        dW_k = torch.matmul(delta_k.T, self.W_q)  # [N, N]ᵀ x [N, d_qk] → [N, d_qk]
+        # dW_k = torch.matmul(delta_k.T.unsqueeze(-1), self.W_q[0].unsqueeze(0))  # [N, N, 1] x [1, N, d_qk]
+        dW_k = dW_k.sum(dim=1)  # [N, d_qk]
+
+        # Stability: clip the gradients
+        dW_q = torch.clamp(dW_q, -1.0, 1.0)
+        dW_k = torch.clamp(dW_k, -1.0, 1.0)
+
+        # Apply updates
+        self.W_q += self.lr_attn * dW_q.unsqueeze(0)  # [1, N, d_qk]
+        self.W_k += self.lr_attn * dW_k.unsqueeze(0)  # [1, N, d_qk]
+
 
 
 class MP_AMB(UpdateRule):
@@ -298,7 +561,8 @@ class PCgraph(torch.nn.Module):
 
         use_attention = True
         # use_attention = False
-        self.lr_attn = 10  # or another small value
+        # self.lr_attn = 0.0000001  # or another small value
+        self.lr_attn = 1000  # 🔥 Best tradeoff between learning and stability
 
         # use_attention = True 
         wandb.log({"use_attention": use_attention})
@@ -311,14 +575,53 @@ class PCgraph(torch.nn.Module):
             if use_attention:
                 print("--------------Using vanZwol_AMB_withAttention------------")
                 self.reshape = True
-                self.updates = vanZwol_AMB_withAttention(update_type=self.update_rules,
-                                             batch_size=self.batch_size,
-                                             f=self.f, dfdx=self.dfdx,
-                                             num_vertices=self.num_vertices,
-                                             device=self.device,
-                                             adj=self.adj,
-                                             lr_attn=self.lr_attn)
+
+
+
+                # self.updates = vanZwol_AMB_withAttention0(update_type=self.update_rules,
+                #                              batch_size=self.batch_size,
+                #                              f=self.f, dfdx=self.dfdx,
+                #                              num_vertices=self.num_vertices,
+                #                              device=self.device,
+                #                              adj=self.adj,
+                #                              lr_attn=self.lr_attn)
                 
+
+                # self.updates = vanZwol_AMB_withAttention1(update_type=self.update_rules,
+                #                              batch_size=self.batch_size,
+                #                              f=self.f, dfdx=self.dfdx,
+                #                              num_vertices=self.num_vertices,
+                #                              device=self.device,
+                #                              adj=self.adj,
+                #                              lr_attn=self.lr_attn)
+                
+                # self.updates = vanZwol_AMB_withLearnableAttention(
+                #     update_type=self.update_rules,
+                #     batch_size=self.batch_size,
+                #     f=self.f,
+                #     dfdx=self.dfdx,
+                #     num_vertices=self.num_vertices,
+                #     device=self.device,
+                #     adj=self.adj,
+                #     lr_attn=self.lr_attn,
+                #     use_attention=True  # Toggleable
+                # )
+
+                self.updates = vanZwol_AMB_withTransformerAttentionHebbian(
+                    update_type=self.update_rules,
+                    batch_size=self.batch_size,
+                    f=self.f,
+                    dfdx=self.dfdx,
+                    num_vertices=self.num_vertices,
+                    device=self.device,
+                    adj=self.adj,
+                    lr_attn=self.lr_attn,
+                    d_qk=1,  # You can tune this
+                    # use_attention=True
+                    use_attention=False
+                )
+
+
                 if hasattr(self.updates, "attn_proj"):
                     self.attn_proj = self.updates.attn_proj  # Register for optimizer
             else:
@@ -611,6 +914,8 @@ class PCgraph(torch.nn.Module):
         
 
         # self.update_mask = self.update_mask_train
+
+
 
     def test_(self, epoch=0):
         self.mode = "test"

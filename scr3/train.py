@@ -992,6 +992,10 @@ with torch.no_grad():
                 "classification/size":  len(accs) * args.batch_size,
             })
 
+            use_attention = (accuracy_mean > 0.5)  # Or epoch > X
+            model.updates.use_attention = use_attention
+
+
         # save model weights plt.imshow to "trained_models/{TASK}/weights/model_{epoch}.png"
         # make folder if not exist
         import os 
@@ -1004,24 +1008,54 @@ with torch.no_grad():
 
 
 
-        if hasattr(model, "attn_proj"):
-            # plot model weights attn_proj
+        if hasattr(model.updates, "alpha"):
+            attn_matrix = model.updates.alpha.detach().cpu().numpy()  # [N, N]
+            print(f"[Epoch {epoch}] Mean attention weight: {attn_matrix.mean():.4f}")
+
+            fig, ax = plt.subplots(figsize=(6, 5))
+            cax = ax.imshow(attn_matrix, cmap="viridis")
+            ax.set_title(f"Attention Map (Epoch {epoch})")
+            ax.set_xlabel("Source Nodes (j)")
+            ax.set_ylabel("Target Nodes (i)")
+            fig.colorbar(cax)
+
+            # Save locally
+            fig.savefig(f"attention_map_epoch_{epoch}.png")
+
+            # Log to wandb
+            if args.use_wandb in ['online', 'run']:
+                wandb.log({f"Monitoring/Attention_Heatmap_E{epoch}": wandb.Image(fig)})
+
+            plt.close(fig)
+        
+        if hasattr(model.updates, "attn_param"):
             with torch.no_grad():
-                attn_matrix = model.updates.compute_attention_matrix(model.values[0].detach().unsqueeze(0))  # [1, N, N]
-                attn_matrix = attn_matrix.squeeze(0).cpu().numpy()  # [N, N]
-
-                print("mean attn_matrix", attn_matrix.mean())
-
+                attn_weights = torch.sigmoid(model.updates.attn_param).cpu().numpy()
             plt.figure(figsize=(6, 5))
-            plt.imshow(attn_matrix, cmap="viridis")
-            plt.title("Attention Map")
+            plt.imshow(attn_weights, cmap="viridis")
+            plt.title("Learned Attention Weights")
             plt.colorbar()
-            plt.xlabel("Source Nodes (j)")
-            plt.ylabel("Target Nodes (i)")
-            # plt.show()
-            plt.savefig(f"attn_proj_{epoch}.png")
+            plt.xlabel("Source Nodes")
+            plt.ylabel("Target Nodes")
+            plt.savefig(f"attention_weights_epoch_{epoch}.png")
             plt.close()
-       
+
+
+        # vanZwol_AMB_withTransformerAttentionHebbian
+        if hasattr(model.updates, "attn_param"):
+            with torch.no_grad():
+                attn_weights = model.updates.attn_param.cpu().numpy()
+                print(f"[Epoch {epoch}] Mean attention weight: {attn_weights.mean():.4f}")
+            plt.figure(figsize=(6, 5))
+            plt.imshow(attn_weights, cmap="viridis")
+            plt.title(f"Learned Attention Weights (Epoch {epoch})")
+            plt.colorbar()
+            plt.xlabel("Source Nodes")
+            plt.ylabel("Target Nodes")
+            plt.savefig(f"attention_weights_epoch_{epoch}.png")
+            plt.close()
+
+
 
 
         # # save weights
