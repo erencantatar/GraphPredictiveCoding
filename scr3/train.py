@@ -124,6 +124,7 @@ parser.add_argument('--update_rules', type=str, default="vanZwol_AMB", choices=[
 
 parser.add_argument('--delta_w_selection', type=str, required=True, choices=["all", "internal_only"], help="Which weights to optimize in delta_w")
 parser.add_argument('--use_grokfast', type=str, default="False", choices=["True", "False"], help="GroKfast fast and slow weights before using the optimizer")
+parser.add_argument('--grad_clip_lr_x_lr_w',type=str,default="False False",choices=["True True", "True False", "False True", "False False"], help='Enable/disable gradient clipping for lr_x and/or lr_w. Choices are: True True, True False, False True, False False.')
 
 # required use_input_error False or True 
 parser.add_argument('--use_input_error', type=str, default="False", choices=["True", "False"], help="Use input error in the model")
@@ -196,6 +197,10 @@ args.normalize_msg = args.normalize_msg == 'True'
 args.use_bias = args.use_bias == 'True'
 args.set_abs_small_w_2_zero = args.set_abs_small_w_2_zero == 'True'
 args.grokfast = args.use_grokfast == 'True'
+
+grad_clip_lr_x_str, grad_clip_lr_w_str = args.grad_clip_lr_x_lr_w.split()
+grad_clip_lr_x = grad_clip_lr_x_str == "True"
+grad_clip_lr_w = grad_clip_lr_w_str == "True"
 
 tags_list = args.tags.split(",") if args.tags else []
 if 'all' in args.tasks:
@@ -301,6 +306,7 @@ graph_params = {
     "seed": args.seed,   
 }
 
+
 eval_generation, eval_classification, eval_denoise, eval_occlusion = True, True, 0, 0 
 
 
@@ -371,6 +377,43 @@ if graph_params["graph_type"]["name"] in ["single_hidden_layer"]:
     # TODO ; still unsure about which graph does which task
     eval_generation, eval_classification, eval_denoise, eval_occlusion = True, True, 0, 0 
 
+
+
+print("graph_params 1 :", graph_params)
+
+from graphbuilder import GraphBuilder
+# from helper.plot import plot_adj_matrix
+
+print("graph_params", graph_params)
+# graph = GraphBuilder(**graph_params)
+
+# 🔹 Create Graph Structure (Assuming GraphBuilder is already defined)
+graph = GraphBuilder(**graph_params)
+single_graph = graph.edge_index  # Use the precomputed edge index
+
+from torch_geometric.utils import to_dense_adj
+adj_matrix_pyg = to_dense_adj(graph.edge_index)[0]
+
+num_vertices = adj_matrix_pyg.shape[0]
+graph.num_vertices = adj_matrix_pyg.shape[0]
+
+if graph_params["graph_type"]["name"] == "sbm_two_branch_chain":
+
+    # print(graph.num_vertices)
+    # if "internal_indices" in graph.__dict__:
+    #     print(graph_params["internal_nodes"])
+    graph_params["internal_nodes"] = len(graph.internal_indices)  # Number of internal nodes
+    # graph_params["internal_nodes"] = graph.num_vertices
+    print(graph_params["internal_nodes"])
+
+    print("----------1-----------")
+    print(len(graph.internal_indices))
+    print(graph.num_vertices)
+    print()
+
+
+print("debugggg------------------")
+print()
 # if graph_params["graph_type"]["name"] not in ["single_hidden_layer"]:
 #     # Ensure these arguments are not specified for other graph types
 #     if "discriminative_hidden_layers" in args:
@@ -425,7 +468,7 @@ from graphbuilder import GraphBuilder
 # from helper.plot import plot_adj_matrix
 
 print("graph_params", graph_params)
-graph = GraphBuilder(**graph_params)
+# graph = GraphBuilder(**graph_params)
 
 # 🔹 Create Graph Structure (Assuming GraphBuilder is already defined)
 graph = GraphBuilder(**graph_params)
@@ -717,9 +760,9 @@ train_set, val_set = random_split(train_dataset, [50000, 10000])
 # Create DataLoaders
 val_loader_batch_size = (args.batch_size if args.batch_size > 10 else 20)
 
-train_loader = DataLoader(train_set, batch_size=args.batch_size, drop_last=False, num_workers=4, pin_memory=True)
-val_loader = DataLoader(val_set, batch_size=val_loader_batch_size, shuffle=False, drop_last=False, num_workers=4, pin_memory=True)
-test_loader = DataLoader(test_dataset, batch_size=val_loader_batch_size, shuffle=False, drop_last=False, num_workers=4, pin_memory=True)
+train_loader = DataLoader(train_set, batch_size=args.batch_size, shuffle=True, drop_last=False, num_workers=4, pin_memory=True)
+val_loader = DataLoader(val_set, batch_size=val_loader_batch_size, shuffle=True, drop_last=False, num_workers=4, pin_memory=True)
+test_loader = DataLoader(test_dataset, batch_size=val_loader_batch_size, shuffle=True, drop_last=False, num_workers=4, pin_memory=True)
 
 
 # graph_type [FC, generative, discriminative, SBM, (SBM_hierarchy, custom_two_branch, two_branch_graph) ]
@@ -727,23 +770,12 @@ test_loader = DataLoader(test_dataset, batch_size=val_loader_batch_size, shuffle
 
 
 
-# from helper.vanZwol_optim import *
 
 ################################# discriminative model lr         ##########################################
 ################################# generative model lr         ##########################################
 
 
-weight_decay = 0             
-grad_clip = 1
-batch_scale = False
- 
-# import helper.vanZwol_optim as optim
 
-# vertices = [784, 48, 10] # input, hidden, output
-# mask = get_mask_hierarchical([784,32,16,10])
-
-from torch_geometric.utils import to_dense_adj
-adj_matrix_pyg = to_dense_adj(graph.edge_index)[0]
 
 print("adj_matrix_pyg", adj_matrix_pyg.shape)
 
@@ -766,7 +798,12 @@ model_params = {
 
     "activation": args.activation_func,  
     "device": device,
-    "num_vertices": graph.num_vertices,
+    
+    "num_vertices": input_size + hidden_size + output_size,
+    # "num_vertices": graph.num_vertices,
+    # "num_vertices": num_vertices,
+    # "num_vertices": num_vertices,
+
     "num_internal": sum(graph.internal_indices),
     "adj": adj_matrix_pyg,             # 2d Adjacency matrix
     "edge_index": graph.edge_index,    # [2, num_edges] edge index
@@ -779,9 +816,6 @@ model_params = {
     
     
     "use_input_error": args.use_input_error,
-    # "use_input_error": False,
-    # "use_input_error": False if args.graph_type == "single_hidden_layer" else True,  # "use_input_error": True,
-    # "use_input_error": True,
 
     "update_rules": args.update_rules,  # "Van_Zwol" or "salvatori", "vectorized"
     "weight_init": args.weight_init,   # xavier, 'uniform', 'based_on_f', 'zero', 'kaiming'
@@ -789,37 +823,12 @@ model_params = {
     # "edge_type":  custom_dataset_train.edge_type,
     "use_learning_optimizer": args.use_learning_optimizer,    # False or [0], [(weight_decay=)]
     "use_grokfast": args.grokfast,  # False or True
-    # "clamping": None , # (0, torch.inf) or 'None'
+    "grad_clip_lr_x_lr_w": (grad_clip_lr_x, grad_clip_lr_w), 
 }
 
 PCG = PCgraph(**model_params, 
                 wandb_logging=run if args.use_wandb in ['online', 'run'] else None,
                 debug=False)
-
-
-# PCG = PCgraph(f,
-#         device=device,
-#         num_vertices=graph.num_vertices,
-#         num_internal=sum(graph.internal_indices),
-#         adj=adj_matrix_pyg,
-#         edge_index=graph.edge_index,
-#         batch_size=batch_size,
-#         # mask=mask,
-#         learning_rates=(lr_x, lr_w), 
-#         T_train=T_train,
-#         T_test=T_test,
-#         incremental=incremental, 
-#         use_input_error=use_input_error,
-#         )
-
-# optimizer = Adam(
-#     PCG.params,
-#     learning_rate=lr_w,
-#     grad_clip=grad_clip,
-#     batch_scale=batch_scale,
-#     weight_decay=weight_decay,
-# ) 
-# PCG.set_optimizer(optimizer)
 
 PCG.init_modes(graph_type=args.graph_type, graph=graph)
 PCG.set_task(TASK)
@@ -838,25 +847,10 @@ from datetime import datetime
 from tqdm import tqdm
 import torch
 
-epochs = 100
 start_time = datetime.now()
 
 train_energy, train_loss, train_acc = [], [], []
 val_loss, val_acc, val_acc2 = [], [], []
-num_epochs = 40
-
-# break_num = 150 
-# break_num = 250 
-# break_num = int(len(train_loader) -1 )
-# break_num = 100
-
-# break_num = 1200
-# break_num = 200
-# break_num = 500
-# break_num = 200
-# break_num = 100
-# break_num = 20
-# break_num = 80
 
 if args.break_num_train == 0:
     break_num = len(train_loader)
@@ -898,6 +892,19 @@ with torch.no_grad():
         total_loss = 0
         energy = 0
 
+        # if epoch == 2:
+        #     # reduce by 10x
+        #     model.lr_x /= 10 
+        #     model.lr_w /= 10
+        
+        # log mean, min and max of weights to wandb
+        w = PCG.w.detach().cpu().numpy()
+        wandb.log({
+            "epoch": epoch,
+            "Weights/mean": w.mean(),
+            "Weights/min": w.min(),
+            "Weights/max": w.max(),
+        })
 
         print("\n-----train_supervised-----")
         print(len(train_loader))
@@ -992,8 +999,8 @@ with torch.no_grad():
                 "classification/size":  len(accs) * args.batch_size,
             })
 
-            use_attention = (accuracy_mean > 0.5)  # Or epoch > X
-            model.updates.use_attention = use_attention
+            # use_attention = (accuracy_mean > 0.5)  # Or epoch > X
+            # model.updates.use_attention = use_attention
 
 
         # save model weights plt.imshow to "trained_models/{TASK}/weights/model_{epoch}.png"
@@ -1002,58 +1009,59 @@ with torch.no_grad():
         if not os.path.exists(f"trained_models/{args.graph_type}/weights/"):
             os.makedirs(f"trained_models/{args.graph_type}/weights/")
 
-        
+       
+
         if epoch % 10 == 1 and args.use_wandb in ['online', 'run']:
             plot_model_weights(model, args.graph_type, model_dir=None, save_wandb=str(epoch))
 
 
+        # if model.use_attention:
+        #     if hasattr(model.updates, "alpha"):
+        #         attn_matrix = model.updates.alpha.detach().cpu().numpy()  # [N, N]
+        #         print(f"[Epoch {epoch}] Mean attention weight: {attn_matrix.mean():.4f}")
 
-        if hasattr(model.updates, "alpha"):
-            attn_matrix = model.updates.alpha.detach().cpu().numpy()  # [N, N]
-            print(f"[Epoch {epoch}] Mean attention weight: {attn_matrix.mean():.4f}")
+        #         fig, ax = plt.subplots(figsize=(6, 5))
+        #         cax = ax.imshow(attn_matrix, cmap="viridis")
+        #         ax.set_title(f"Attention Map (Epoch {epoch})")
+        #         ax.set_xlabel("Source Nodes (j)")
+        #         ax.set_ylabel("Target Nodes (i)")
+        #         fig.colorbar(cax)
 
-            fig, ax = plt.subplots(figsize=(6, 5))
-            cax = ax.imshow(attn_matrix, cmap="viridis")
-            ax.set_title(f"Attention Map (Epoch {epoch})")
-            ax.set_xlabel("Source Nodes (j)")
-            ax.set_ylabel("Target Nodes (i)")
-            fig.colorbar(cax)
+        #         # Save locally
+        #         fig.savefig(f"attention/attention_map_epoch_{epoch}.png")
 
-            # Save locally
-            fig.savefig(f"attention_map_epoch_{epoch}.png")
+        #         # Log to wandb
+        #         if args.use_wandb in ['online', 'run']:
+        #             wandb.log({f"Monitoring/Attention_Heatmap_E{epoch}": wandb.Image(fig)})
 
-            # Log to wandb
-            if args.use_wandb in ['online', 'run']:
-                wandb.log({f"Monitoring/Attention_Heatmap_E{epoch}": wandb.Image(fig)})
-
-            plt.close(fig)
-        
-        if hasattr(model.updates, "attn_param"):
-            with torch.no_grad():
-                attn_weights = torch.sigmoid(model.updates.attn_param).cpu().numpy()
-            plt.figure(figsize=(6, 5))
-            plt.imshow(attn_weights, cmap="viridis")
-            plt.title("Learned Attention Weights")
-            plt.colorbar()
-            plt.xlabel("Source Nodes")
-            plt.ylabel("Target Nodes")
-            plt.savefig(f"attention_weights_epoch_{epoch}.png")
-            plt.close()
+        #         plt.close(fig)
+            
+        #     if hasattr(model.updates, "attn_param"):
+        #         with torch.no_grad():
+        #             attn_weights = torch.sigmoid(model.updates.attn_param).cpu().numpy()
+        #         plt.figure(figsize=(6, 5))
+        #         plt.imshow(attn_weights, cmap="viridis")
+        #         plt.title("Learned Attention Weights")
+        #         plt.colorbar()
+        #         plt.xlabel("Source Nodes")
+        #         plt.ylabel("Target Nodes")
+        #         plt.savefig(f"attention/attention_weights_epoch_{epoch}.png")
+        #         plt.close()
 
 
-        # vanZwol_AMB_withTransformerAttentionHebbian
-        if hasattr(model.updates, "attn_param"):
-            with torch.no_grad():
-                attn_weights = model.updates.attn_param.cpu().numpy()
-                print(f"[Epoch {epoch}] Mean attention weight: {attn_weights.mean():.4f}")
-            plt.figure(figsize=(6, 5))
-            plt.imshow(attn_weights, cmap="viridis")
-            plt.title(f"Learned Attention Weights (Epoch {epoch})")
-            plt.colorbar()
-            plt.xlabel("Source Nodes")
-            plt.ylabel("Target Nodes")
-            plt.savefig(f"attention_weights_epoch_{epoch}.png")
-            plt.close()
+        #     # vanZwol_AMB_withTransformerAttentionHebbian
+        #     if hasattr(model.updates, "attn_param"):
+        #         with torch.no_grad():
+        #             attn_weights = model.updates.attn_param.cpu().numpy()
+        #             print(f"[Epoch {epoch}] Mean attention weight: {attn_weights.mean():.4f}")
+        #         plt.figure(figsize=(6, 5))
+        #         plt.imshow(attn_weights, cmap="viridis")
+        #         plt.title(f"Learned Attention Weights (Epoch {epoch})")
+        #         plt.colorbar()
+        #         plt.xlabel("Source Nodes")
+        #         plt.ylabel("Target Nodes")
+        #         plt.savefig(f"attention/attention_weights_epoch_{epoch}.png")
+        #         plt.close()
 
 
 
