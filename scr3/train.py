@@ -1104,8 +1104,9 @@ with torch.no_grad():
 
 
 print("done training")
-print(max(accuracy_means))
-print(accuracy_means)
+if len(accuracy_means) > 0:
+    print(max(accuracy_means))
+    print(accuracy_means)
 
 
 if max(accuracy_means) > 0.90 or accuracy_means[-1] >= 0.85:
@@ -1155,3 +1156,7 @@ if max(accuracy_means) > 0.90 or accuracy_means[-1] >= 0.85:
             "classification_test/size":  len(accs) * args.batch_size,
         })
 
+
+
+if args.use_wandb in ['online', 'run']:
+        plot_model_weights(model, args.graph_type, model_dir=None, save_wandb=str(int(args.epochs)))

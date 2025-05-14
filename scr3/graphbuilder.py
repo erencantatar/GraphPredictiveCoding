@@ -64,6 +64,13 @@ graph_type_options = {
                 }
         },
         
+        "sbm_two_branch_chain": {
+            "params": {
+                "branch1_config": (2, 20, 20),  # layers, clusters per layer, nodes per cluster
+                "branch2_config": (2, 20, 20)
+            }
+        },
+
 
         "stochastic_block_w_supvision_clusters": {
             "params": {
@@ -249,7 +256,11 @@ class GraphBuilder:
         elif self.graph_type["name"] == "stochastic_block":
             self.stochastic_block(no_sens2sens=self.graph_params["remove_sens_2_sens"], 
                                  no_sens2supervised=self.graph_params["remove_sens_2_sup"])
-
+        elif self.graph_type["name"] == "sbm_two_branch_chain":
+            self.sbm_two_branch_chain(
+                self.graph_params["branch1_config"],
+                self.graph_params["branch2_config"]
+            )
         elif self.graph_type["name"] == "stochastic_block_hierarchy":
             self.stoic_block_hierarchy( 
                                 no_sens2sens=self.graph_params["remove_sens_2_sens"], 
@@ -578,6 +589,85 @@ class GraphBuilder:
                     self.edge_type.append("Inter2Sup")
                     self.edge_index.append([sup_node, large_cluster])
                     self.edge_type.append("Sup2Inter")
+
+    def sbm_two_branch_chain(self, branch1_config=None, branch2_config=None):
+        """
+        Hardcoded version for correctness testing:
+        Branch 1: Sensory → Internal1 (fully connected) → Supervision
+        Branch 2: Supervision → Internal2 (fully connected) → Sensory
+        """
+        assert self.supervised_learning, "Supervision nodes are required for this graph type."
+
+        self.edge_index = []
+        self.edge_type = []
+
+        sensory = list(range(self.SENSORY_NODES))
+        supervision = list(self.supervision_indices)
+
+        # === Internal Clusters ===
+        internal1_start = self.SENSORY_NODES
+        internal2_start = internal1_start + 50  # 50 nodes per cluster
+
+        internal1 = list(range(internal1_start, internal1_start + 50))
+        internal2 = list(range(internal2_start, internal2_start + 50))
+
+        self.branch1_internal_indices = internal1
+        self.branch2_internal_indices = internal2
+        self.internal_indices = internal1 + internal2
+        self.NUM_INTERNAL_NODES = len(self.internal_indices)
+
+        # === Branch 1: Sensory → Internal1 → Supervision ===
+        for s in sensory:
+            for i in internal1:
+                self.edge_index.append([s, i])
+                self.edge_type.append("Sens2Inter")
+
+        for i in internal1:
+            for j in internal1:
+                if i != j:
+                    self.edge_index.append([i, j])
+                    self.edge_type.append("Inter2Inter")
+
+        for i in internal1:
+            for sup in supervision:
+                self.edge_index.append([i, sup])
+                self.edge_type.append("Inter2Sup")
+
+        # === Branch 2: Supervision → Internal2 → Sensory ===
+        for sup in supervision:
+            for i in internal2:
+                self.edge_index.append([sup, i])
+                self.edge_type.append("Sup2Inter")
+
+        for i in internal2:
+            for j in internal2:
+                if i != j:
+                    self.edge_index.append([i, j])
+                    self.edge_type.append("Inter2Inter")
+
+        for i in internal2:
+            for s in sensory:
+                self.edge_index.append([i, s])
+                self.edge_type.append("Inter2Sens")
+
+        print("✅ Hardcoded sbm_two_branch_chain constructed successfully.")
+
+
+    def ensure_all_nodes_connected(self, total_nodes):
+        used = set()
+        for src, dst in self.edge_index:
+            used.add(src)
+            used.add(dst)
+        all_nodes = set(range(total_nodes))
+        missing = all_nodes - used
+        for m in missing:
+            self.edge_index.append([m, m])
+            self.edge_type.append("Sup2Sup" if m in self.supervision_indices else "Inter2Inter")
+        if missing:
+            print(f"⚠️ Added self-loops for {len(missing)} disconnected nodes: {sorted(missing)}")
+        else:
+            print("✅ All nodes connected.")
+
 
     def fully_connected(self, self_connection, no_sens2sens=False, no_sens2supervised=False):
         # Initialize a set to track seen edges

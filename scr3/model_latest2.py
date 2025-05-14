@@ -329,7 +329,8 @@ class vanZwol_AMB_withAttention1(UpdateRule):
 #         self.attn_param.data += self.lr_attn * delta_alpha * self.adj
 
 class vanZwol_AMB_withTransformerAttentionHebbian(UpdateRule):
-    def __init__(self, update_type, batch_size, f, dfdx, num_vertices, device, adj, lr_attn, d_qk=8, use_attention=True):
+    def __init__(self, update_type, batch_size, f, dfdx, num_vertices, device, adj, 
+                 lr_attn, d_qk=8, use_attention=True, grad_clip_lr_x=False, grad_clip_lr_w=False):
         super().__init__(update_type, batch_size, f, dfdx)
         self.batch_size = batch_size
         self.num_vertices = num_vertices
@@ -338,6 +339,10 @@ class vanZwol_AMB_withTransformerAttentionHebbian(UpdateRule):
         self.lr_attn = lr_attn
         self.use_attention = use_attention
         self.d_qk = d_qk
+        self.grad_clip_lr_x = grad_clip_lr_x
+        self.grad_clip_lr_w = grad_clip_lr_w
+
+
 
         print("⏎ using vanZwol_AMB_withTransformerAttentionHebbian")
 
@@ -437,8 +442,10 @@ class vanZwol_AMB_withTransformerAttentionHebbian(UpdateRule):
         dW_k = dW_k.sum(dim=1)  # [N, d_qk]
 
         # Stability: clip the gradients
-        dW_q = torch.clamp(dW_q, -1.0, 1.0)
-        dW_k = torch.clamp(dW_k, -1.0, 1.0)
+        # if self.grad_clip_lr_x:
+        if self.grad_clip_lr_w:
+            dW_q = torch.clamp(dW_q, -1.0, 1.0)
+            dW_k = torch.clamp(dW_k, -1.0, 1.0)
 
         # Apply updates
         self.W_q += self.lr_attn * dW_q.unsqueeze(0)  # [1, N, d_qk]
@@ -510,7 +517,7 @@ class PCgraph(torch.nn.Module):
 
     def __init__(self, graph_type, task, activation, device, num_vertices, num_internal, adj, edge_index,
                     batch_size, learning_rates, T, incremental_learning, use_input_error,
-                    update_rules, weight_init, 
+                    update_rules, weight_init, grad_clip_lr_x_lr_w,
                     early_stop=None, edge_type=None, use_learning_optimizer=None, use_grokfast=None, clamping=None,
                     wandb_logging=None, debug=False, **kwargs):
         super().__init__()
@@ -526,12 +533,15 @@ class PCgraph(torch.nn.Module):
         self.edge_index = edge_index.to(self.device)  # PYG edge_index
         self.edge_index_single_graph = edge_index
 
-        self.lr_x, self.lr_w = learning_rates 
-        self.lr_values, self.lr_weights = learning_rates
+        self.lr_values, self.lr_weights = learning_rates          # self.lr_x, self.lr_w = learning_rates  
         
         self.T_train, self.T_test = T 
         self.incremental = incremental_learning 
         # self.early_stop = early_stop
+
+        self.grad_clip_lr_x, self.grad_clip_lr_w = grad_clip_lr_x_lr_w
+        print("using grad_clip_lr_x", self.grad_clip_lr_x)
+        print("using grad_clip_lr_w", self.grad_clip_lr_w)
 
         self.epoch = 0 
         self.batch_size = batch_size  # Number of graphs in the batch
@@ -549,7 +559,11 @@ class PCgraph(torch.nn.Module):
         # assert torch.all(self.edge_index == edge_index)
 
         self.adj = torch.tensor(adj).to(DEVICE)
+        print("self.adj", self.adj.shape)
         self.mask = self.adj
+        # log mask to wandb
+        wandb.log({"mask": wandb.Image(self.mask.cpu().numpy())})
+        
 
         self.update_rules = update_rules 
         self.weight_init  = weight_init  
@@ -559,55 +573,20 @@ class PCgraph(torch.nn.Module):
         self.do_log_error_map = False
         print("---do_log_error_map------", self.do_log_error_map)
 
-        use_attention = True
-        # use_attention = False
+        # self.use_attention = True
+        self.use_attention = False
         # self.lr_attn = 0.0000001  # or another small value
         self.lr_attn = 1000  # 🔥 Best tradeoff between learning and stability
 
         # use_attention = True 
-        wandb.log({"use_attention": use_attention})
+        wandb.log({"use_attention": self.use_attention})
 
 
 
         if self.update_rules in ["vectorized", "vanZwol_AMB"]:
             self.reshape = True
 
-            if use_attention:
-                print("--------------Using vanZwol_AMB_withAttention------------")
-                self.reshape = True
-
-
-
-                # self.updates = vanZwol_AMB_withAttention0(update_type=self.update_rules,
-                #                              batch_size=self.batch_size,
-                #                              f=self.f, dfdx=self.dfdx,
-                #                              num_vertices=self.num_vertices,
-                #                              device=self.device,
-                #                              adj=self.adj,
-                #                              lr_attn=self.lr_attn)
-                
-
-                # self.updates = vanZwol_AMB_withAttention1(update_type=self.update_rules,
-                #                              batch_size=self.batch_size,
-                #                              f=self.f, dfdx=self.dfdx,
-                #                              num_vertices=self.num_vertices,
-                #                              device=self.device,
-                #                              adj=self.adj,
-                #                              lr_attn=self.lr_attn)
-                
-                # self.updates = vanZwol_AMB_withLearnableAttention(
-                #     update_type=self.update_rules,
-                #     batch_size=self.batch_size,
-                #     f=self.f,
-                #     dfdx=self.dfdx,
-                #     num_vertices=self.num_vertices,
-                #     device=self.device,
-                #     adj=self.adj,
-                #     lr_attn=self.lr_attn,
-                #     use_attention=True  # Toggleable
-                # )
-
-                self.updates = vanZwol_AMB_withTransformerAttentionHebbian(
+            self.updates = vanZwol_AMB_withTransformerAttentionHebbian(
                     update_type=self.update_rules,
                     batch_size=self.batch_size,
                     f=self.f,
@@ -618,16 +597,67 @@ class PCgraph(torch.nn.Module):
                     lr_attn=self.lr_attn,
                     d_qk=1,  # You can tune this
                     # use_attention=True
-                    use_attention=False
+                    use_attention=self.use_attention,
+                    grad_clip_lr_x = self.grad_clip_lr_x, 
+                    grad_clip_lr_w = self.grad_clip_lr_w,
                 )
 
+            
+            if hasattr(self.updates, "attn_proj"):
+                self.attn_proj = self.updates.attn_proj  # Register for optimizer
 
-                if hasattr(self.updates, "attn_proj"):
-                    self.attn_proj = self.updates.attn_proj  # Register for optimizer
-            else:
-                print("--------------Using vanZwol_AMB (no attention) ------------")                
-                self.updates = vanZwol_AMB(update_type=self.update_rules, batch_size=self.batch_size, f=self.f, dfdx=self.dfdx)
-        
+            print("--------------Using vanZwol_AMB_------------")
+            print("Using attention", self.use_attention)
+            self.reshape = True
+
+            # print("--------------Using vanZwol_AMB (no attention) ------------")                
+            # self.updates = vanZwol_AMB(update_type=self.update_rules, batch_size=self.batch_size, f=self.f, dfdx=self.dfdx)
+    
+            # self.updates = vanZwol_AMB_withAttention0(update_type=self.update_rules,
+            #                              batch_size=self.batch_size,
+            #                              f=self.f, dfdx=self.dfdx,
+            #                              num_vertices=self.num_vertices,
+            #                              device=self.device,
+            #                              adj=self.adj,
+            #                              lr_attn=self.lr_attn)
+            
+
+            # self.updates = vanZwol_AMB_withAttention1(update_type=self.update_rules,
+            #                              batch_size=self.batch_size,
+            #                              f=self.f, dfdx=self.dfdx,
+            #                              num_vertices=self.num_vertices,
+            #                              device=self.device,
+            #                              adj=self.adj,
+            #                              lr_attn=self.lr_attn)
+            
+            # self.updates = vanZwol_AMB_withLearnableAttention(
+            #     update_type=self.update_rules,
+            #     batch_size=self.batch_size,
+            #     f=self.f,
+            #     dfdx=self.dfdx,
+            #     num_vertices=self.num_vertices,
+            #     device=self.device,
+            #     adj=self.adj,
+            #     lr_attn=self.lr_attn,
+            #     use_attention=True  # Toggleable
+            # )
+
+            # self.updates = vanZwol_AMB_withTransformerAttentionHebbian(
+            #     update_type=self.update_rules,
+            #     batch_size=self.batch_size,
+            #     f=self.f,
+            #     dfdx=self.dfdx,
+            #     num_vertices=self.num_vertices,
+            #     device=self.device,
+            #     adj=self.adj,
+            #     lr_attn=self.lr_attn,
+            #     d_qk=1,  # You can tune this
+            #     # use_attention=True
+            #     use_attention=False
+            # )
+
+
+            
         elif self.update_rules in ["MP", "MP_AMB"]:
             print("-------Using MP_AMB-------------")
             self.reshape = False
@@ -664,17 +694,17 @@ class PCgraph(torch.nn.Module):
         print("self.use_grokfast", self.use_grokfast)
         print("use_learning_optimizer", self.use_learning_optimizer)
 
-        self.optimizer_weights = torch.optim.Adam([self.w], lr=self.lr_w, betas=(0.9, 0.999), eps=1e-7, weight_decay=self.weight_decay)
-        # self.optimizer_values = torch.optim.Adam([self.values_dummy], lr=self.lr_x, betas=(0.9, 0.999), eps=1e-7, weight_decay=0)
-        self.optimizer_values = torch.optim.SGD([self.values_dummy], lr=self.lr_x, weight_decay=self.weight_decay, momentum=0, nesterov=False) # nestrov only for momentum > 0
+        self.optimizer_weights = torch.optim.Adam([self.w], lr=self.lr_weights, betas=(0.9, 0.999), eps=1e-7, weight_decay=self.weight_decay)
+        # self.optimizer_values = torch.optim.Adam([self.values_dummy], lr=self.lr_values, betas=(0.9, 0.999), eps=1e-7, weight_decay=0)
+        self.optimizer_values = torch.optim.SGD([self.values_dummy], lr=self.lr_values, weight_decay=self.weight_decay, momentum=0, nesterov=False) # nestrov only for momentum > 0
 
         # if hasattr(self, "attn_proj"):
         #     self.optimizer_weights.add_param_group({'params': [self.attn_proj]})
 
         if self.use_learning_optimizer:
 
-            # self.optimizer_weights = torch.optim.Adam([self.w], lr=self.lr_w, betas=(0.9, 0.999), eps=1e-7, weight_decay=0)
-            # self.optimizer_values = torch.optim.Adam([self.values_dummy], lr=self.lr_x, betas=(0.9, 0.999), eps=1e-7, weight_decay=0)
+            # self.optimizer_weights = torch.optim.Adam([self.w], lr=self.lr_lr_weights, betas=(0.9, 0.999), eps=1e-7, weight_decay=0)
+            # self.optimizer_values = torch.optim.Adam([self.values_dummy], lr=self.lr_values, betas=(0.9, 0.999), eps=1e-7, weight_decay=0)
 
             # self.optimizer_weights = torch.optim.AdamW([self.weights], lr=self.lr_weights, weight_decay=weight_decay)      
             # # self.optimizer_weights = torch.optim.Adam([self.weights], lr=self.lr_weights, weight_decay=weight_decay)      
@@ -699,9 +729,11 @@ class PCgraph(torch.nn.Module):
     def _reset_params(self):
 
         #### WEIGHT INITIALIZATION ####
+        print("---self.num_vertices----", self.num_vertices)
         self.w = torch.nn.Parameter(torch.empty(self.num_vertices, self.num_vertices, device=DEVICE))
         # self.weights = torch.nn.Parameter(torch.zeros(self.edge_index_single_graph.size(1), device=self.device, requires_grad=True))
-
+        print("self.w", self.w.shape)
+        
         # Weight initialization
         init_type, m, std_val = self.weight_init.split()
 
@@ -881,12 +913,7 @@ class PCgraph(torch.nn.Module):
         self.dw = out
         # self.dw = out_dum.float()
 
-        norm = torch.norm(self.dw).item()
-        mean_dw = self.dw.mean().item()
-        wandb.log({"Monitoring/delta_w_norm": norm, 
-                    "Monitoring/delta_w_mean": mean_dw,
-                    "epoch": self.epoch, "step": self.t})
-
+    
 
         # if self.structure.use_bias:
         #     self.db = self.structure.grad_b(x=self.x, e=self.e, w=self.w, b=self.b)
@@ -895,7 +922,7 @@ class PCgraph(torch.nn.Module):
 
         # self.optimizer = optimizer
 
-        # self.optimizer_x = torch.optim.Adam(params, lr=lr_w, betas=(0.9, 0.999), eps=1e-7, weight_decay=weight_decay)
+        # self.optimizer_x = torch.optim.Adam(params, lr=lr_lr_weights, betas=(0.9, 0.999), eps=1e-7, weight_decay=weight_decay)
         pass
 
 
@@ -1035,7 +1062,7 @@ class PCgraph(torch.nn.Module):
 
 
     def gradient_descent_update_w(self, grad_type, parameter, delta, learning_rate, nodes_or_edge2_update, 
-                                optimizer=None, use_optimizer=False):
+                                optimizer=None, use_optimizer=False, grad_clip=False):
         """
         Updates weights (self.w) via optimizer or manual gradient descent.
         
@@ -1048,7 +1075,17 @@ class PCgraph(torch.nn.Module):
 
         # print("---------------------TEST------------------------------------")
         
-     
+        if grad_clip:
+            # Gradient clipping
+            delta = torch.clamp(delta, min=-1.0, max=1.0)
+            # print("Gradient clipping applied")
+
+        norm = torch.norm(delta).item()
+        mean_dw = delta.mean().item()
+        wandb.log({"Monitoring/delta_w_norm": norm, 
+                    "Monitoring/delta_w_mean": mean_dw,
+                    "epoch": self.epoch, "step": self.t})
+
 
       
         # ✅ GROKFAST PROCESSING
@@ -1474,13 +1511,15 @@ class PCgraph(torch.nn.Module):
             
             wandb.log({"Monitoring/delta_x_norm": torch.norm(dEdx).item(), 
                        "Monitoring/delta_x_mean": dEdx.mean().item(),
+                       "Monitoring/lr_values": self.lr_values,
+                       "Monitoring/lr_weights": self.lr_weights,
                        "epoch": self.epoch, "step": self.t})
                 
             self.gradient_descent_update_values(
                 grad_type="values",
                 parameter=self.values_dummy,
                 delta=dEdx,
-                learning_rate=self.lr_x,
+                learning_rate=self.lr_values,
                 nodes_or_edge2_update=update_mask,
                 nodes_or_edge2_update_single=self.nodes_or_edge2_update_single,
                 optimizer=self.optimizer_values,
@@ -1488,7 +1527,7 @@ class PCgraph(torch.nn.Module):
                 use_optimizer=self.use_learning_optimizer,
                 # optimizer=self.optimizer_values if self.use_learning_optimizer else None,
                 train=train,
-                grad_clip=False
+                grad_clip=self.grad_clip_lr_x, 
                 # grad_clip=True,
             )
 
@@ -1520,6 +1559,9 @@ class PCgraph(torch.nn.Module):
 
         self.get_energy(False, True)
 
+        # 🆕 Add this to support classic PC mode (non-incremental)
+        if train and not self.incremental:
+            self.get_dw()
            
 
 
@@ -1696,6 +1738,7 @@ class PCgraph(torch.nn.Module):
             # optimizer=self.optimizer_weights if self.use_learning_optimizer else None,
             optimizer=self.optimizer_weights,
             use_optimizer=self.use_learning_optimizer, 
+            grad_clip=self.grad_clip_lr_w,
         )
 
         # print("mean w 2", self.w.mean())
@@ -1808,6 +1851,8 @@ class PCgraph(torch.nn.Module):
                 # data[:, 0:input_size] = torch.randn_like(data[:, 0:input_size])
                 data[:, 0:input_size] = torch.rand_like(data[:, 0:input_size])
                 self.values = data.view(self.batch_size * self.num_vertices, 1)
+        # if self.task == "occlusion":
+            # continue
 
         # ===== INFERENCE =====
         self.trace_data = []
@@ -1861,8 +1906,12 @@ class PCgraph(torch.nn.Module):
             "Raw"
         )
 
-        fig_gen.suptitle(f"Generated Images (Epoch {self.epoch}) [{norm_status}]")
-        plt.tight_layout()
+        # fig_gen.suptitle(f"Generated Images (Epoch {self.epoch}) [{norm_status}]")
+        # fig_gen.subplots_adjust(top=0.75, wspace=0, hspace=0)
+        fig_gen.subplots_adjust(wspace=0, hspace=0)
+
+
+        # plt.tight_layout()
         # img_path = os.path.join(save_dir, f"generated_imgs_epoch_{self.epoch}.png")
         # plt.savefig(img_path)
         # print(f"Saved processed image grid to: {img_path}")
@@ -1882,10 +1931,14 @@ class PCgraph(torch.nn.Module):
             axs_raw[idx].axis("off")
             axs_raw[idx].set_title(f"{labels[img_idx].item()}" if labels is not None else f"Img {img_idx}")
 
-        fig_raw.suptitle(f"Generated Images (Epoch {self.epoch}) [Raw]", fontsize=12)
-        plt.tight_layout()
+        # fig_raw.suptitle(f"Generated Images (Epoch {self.epoch}) [Raw]", fontsize=12)
+        # plt.tight_layout()
+        # fig_raw.subplots_adjust(top=0.75, wspace=0, hspace=0)
+        fig_raw.subplots_adjust(wspace=0, hspace=0)
+
+
         # img_path_raw = os.path.join(save_dir, f"generated_imgs_raw_epoch_{self.epoch}.png")
-        # plt.savefig(img_path_raw)
+        # plt.savefig(img_path_raw) 
         # print(f"Saved RAW image grid to: {img_path_raw}")
 
         if wandb_logging:
@@ -1933,7 +1986,12 @@ class PCgraph(torch.nn.Module):
 
 
             fig_mosaic, ax = plt.subplot_mosaic(mosaic_rows, figsize=(num_snapshots * 3, 6))
-            label = labels[0].item() if labels is not None else "digit Unknown"
+            
+            trace_index = np.random.randint(0, len(labels))
+            # Create label vector matching batch size
+            labels_full = torch.full((self.batch_size,), -1, device=data.device)  # -1 = unknown
+            labels_full[:10] = torch.arange(10, device=data.device)
+            label = labels_full[trace_index].item() if labels_full[trace_index] >= 0 else "digit Unknown"
 
             fig_mosaic.suptitle(f"Trace & Energy (Digit: {label}) - Epoch {self.epoch}", fontsize=16, fontweight='bold')
 
@@ -1947,7 +2005,7 @@ class PCgraph(torch.nn.Module):
 
             # ====== TOP ROW: TRACE SNAPSHOTS ======
             for idx, t_idx in enumerate(snapshot_indices):
-                img = self.trace_data[t_idx][0]
+                img = self.trace_data[t_idx][trace_index]
                 if normalize_trace_images:
                     img = normalize_image(img)
 
@@ -2060,8 +2118,6 @@ class PCgraph(torch.nn.Module):
     
 
 
-    # def get_energy(self):
-    #     return torch.sum(self.errors**2).item()
 
     def test_feedforward(self, X_batch):
         pass
@@ -2089,8 +2145,6 @@ class PCgraph(torch.nn.Module):
     def get_weights(self):
         return self.w.clone()
 
-    # def get_energy(self):
-    #     return torch.sum(self.e**2).item()
 
     def get_errors(self):
         return self.e.clone()    

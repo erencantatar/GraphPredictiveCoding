@@ -40,6 +40,7 @@ pip freeze > requirements.txt
 1. Interactive (debug) session: 
 ```bash
 srun --partition=gpu_a100 --gpus=1 --ntasks=1 --cpus-per-task=18 --time=02:00:00 --pty bash -i
+srun --partition=gpu_a100 --gpus=1 --ntasks=1 --cpus-per-task=18 --time=01:00:00 --pty bash -i
 
 module purge
 module load 2022
