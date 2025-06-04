@@ -53,12 +53,12 @@ graph_type_options = {
         
         "stochastic_block": {
             "params": {
-                "num_communities": 20,      # Number of communities (50)
-                "community_size": 50,       # Size of each community (40)
+                "num_communities": 15,      # Number of communities (50)
+                "community_size": 400,       # Size of each community (40)
                 "p_intra": 0.25,             # Probability of edges within the same community
                 "p_inter": 0.1,             # Probability of edges between different communities
                 "full_con_last_cluster_w_sup": True,
-                "min_full_con_last_cluster_w_sup": 2,
+                "min_full_con_last_cluster_w_sup": 6,
                 # "remove_sens_2_sens": False, 
                 # "remove_sens_2_sup": False, 
                 }

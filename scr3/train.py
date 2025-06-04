@@ -85,7 +85,7 @@ parser.add_argument('--dataset_transform', nargs='*', default=[], help='List of 
 parser.add_argument('--numbers_list', type=valid_int_list, default=[0, 1, 3, 4, 5, 6, 7], help="A comma-separated list of integers describing which distinct classes we take during training alone")
 parser.add_argument('--N', type=valid_int_or_all, default=20, help="Number of distinct trainig images per class; greater than 0 or the string 'all' for all instances o.")
 
-parser.add_argument('--supervision_label_val', default=10, type=int, required=True, help='An integer value.')
+parser.add_argument('--supervision_label_val', default=1, type=int, required=True, help='An integer value.')
 
 
 ## -----graph-----  
@@ -685,13 +685,12 @@ run = wandb.init(
 #     break 
 
 
-
-
 class GraphFormattedMNIST(torch.utils.data.Dataset):
-    def __init__(self, dataset, input_size, hidden_size, output_size):
+    def __init__(self, dataset, input_size, hidden_size, output_size, label_value=1):
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.output_size = output_size
+        self.label_value = label_value  # <---- New parameter to control the value in one-hot vector
 
         # Precompute dataset transformation (instead of transforming on-the-fly)
         self.data = []
@@ -702,7 +701,7 @@ class GraphFormattedMNIST(torch.utils.data.Dataset):
         for img, label in dataset:
             image_flat = img.view(-1).to(torch.float32)  # Flattened
             internal_nodes = torch.zeros(hidden_size, dtype=torch.float32)  # Internal nodes
-            one_hot_label = one_hot_lookup[label]
+            one_hot_label = one_hot_lookup[label] * self.label_value  # <---- Changed here
 
             # Precomputed graph data
             graph_data = torch.cat([image_flat, internal_nodes, one_hot_label])
@@ -719,6 +718,7 @@ class GraphFormattedMNIST(torch.utils.data.Dataset):
 
     def __getitem__(self, idx):
         return self.data[idx], self.labels[idx]  # No transformations here!
+
 
 
 DATASET_PATH = "../data"
@@ -750,8 +750,8 @@ base_test_dataset = torchvision.datasets.MNIST(root=DATASET_PATH, train=False, t
 
 print("hidden_size", hidden_size)
 # Wrap it in the GraphFormattedMNIST class
-train_dataset = GraphFormattedMNIST(base_train_dataset, input_size, hidden_size, output_size)
-test_dataset = GraphFormattedMNIST(base_test_dataset, input_size, hidden_size, output_size)
+train_dataset = GraphFormattedMNIST(base_train_dataset, input_size, hidden_size, output_size, label_value=args.supervision_label_val)
+test_dataset = GraphFormattedMNIST(base_test_dataset, input_size, hidden_size, output_size, label_value=args.supervision_label_val)
 
 # Split the dataset
 train_set, val_set = random_split(train_dataset, [50000, 10000])
@@ -909,8 +909,10 @@ with torch.no_grad():
         print("\n-----train_supervised-----")
         print(len(train_loader))
 
+        model.do_log_error_map = True 
         # for batch_no, batch in enumerate(tqdm(train_loader, total=min(break_num, len(train_loader)), desc=f"Epoch {epoch+1} - Training", leave=False)):
         for batch_no, (X_batch, y_batch) in enumerate(tqdm(train_loader, total=min(break_num, len(train_loader)), desc=f"Epoch {epoch+1} - Training", leave=False)):
+            
 
             X_batch, y_batch = X_batch.to(DEVICE), y_batch.to(DEVICE)  # Move to GPU
             
@@ -932,6 +934,8 @@ with torch.no_grad():
             num_of_trained_imgs += X_batch.shape[0]
             if batch_no >= break_num:
                 break
+            
+            model.do_log_error_map = False
 
         wandb.log({
             "epoch": epoch,
@@ -1109,54 +1113,58 @@ if len(accuracy_means) > 0:
     print(accuracy_means)
 
 
-if max(accuracy_means) > 0.90 or accuracy_means[-1] >= 0.85:
+    if max(accuracy_means) > 0.90 or accuracy_means[-1] >= 0.85:
 
-    # save weights; TODO
+        # save weights; TODO
 
-    # eval on test set
+        # eval on test set
 
-    
-    # for batch_no, batch in enumerate(tqdm(val_loader, total=min(len(val_loader)), desc=f"Epoch {epoch+1} - Validation", leave=False)):
-    for batch_no, (X_batch, y_batch)  in enumerate(tqdm(test_loader, total=len(test_loader), desc=f"Epoch {epoch+1} - Test Eval. | {TASK}", leave=False)):
-    
-        X_batch, y_batch = X_batch.to(DEVICE), y_batch.to(DEVICE)  # Move to GPU
         
-        # y_pred = PCG.test_iterative(batch, eval_types=TASK_copy, remove_label=True)
-
-        for task in TASK_copy:
-            y_pred = PCG.test_iterative( (X_batch, y_batch), 
-                                        eval_types=[task], remove_label=True)
-
-        # # do generation once
-        if "generation" in TASK_copy and "classification" in TASK_copy:
-            TASK_copy = ["classification"]
-
-        # print("y_pred", y_pred.shape)
-        # print("y_pred", y_batch.shape)
-        if "classification" in TASK_copy:
-            mean_correct = torch.mean((y_pred == y_batch).float()).item()
-            acc += mean_correct
-            accs.append(mean_correct)
+        # for batch_no, batch in enumerate(tqdm(val_loader, total=min(len(val_loader)), desc=f"Epoch {epoch+1} - Validation", leave=False)):
+        for batch_no, (X_batch, y_batch)  in enumerate(tqdm(test_loader, total=len(test_loader), desc=f"Epoch {epoch+1} - Test Eval. | {TASK}", leave=False)):
         
-    print("Done test eval")
+            X_batch, y_batch = X_batch.to(DEVICE), y_batch.to(DEVICE)  # Move to GPU
+            
+            # y_pred = PCG.test_iterative(batch, eval_types=TASK_copy, remove_label=True)
 
-    if "classification" in TASK:
-        accuracy_mean = (sum(accs) / len(accs)) if accs else 0
-        val_acc.append(accuracy_mean)
-        accuracy_means.append(accuracy_mean)
+            for task in TASK_copy:
+                y_pred = PCG.test_iterative( (X_batch, y_batch), 
+                                            eval_types=[task], remove_label=True)
 
-        print("epoch", epoch, "accuracy_mean", accuracy_mean, "on size test set", len(accs) * args.batch_size)
+            # # do generation once
+            if "generation" in TASK_copy and "classification" in TASK_copy:
+                TASK_copy = ["classification"]
 
-        # if epoch % 10 == 0 or accuracy_mean > 0.90:
-        #     print("delta pred ", y_pred - y_batch)
+            # print("y_pred", y_pred.shape)
+            # print("y_pred", y_batch.shape)
+            if "classification" in TASK_copy:
+                mean_correct = torch.mean((y_pred == y_batch).float()).item()
+                acc += mean_correct
+                accs.append(mean_correct)
+            
+        print("Done test eval")
 
-        wandb.log({
-            "epoch": epoch,
-            "classification_test/accuracy_mean": accuracy_mean,
-            "classification_test/size":  len(accs) * args.batch_size,
-        })
+        if "classification" in TASK:
+            accuracy_mean = (sum(accs) / len(accs)) if accs else 0
+            val_acc.append(accuracy_mean)
+            accuracy_means.append(accuracy_mean)
+
+            print("epoch", epoch, "accuracy_mean", accuracy_mean, "on size test set", len(accs) * args.batch_size)
+
+            # if epoch % 10 == 0 or accuracy_mean > 0.90:
+            #     print("delta pred ", y_pred - y_batch)
+
+            wandb.log({
+                "epoch": epoch,
+                "classification_test/accuracy_mean": accuracy_mean,
+                "classification_test/size":  len(accs) * args.batch_size,
+            })
 
 
 
 if args.use_wandb in ['online', 'run']:
         plot_model_weights(model, args.graph_type, model_dir=None, save_wandb=str(int(args.epochs)))
+
+
+
+wandb.finish()

@@ -552,6 +552,10 @@ class PCgraph(torch.nn.Module):
         self.use_input_error = use_input_error
         self.trace = False 
 
+        self.init_hidden_values = 0.001 # either "zeros" or "small value"
+        # log to wandb
+        wandb.log({"init_hidden_values": self.init_hidden_values})
+    
         # self.w = nn.Parameter(torch.empty(num_vertices, num_vertices, device=self.device))
         # self.b = nn.Parameter(torch.empty(num_vertices, device=self.device))
         self.device = device 
@@ -570,7 +574,7 @@ class PCgraph(torch.nn.Module):
         self.wandb_logging = wandb_logging
         
 
-        self.do_log_error_map = False
+        self.do_log_error_map = True
         print("---do_log_error_map------", self.do_log_error_map)
 
         # self.use_attention = True
@@ -1461,6 +1465,15 @@ class PCgraph(torch.nn.Module):
         # if self.early_stop:
         #     early_stopper = EarlyStopper(patience=0, min_delta=self.min_delta)
 
+
+
+        if self.init_hidden_values:
+            if self.reshape:
+                self.values[:, 784:-10] = torch.randn_like(self.values[:, 784:-10]) * self.init_hidden_values
+            else:
+                self.values[:, 784:-10] = torch.randn_like(self.values) * self.init_hidden_values                
+
+
         T = self.T_train if train else self.T_test
 
         update_mask = self.internal_mask_train if train else self.update_mask_test
@@ -1763,6 +1776,9 @@ class PCgraph(torch.nn.Module):
             self.values = data.view(self.batch_size * self.num_vertices, 1)
 
         # self.values, _ , _ = self.unpack_features(data.x, reshape=False)
+
+        # init hidden values at start of training with small noise instead of zeros from 
+
         
         self.update_xs(train=True)
         self.get_dw()
