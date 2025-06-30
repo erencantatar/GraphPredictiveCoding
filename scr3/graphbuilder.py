@@ -9,6 +9,9 @@ import networkx as nx
 import numpy as np 
 import torch 
 import random 
+import wandb
+import matplotlib.pyplot as plt
+
 
 # import os
 # os.environ['NX_CUGRAPH_AUTOCONFIG'] = 'True'
@@ -37,6 +40,8 @@ graph_type_options = {
 
         "single_hidden_layer": {
             "params": {
+                "add_residual": True  # <--- add this!
+
                 # "remove_sens_2_sens": True, 
                 # "remove_sens_2_sup": False, 
             }
@@ -53,12 +58,12 @@ graph_type_options = {
         
         "stochastic_block": {
             "params": {
-                "num_communities": 15,      # Number of communities (50)
-                "community_size": 400,       # Size of each community (40)
+                "num_communities": 5,      # Number of communities (50)
+                "community_size": 100,       # Size of each community (40)
                 "p_intra": 0.25,             # Probability of edges within the same community
                 "p_inter": 0.1,             # Probability of edges between different communities
-                "full_con_last_cluster_w_sup": True,
-                "min_full_con_last_cluster_w_sup": 6,
+                "full_con_last_cluster_w_sup": False,
+                "min_full_con_last_cluster_w_sup": 0,
                 # "remove_sens_2_sens": False, 
                 # "remove_sens_2_sup": False, 
                 }
@@ -249,7 +254,11 @@ class GraphBuilder:
                                     generative_hidden_layers=self.graph_params["generative_hidden_layers"], 
                                     no_sens2sens=self.graph_params["remove_sens_2_sens"], 
                                     no_sens2supervised=self.graph_params["remove_sens_2_sup"],
-                                    bidirectional_hidden=False)
+                                    bidirectional_hidden=False,
+                                    # add_residual=True,
+                                    add_residual=False,
+                                    # add_residual= self.graph_params.get("add_residual", False)  # Use the parameter from graph_params if available
+                                    )
         
         elif self.graph_type["name"] == "barabasi":
             self.barabasi()
@@ -352,12 +361,40 @@ class GraphBuilder:
 
 
     def single_hidden_layer(self, discriminative_hidden_layers, generative_hidden_layers,
-                                no_sens2sens=False, no_sens2supervised=False, bidirectional_hidden=False):
+                                no_sens2sens=False, no_sens2supervised=False, bidirectional_hidden=False,
+                                add_residual=False):
         """Creates a graph with shared internal nodes and layers for discriminative and generative paths."""
         # edge_index = []
         # edge_type = []
 
+        def add_residual_connections_to_generative_layer(
+            generative_layers,
+            supervision_indices,
+            edge_index,
+            edge_type,
+            edge_type_name="Sup2Inter",
+            skip=1,
+        ):
+            """
+            Adds residual connections from supervision nodes to earlier generative layers.
+            For example, if skip=1 and there are 3 generative layers, it adds from sup to layer 1.
+            """
+            if len(generative_layers) < 2 or skip >= len(generative_layers):
+                print("⚠️ Not enough layers or invalid skip value for residual connections.")
+                return
+
+            target_layer = generative_layers[-1 - skip]
+            for sup in supervision_indices:
+                for node in target_layer:
+                    edge_index.append([sup, node])
+                    edge_type.append(edge_type_name)
+
+            print(f"✅ Added residual connections from supervision to generative layer {len(generative_layers)-1 - skip}")
+
+
         # swap 
+        # TODO; explain this??? something with edge_index (source, target) and edge_type??
+        # also fix add_residual_connections_to_generative_layer() with the swap
         discriminative_hidden_layers, generative_hidden_layers = generative_hidden_layers, discriminative_hidden_layers
 
         # Sensory nodes
@@ -468,6 +505,29 @@ class GraphBuilder:
                 for sup_node in supervision_indices:
                     self.edge_index.append([sensory_node, sup_node])
                     self.edge_type.append("Sens2Sup")
+
+
+        # Add residual connections to generative layers if enabled
+
+
+        # Optional residual connection from supervision → middle generative layer
+        if add_residual:
+            # log to wandb
+            print("Adding residual connections to generative layers...")
+            wandb.log({"add_residual_connections_to_generative_layer": True})
+            
+            add_residual_connections_to_generative_layer(
+                # generative_layers=generative_layers,
+                generative_layers=discriminative_layers,
+                supervision_indices=supervision_indices,
+                edge_index=self.edge_index,
+                edge_type=self.edge_type,
+                skip=1  # middle layer
+            )
+        print(self.graph_params["add_residual"], add_residual)
+        print(self.graph_params)
+                                            # add_residual=self.graph_params["add_residual"]
+
 
         print("Custom graph with shared internal nodes and multi-layer paths created.")
 
@@ -1133,3 +1193,66 @@ class GraphBuilder:
 
 
         print("Created Stochastic Block Model graph with supervision clusters")
+
+    
+    def log_hop_distribution_to_wandb(self):
+        """Logs hop length distribution between sensory and supervision nodes (both directions) to wandb."""
+
+        def build_nx_graph(edge_index):
+            G = nx.DiGraph()
+            edge_list = edge_index.t().tolist()
+            G.add_edges_from(edge_list)
+            return G
+
+        def get_all_hop_lengths(G, source_nodes, target_nodes):
+            hop_lengths = []
+            for src in source_nodes:
+                lengths = nx.single_source_shortest_path_length(G, src)
+                for dst in target_nodes:
+                    if dst in lengths:
+                        hop_lengths.append(lengths[dst])
+            return hop_lengths
+
+        def plot_histogram(hops, title, x_label="Hop Length", y_label="Count"):
+            fig, ax = plt.subplots()
+            ax.hist(hops, bins=np.arange(min(hops), max(hops) + 2) - 0.5, edgecolor='black')
+            ax.set_title(title)
+            ax.set_xlabel(x_label)
+            ax.set_ylabel(y_label)
+            ax.grid(True)
+            return wandb.Image(fig)
+
+        # === Build Graph ===
+        G = build_nx_graph(self.edge_index)
+        sensory = self.sensory_indices
+        supervision = list(self.supervision_indices)
+
+        hop_s2l = get_all_hop_lengths(G, sensory, supervision)
+        hop_l2s = get_all_hop_lengths(G, supervision, sensory)
+
+        log_dict = {}
+
+        if hop_s2l:
+            log_dict.update({
+                "hop/hop_dist_sens_to_sup": wandb.Histogram(hop_s2l),
+                "hop/hop_s2l_min": np.min(hop_s2l),
+                "hop/hop_s2l_max": np.max(hop_s2l),
+                "hop/hop_s2l_mean": np.mean(hop_s2l),
+                "hop/hop_s2l_hist_plot": plot_histogram(hop_s2l, "Sensory → Supervision Hop Distribution"),
+            })
+        else:
+            log_dict["hop/hop_s2l_unreachable"] = True
+
+        if hop_l2s:
+            log_dict.update({
+                "hop/hop_dist_sup_to_sens": wandb.Histogram(hop_l2s),
+                "hop/hop_l2s_min": np.min(hop_l2s),
+                "hop/hop_l2s_max": np.max(hop_l2s),
+                "hop/hop_l2s_mean": np.mean(hop_l2s),
+                "hop/hop_l2s_hist_plot": plot_histogram(hop_l2s, "Supervision → Sensory Hop Distribution"),
+            })
+        else:
+            log_dict["hop/hop_l2s_unreachable"] = True
+
+        wandb.log(log_dict)
+        print("✅ Hop distributions (with axes) logged to wandb.")

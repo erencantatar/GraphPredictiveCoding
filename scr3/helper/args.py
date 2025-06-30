@@ -57,9 +57,15 @@ def validate_weight_init(value):
             return f"{init_type} {default_mean} {default_std}"
         else:
             raise argparse.ArgumentTypeError("Invalid format for 'uniform'. Expected: 'uniform' with no additional parameters.")
-
-    else:
-        raise argparse.ArgumentTypeError("Invalid init_type. Expected 'normal', 'uniform', or 'fixed'.")
+    elif init_type == "orthogonal":
+        # optional gain factor (constant multiplier for the orthogonal initialization), but not required
+        # return defaults mean and std
+        if len(parts) == 1:
+            return f"{init_type} {default_mean} {default_std}"
+    elif init_type == "MLP_like":
+        # return defaults mean and std
+        if len(parts) == 1:
+            return f"{init_type} {default_mean} {default_std}"
 
     return value
 

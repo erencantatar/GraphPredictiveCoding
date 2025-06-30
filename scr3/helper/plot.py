@@ -289,7 +289,7 @@ def plot_model_weights(model, GRAPH_TYPE=None, model_dir=None, save_wandb=None):
     # Convert to dense for detailed visualization (if the graph is not too large)
     W = W_sparse.toarray()
 
-    fig, axes = plt.subplots(3, 2, figsize=(20, 30))
+    fig, axes = plt.subplots(4, 2, figsize=(20, 30))
     title = f'Visualization of Weight Matrix of {GRAPH_TYPE}' if GRAPH_TYPE else 'Visualization of Weight Matrix'
     fig.suptitle(title, fontsize=20)
 
@@ -302,7 +302,7 @@ def plot_model_weights(model, GRAPH_TYPE=None, model_dir=None, save_wandb=None):
     fig.colorbar(im2, ax=axes[0, 1], label='Weight value')
     axes[0, 1].set_title('Full Weight Matrix')
 
-    thresholds = [0.001, 0.0001, 0.00001, 0.000001]
+    thresholds = [0.001, 0.0001, 0.00001, 0.000001, 0.0000001, 0.00000001]
     for idx, thresh in enumerate(thresholds):
         row, col = divmod(idx + 2, 2)
         im = axes[row, col].imshow(W > thresh, cmap='viridis', aspect='auto')
@@ -325,6 +325,22 @@ def plot_model_weights(model, GRAPH_TYPE=None, model_dir=None, save_wandb=None):
             ax_neg.set_title('Negative Weights and Their Magnitudes')
             plt.axis('off')
             wandb.log({f"Weights_neg/weights_negative_{epoch_x}": [wandb.Image(fig)]})
+
+
+        # 🟨 Log bias if present
+        if model.use_bias:
+            bias = model.b.cpu().detach().numpy().flatten()
+            fig_bias, ax_bias = plt.subplots(figsize=(10, 4))
+            ax_bias.hist(bias, bins=100, color='green', alpha=0.7)
+            ax_bias.set_title('Distribution of Bias')
+            ax_bias.set_xlabel('Bias Value')
+            ax_bias.set_ylabel('Frequency')
+
+            if save_wandb:
+                wandb.log({f"Weights/bias_distribution_{save_wandb}": wandb.Image(fig_bias)})
+                print("Bias distribution logged to wandb")
+            plt.close(fig_bias)
+
 
     if model_dir:
         plt.savefig(model_dir)
@@ -468,3 +484,439 @@ def plot_updated_edges(N, edge_index, edges_2_update, delta_w_selection, model_d
     #     plt.show()
     # else:
     #     plt.close(fig)
+
+
+import networkx as nx
+
+# Convert PyTorch edge_index to a NetworkX DiGraph
+def build_nx_graph(edge_index):
+    G = nx.DiGraph()
+    edge_list = edge_index.t().tolist()
+    G.add_edges_from(edge_list)
+    return G
+
+def compute_min_max_hops(G, source_nodes, target_nodes):
+    hop_lengths = []
+
+    for src in source_nodes:
+        lengths = nx.single_source_shortest_path_length(G, src)
+        relevant_lengths = [lengths[dst] for dst in target_nodes if dst in lengths]
+        hop_lengths.extend(relevant_lengths)
+
+    if not hop_lengths:    
+        # A hop length of 0 means the source and target are the same node, or there is a direct self-loop.
+
+        return float('inf'), float('-inf')  # No path found
+
+    return min(hop_lengths), max(hop_lengths)
+
+
+
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import torchvision
+from torch.utils.data import DataLoader
+from torchvision import transforms
+import wandb
+
+
+# args = {    "discriminative_hidden_layers": [32, 16],  # Example hidden layers
+#             "batch_size": 64,
+#             "epochs": 10,
+#             "lr_weights": 0.001,
+#             "w_decay_lr_weights": 0.0001,
+#             "activation_func": "relu",  # Options: "relu", "swish", "tanh", "sigmoid"
+#             "seed": 42,
+#             "graph_type": "mlp"  # Example graph type
+#         }
+
+
+def train_mlp_classifier(run_id, PC_weights, hidden_layer, activation_fn, 
+               base_train_dataset, base_test_dataset, batch_size, epochs,
+                lr_w, weight_decay, seed, graph_type):
+
+    # TODO MOVE THIS FUNCTION TO TRAIN_MLP.py
+    # Set random seed for reproducibility
+    torch.manual_seed(seed)
+
+    # ----------------- Dataset ----------------- #
+    # base dataset already has the same transformations applied
+    train_loader = DataLoader(base_train_dataset, batch_size=batch_size, shuffle=True, pin_memory=True)
+    test_loader = DataLoader(base_test_dataset, batch_size=batch_size, shuffle=False)
+
+    # ----------------- Hyperparams from args ----------------- #
+    input_size = 784
+    hidden_layers = hidden_layer  # e.g., [32, 16]
+    output_size = 10
+    batch_size = batch_size
+    epochs = epochs
+    learning_rate = lr_w  # for backprop
+    weight_decay = weight_decay
+    activation_fn = activation_fn.lower()  # "relu", "swish", etc.
+    DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    # wandb.init(project="MLP_MNIST", name="MLP_discrim_baseline", config={
+    #     "hidden_layers": hidden_layers,
+    #     "lr": learning_rate,
+    #     "weight_decay": weight_decay,
+    #     "activation": activation_fn
+    # })
+
+    # wandb.disable_wandb()
+
+    # ----------------- Activation Selection ----------------- #
+    def get_activation(act):
+        if act == "swish":
+            return lambda x: x * torch.sigmoid(x)
+        elif act == "relu":
+            return nn.ReLU()
+        elif act == "tanh":
+            return nn.Tanh()
+        elif act == "sigmoid":
+            return nn.Sigmoid()
+        else:
+            raise ValueError(f"Unsupported activation: {act}")
+
+    activation = get_activation(activation_fn.lower())
+
+    # ----------------- MLP Model ----------------- #
+    layers = [nn.Flatten()]
+    prev = input_size
+    for h in hidden_layers:
+        layers.append(nn.Linear(prev, h))
+        layers.append(activation if isinstance(activation, nn.Module) else nn.ReLU())  # swish is function
+        prev = h
+    layers.append(nn.Linear(prev, output_size))
+    mlp = nn.Sequential(*layers).to(DEVICE)
+
+    # ----------------- Optimizer and Loss ----------------- #
+    optimizer = torch.optim.Adam(mlp.parameters(), lr=learning_rate, weight_decay=weight_decay)
+    criterion = nn.CrossEntropyLoss()
+
+
+    # ----------------- Training Loop ----------------- #
+    test_acc = []
+    for epoch in range(epochs):
+        mlp.train()
+        for X, y in train_loader:
+            X, y = X.to(DEVICE), y.to(DEVICE)
+            optimizer.zero_grad()
+            out = mlp(X)
+            loss = criterion(out, y)
+            loss.backward()
+            optimizer.step()
+
+        # Validation
+        mlp.eval()
+        correct = 0
+        total = 0
+        with torch.no_grad():
+            for X, y in test_loader:
+                X, y = X.to(DEVICE), y.to(DEVICE)
+                out = mlp(X)
+                preds = out.argmax(dim=1)
+                correct += (preds == y).sum().item()
+                total += y.size(0)
+        acc = correct / total
+        test_acc.append(acc)
+        wandb.log({"epoch": epoch, "val_accuracy": acc, "train_loss": loss.item()})
+        print(f"Epoch {epoch}: Acc={acc:.4f} | Loss={loss.item():.4f}")
+
+    # ----------------- Save ----------------- #
+    # torch.save(mlp.state_dict(), f"trained_models/{graph_type}/weights/mlp_last.pt")
+    # wandb.save(f"trained_models/{graph_type}/weights/mlp_last.pt")
+    # wandb.finish()
+
+    # create new folder in 'scr3/jobs"
+    import os
+
+    # Ensure directory exists
+    # dir path include training parameters: mlp_{layers}_  epochs, lr_w, w_decay_lr_w, activation_fn, batch_size, seed
+    # unpack_layers = "_".join(map(str, layers))
+    unpack_hidden_layers = "_".join(map(str, hidden_layers))
+    # make dir_path have all the parameters but string as short as possible
+    run_id = str(run_id) if run_id is not None else "mlp_run"
+    dir_path = f"trained_models/mlp/weights/mlp_{run_id}_{unpack_hidden_layers}_ep_{epochs}_bs_{batch_size}_lr_{learning_rate}_wd_{weight_decay}_{activation_fn}_sed_{seed}"
+    
+    os.makedirs(dir_path, exist_ok=True)
+
+    os.makedirs(f"{dir_path}/weights", exist_ok=True)
+    # os.makedirs(f"scr3/jobs/{graph_type}/weights", exist_ok=True)
+    # torch.save(mlp.state_dict(), f"scr3/jobs/{graph_type}/weights/mlp_last.pt")
+    torch.save(mlp.state_dict(), f"{dir_path}/weights/mlp_last.pt")
+    print(f"Model saved to scr3/jobs/{graph_type}/weights/mlp_last.pt") 
+
+    # in a file called "test_acc.txt" in the same folder
+    with open(f"{dir_path}/test_acc.txt", "w") as f:
+        for acc in test_acc:
+            f.write(f"{acc}\n")
+    print(f"Test accuracies saved to {dir_path}/test_acc.txt")
+
+    # save fig
+    # prompt: plot the model weights, in a imshow
+
+    import matplotlib.pyplot as plt
+
+    # Extract the weights of the first linear layer (after Flatten)
+    first_linear_layer = None
+    for layer in mlp.modules():
+        if isinstance(layer, nn.Linear):
+            first_linear_layer = layer
+            break
+
+    if first_linear_layer is not None:
+        weights = first_linear_layer.weight.cpu().detach().numpy()
+
+        # Since the input is flattened MNIST (28x28 = 784), we can reshape the weights
+        # for the first layer to visualize them as images.
+        # The weights have shape (output_features, input_features).
+        # We can reshape each row (which corresponds to the weights connecting to one output neuron)
+        # into a 28x28 image.
+        num_output_features = weights.shape[0]
+        num_input_features = weights.shape[1] # Should be 784 for the first linear layer
+
+        if num_input_features == 784:
+            print(f"Plotting weights for the first linear layer ({num_output_features} output features).")
+            # Determine the grid size for plotting
+            grid_cols = min(num_output_features, 8) # Plot up to 8 columns
+            grid_rows = (num_output_features + grid_cols - 1) // grid_cols
+
+            plt.figure(figsize=(grid_cols * 2, grid_rows * 2))
+
+            for i in range(num_output_features):
+                plt.subplot(grid_rows, grid_cols, i + 1)
+                # Reshape the weights for this output neuron into a 28x28 image
+                weight_image = weights[i].reshape(28, 28)
+                plt.imshow(weight_image, cmap='viridis') # Use 'viridis' or another colormap
+                plt.title(f'Neuron {i+1}')
+                plt.axis('off')
+
+            plt.tight_layout()
+            # plt.show()
+            # plt.savefig to dir_path
+            plt.savefig(f"{dir_path}/mlp_weights.png")
+
+            # plt.savefig(f"scr3/jobs/{graph_type}/weights/mlp_weights.png")
+            print(f"Weights image saved to scr3/jobs/{graph_type}/weights/mlp_weights.png")
+            # close 
+            plt.close()
+
+        else:
+            print(f"First linear layer has input features {num_input_features}, not 784. Cannot reshape to 28x28 for imshow.")
+    else:
+        print("No linear layer found in the model after Flatten.")
+
+    import numpy as np
+    import matplotlib.pyplot as plt
+    import os
+
+
+    # Calculate the total number of neurons
+    total_neurons = input_size + sum(hidden_layers) + output_size
+
+    # Create adjacency matrix
+    adj_matrix = np.zeros((total_neurons, total_neurons))
+
+    # Index tracking
+    current_idx = 0
+    input_indices = list(range(current_idx, current_idx + input_size))
+    current_idx += input_size
+
+    hidden_layer_indices = []
+    for h in hidden_layers:
+        indices = list(range(current_idx, current_idx + h))
+        hidden_layer_indices.append(indices)
+        current_idx += h
+
+    output_indices = list(range(current_idx, current_idx + output_size))
+
+    # Wiring: input -> hidden -> output
+    layer_input_indices = input_indices
+    layer_output_indices_list = hidden_layer_indices + [output_indices]
+
+    # TODO; check double transpose
+    for layer in mlp.modules():
+        if isinstance(layer, nn.Linear):
+            weights = layer.weight.cpu().detach().numpy().T  # ← TRANSPOSE HERE
+            current_layer_output_indices = layer_output_indices_list.pop(0)
+
+            for i_in, from_idx in enumerate(layer_input_indices):
+                for i_out, to_idx in enumerate(current_layer_output_indices):
+                    adj_matrix[from_idx, to_idx] = weights[i_in, i_out]
+
+            layer_input_indices = current_layer_output_indices
+
+            # Plot
+            plt.figure(figsize=(10, 10))
+            plt.imshow(adj_matrix, cmap='viridis', origin='upper')
+            plt.title('Transposed Weights as Adjacency Matrix')
+            plt.xlabel('To Neuron Index')
+            plt.ylabel('From Neuron Index')
+            plt.colorbar(label='Weight Value')
+            plt.tight_layout()
+
+            # save fig to folder dir
+            plt.savefig(f"{dir_path}/mlp_weights_adj_matrix.png")
+            print(f"Adjacency matrix saved to trained_models/mlp/weights/mlp_weights_adj_matrix.png")
+            plt.close()
+
+    # shoud be an NxN matrix, where N is the total number of neurons (N= 784 + sum(hidden_layers) + 10)
+    # mlp_model_weights = adj_matrix
+    weights = adj_matrix.T
+
+    ############################
+
+
+
+    # compare the matrix "weights" with the "PC_weights" by calculating the abs avg difference in percentage
+    if PC_weights is not None:
+        PC_weights = PC_weights  # .cpu().detach().numpy()
+        # Calculate the absolute average difference in percentage
+        abs_diff = np.abs(weights - PC_weights)
+        avg_diff = np.mean(abs_diff)
+        avg_diff_percentage = (avg_diff / np.mean(np.abs(PC_weights))) * 100
+
+        print(f"Average absolute difference between model weights and PC weights: {avg_diff_percentage:.2f}%")
+    else:
+        print("PC_weights is None, skipping comparison.")
+
+    # log the average difference to txt file 
+    with open(f"{dir_path}/avg_diff.txt", "w") as f:
+        f.write(f"Average absolute difference between model weights and PC weights: {avg_diff_percentage:.2f}%\n")
+
+    import numpy as np
+    from sklearn.metrics.pairwise import cosine_similarity
+
+    # ------------------ Inputs ---------------------
+    # weights:      NxN matrix from model A (e.g., MLP)
+    # PC_weights:   NxN matrix from model B (e.g., Predictive Coding)
+    # ------------------------------------------------
+
+    assert weights.shape == PC_weights.shape, "Weight shapes do not match!"
+
+    # Threshold to consider a value as "non-zero"
+    # threshold = 1e-6
+    threshold = 1e-2
+    # threshold = max(np.mean(np.abs(weights)) * 0.01, 1e-6)
+    print("Using threshold for non-zero weights:", threshold)
+
+
+    # 1. ---------- Non-zero mask (both matrices) ----------
+    common_non_zero_mask = (np.abs(PC_weights) > threshold) & (np.abs(weights) > threshold)
+
+    if np.sum(common_non_zero_mask) == 0:
+        print("No common non-zero weights to compare.")
+
+        # save imshow plot of both weights
+        fig, ax = plt.subplots(1, 2, figsize=(20, 10))
+        ax[0].imshow(weights, cmap='viridis', origin='upper')
+        ax[0].set_title("Model Weights")
+        ax[1].imshow(PC_weights, cmap='viridis', origin='upper')
+        ax[1].set_title("PC Weights")
+        plt.tight_layout()
+        # save dir_path
+        plt.savefig(f"{dir_path}/weights_comparison_no_common_non_zero.png")
+        print(f"Saved weights comparison plot to {dir_path}/weights_comparison_no_common_non_zero.png")
+        plt.close(fig)
+    else:
+        # Extract only relevant weights
+        W1 = weights[common_non_zero_mask]
+        W2 = PC_weights[common_non_zero_mask]
+
+        # 2. ---------- Average Absolute Percentage Difference ----------
+        abs_diff = np.abs(W1 - W2)
+        avg_abs_diff = np.mean(abs_diff)
+        avg_pct_diff = (avg_abs_diff / np.mean(np.abs(W2))) * 100
+
+        # 3. ---------- RMSE ----------
+        rmse = np.sqrt(np.mean((W1 - W2) ** 2))
+
+        # 4. ---------- Cosine Similarity ----------
+        # Reshape into vectors
+        W1_vec = W1.reshape(1, -1)
+        W2_vec = W2.reshape(1, -1)
+        cosine_sim = cosine_similarity(W1_vec, W2_vec)[0, 0]
+
+        # 5. ---------- Normalized weights comparison ----------
+        norm_W1 = W1 / np.linalg.norm(W1)
+        norm_W2 = W2 / np.linalg.norm(W2)
+
+        norm_abs_diff = np.mean(np.abs(norm_W1 - norm_W2))
+
+        # ----------- Print Results ------------
+        print(f"🔍 Common non-zero weights: {common_non_zero_mask.sum()}")
+        print(f"📏 Avg absolute % difference: {avg_pct_diff:.2f}%")
+        print(f"📉 RMSE: {rmse:.6f}")
+        print(f"🎯 Cosine Similarity: {cosine_sim:.4f}")
+        print(f"📐 Normalized Avg Abs Difference: {norm_abs_diff:.6f}")
+
+        # ----------- Optionally: Save to File ------------
+        with open(f"{dir_path}/weight_comparison_metrics.txt", "w") as f:
+            f.write(f"Common non-zero weights: {common_non_zero_mask.sum()}\n")
+            f.write(f"Average absolute % difference: {avg_pct_diff:.2f}%\n")
+            f.write(f"RMSE: {rmse:.6f}\n")
+            f.write(f"Cosine Similarity: {cosine_sim:.4f}\n")
+            f.write(f"Normalized Avg Abs Difference: {norm_abs_diff:.6f}\n")
+
+
+    import numpy as np
+    import matplotlib.pyplot as plt
+
+    # Parameters (same as for your first layer in MLP)
+    num_hidden_neurons = hidden_layer[0]  # e.g. like [32, 16] → use 16 for second layer, or 32 for first
+    input_size = 784  # 28x28 flattened image
+
+
+    # Architecture setup
+    input_size = 784
+    hidden_size = hidden_layer[0]   # Change as needed
+    output_size = 10
+    N = input_size + hidden_size + output_size
+
+    # Create full weight matrix: N x N
+    # Create random weights matrix
+    W = np.random.randn(N, N) 
+    W = PC_weights if PC_weights is not None else W  # Use PC_weights if provided
+
+    # Get hidden node indices
+    hidden_start = input_size
+    hidden_end = input_size + hidden_size
+
+    # Extract weights from inputs to hidden layer
+    W_input_to_hidden = W[hidden_start:hidden_end, :input_size]  # Shape: [hidden_size, 784]
+
+    # Plot each hidden neuron's incoming weights as a 28x28 image
+    grid_cols = min(hidden_size, 8)
+    grid_rows = (hidden_size + grid_cols - 1) // grid_cols
+
+    plt.figure(figsize=(grid_cols * 2, grid_rows * 2))
+    for i in range(hidden_size):
+        weight_img = W_input_to_hidden[i].reshape(28, 28)
+        plt.subplot(grid_rows, grid_cols, i + 1)
+        plt.imshow(weight_img, cmap='viridis')
+        # plt.title(f'Hidden {i+1}')
+        plt.axis('off')
+
+    # plt tight_layout()
+    # no space between subplots
+    plt.subplots_adjust(wspace=0, hspace=0)
+    # main title for the whole figure
+    # plt.suptitle(f"Hidden Layer Weights Visualization\nHidden Neurons: {hidden_size}, Input Size: {input_size}", fontsize=16)
+    # make main title higher such that not overlapping with subplots
+    plt.suptitle(f"Hidden Layer Weights Visualization\nHidden Neurons: {hidden_size}, Input Size: {input_size}", fontsize=16, y=1.02)
+
+    plt.tight_layout()
+    # Save the figure of PC_weights along with the MLP weights
+    plt.savefig(f"{dir_path}/PC_weights.png")
+    plt.close()
+
+    # Return the model and test accuracies
+    return mlp, test_acc
+
+# End of file scr3/train_mlp
+# End of recent edits
+# End of file scr3/train_mlp 
+
+

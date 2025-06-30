@@ -106,7 +106,7 @@ parser.add_argument('--model_type', type=str, default="PC", help='Incremental_le
 # parser.add_argument("--weight_init", type=str, default="fixed 0.001", help="Initialization method and params for weights")
 parser.add_argument("--weight_init", type=validate_weight_init, default="fixed 0.001", help="Initialization method and params for weights")
 
-parser.add_argument('--use_bias',  choices=['True', 'False'], required=True, help="....")
+parser.add_argument('--use_bias',  default="False", choices=['True', 'False'], help="use bias in the model, expected True or False")
 parser.add_argument("--bias_init", type=str, default="", required=False, help="ege. fixed 0.0 Initialization method and params for biases")
 
 parser.add_argument('--T_train', type=int, default=5, help='Number of iterations for gradient descent.')
@@ -125,6 +125,9 @@ parser.add_argument('--update_rules', type=str, default="vanZwol_AMB", choices=[
 parser.add_argument('--delta_w_selection', type=str, required=True, choices=["all", "internal_only"], help="Which weights to optimize in delta_w")
 parser.add_argument('--use_grokfast', type=str, default="False", choices=["True", "False"], help="GroKfast fast and slow weights before using the optimizer")
 parser.add_argument('--grad_clip_lr_x_lr_w',type=str,default="False False",choices=["True True", "True False", "False True", "False False"], help='Enable/disable gradient clipping for lr_x and/or lr_w. Choices are: True True, True False, False True, False False.')
+parser.add_argument('--init_hidden_values', type=float, default=0.001, help='Initial value for hidden nodes in the model. This is a small value for initialization of hidden nodes. Used as mean for normal distribution at the start of each trainig sample')
+# optional init_hiddden_mu 
+parser.add_argument('--init_hidden_mu', type=float, default=0.0, help='Mean for the normal distribution used to initialize hidden nodes. Default is 0.0')
 
 # required use_input_error False or True 
 parser.add_argument('--use_input_error', type=str, default="False", choices=["True", "False"], help="Use input error in the model")
@@ -137,8 +140,12 @@ parser.add_argument('--use_input_error', type=str, default="False", choices=["Tr
 parser.add_argument('--epochs', type=int, default=5, help='Number of epochs to train.')
 parser.add_argument('--batch_size', type=int, default=1, help='Batch size.')
 parser.add_argument('--seed', type=int, default=42, help='Random seed.')
-parser.add_argument('--use_learning_optimizer', '--optimizer', type=true_with_float, default=False,
-                    help="Either False or, if set to True, requires a float value for weight decay.") 
+# parser.add_argument('--use_learning_optimizer', '--optimizer', type=true_with_float, default=False,  OLD OLD ---------------------------------
+#                     help="Either False or, if set to True, requires a float value for weight decay.") 
+parser.add_argument('--w_decay_lr_values', type=float, default=0.0, help="Weight decay for value updates (e.g., SGD on node activities). Set to 0.0 to disable.")
+parser.add_argument('--w_decay_lr_weights', type=float, default=0.0, help="Weight decay for weight updates (e.g., Adam on synaptic weights). Set to 0.0 to disable.")
+                    
+
 parser.add_argument('--break_num_train', type=int, default=200,
                     help='Max number of training steps per epoch. If set to 0, runs for the full length of the train_loader.')
 
@@ -150,6 +157,10 @@ parser.add_argument('--set_abs_small_w_2_zero',  choices=['True', 'False'], requ
 import wandb
 parser.add_argument('--use_wandb', type=str, default="disabled", help='Wandb mode.', choices=['shared', 'online', 'run', 'dryrun', 'offline', 'disabled'])
 parser.add_argument('--tags', type=str, default="", help="Comma-separated tags to add to wandb logging (e.g., 'experiment,PC,test')")
+
+
+parser.add_argument('--train_mlp', type=lambda x: x.lower() == 'true', default=False,
+                    help="Set to True to enable MLP training mode")
 
 args = parser.parse_args()
 
@@ -194,7 +205,9 @@ USE_TORCH_COMPILE = True
 
 # Make True of False bool
 args.normalize_msg = args.normalize_msg == 'True'
-args.use_bias = args.use_bias == 'True'
+# args.use_bias = args.use_bias == 'True'
+args.use_bias = args.use_bias.lower() == 'true'
+
 args.set_abs_small_w_2_zero = args.set_abs_small_w_2_zero == 'True'
 args.grokfast = args.use_grokfast == 'True'
 
@@ -234,25 +247,7 @@ import torchvision.transforms as transforms
 import numpy as np
 
 
-# The ToTensor() transformation is the one responsible for scaling (MNIST) images to the range [0, 1].
-transform_list = [
-    transforms.ToTensor()
-]
 
-if args.dataset_transform:
-
-    if "normalize_min1_plus1" in args.dataset_transform:
-        transform_list.append(transforms.Normalize((0.5,), (0.5,)))
-
-    if "normalize_mnist_mean_std" in args.dataset_transform:
-        transform_list.append(transforms.Normalize((0.1307,), (0.3081,)))
-    
-    if "random_rotation" in args.dataset_transform:
-        transform_list.append(transforms.RandomRotation(degrees=20))
-    
-
-# # Create the transform
-print("TODO ADD COMPASE TRANSFORMS")
 # transform = transforms.Compose(transform_list)
 
 # mnist_trainset = torchvision.datasets.MNIST(root=args.data_dir, train=True, download=True, transform=transform)
@@ -366,6 +361,9 @@ if graph_params["graph_type"]["name"] in ["single_hidden_layer"]:
    
     graph_params["internal_nodes"] = num_discriminative_nodes + num_generative_nodes
 
+
+    graph_params["graph_type"]["params"]["add_residual"] = True
+
     # edge_index, N = test_single_hidden_layer(discriminative_hidden_layers, generative_hidden_layers,
     #                                         no_sens2sens=True, no_sens2supervised=True)
 
@@ -475,8 +473,9 @@ graph = GraphBuilder(**graph_params)
 single_graph = graph.edge_index  # Use the precomputed edge index
 
 
+
+
 import wandb 
-optimizer_str = str(args.use_learning_optimizer) if isinstance(args.use_learning_optimizer, float) else str(args.use_learning_optimizer)
 
 model_params_name = (
     f"{args.model_type}_"
@@ -493,7 +492,6 @@ model_params_name = (
     f"nums_{'_'.join(map(str, args.numbers_list))}_"
     f"N_{args.N}_"
     f"ep_{args.epochs}_"
-    f"opt_{optimizer_str}_"
     f"trans_{'_'.join(args.dataset_transform) if args.dataset_transform else 'none'}"
 )
 model_params_name_full = (
@@ -511,7 +509,6 @@ model_params_name_full = (
     f"numbers_list_{'_'.join(map(str, args.numbers_list))}_"
     f"N_{args.N}_"
     f"epochs_{args.epochs}_"
-    f"optimizer_{optimizer_str}_"
     f"dataset_transform_{'_'.join(args.dataset_transform) if args.dataset_transform else 'none'}"
 )
 model_params_short = f"{args.model_type}_{args.graph_type}_T_{args.T_train}_lr_w_{args.lr_weights}_lr_val_{args.lr_values}"
@@ -570,7 +567,8 @@ run = wandb.init(
 )
 
 
-
+if graph_params["graph_type"]["name"] in ["stochastic_block", "sbm_two_branch_chain", "two_branch_graph", "custom_two_branch"]:
+    graph.log_hop_distribution_to_wandb()
 
 
 
@@ -743,10 +741,32 @@ hidden_size = graph_params["internal_nodes"]
 output_size = 10  # Number of classes
 
 # Load the raw MNIST dataset
-transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))])
+# transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))])
 
-base_train_dataset = torchvision.datasets.MNIST(root=DATASET_PATH, train=True, transform=transform, download=True)
-base_test_dataset = torchvision.datasets.MNIST(root=DATASET_PATH, train=False, transform=transform, download=True)
+# The ToTensor() transformation is the one responsible for scaling (MNIST) images to the range [0, 1].
+transform_list = [
+    transforms.ToTensor()
+]
+
+if args.dataset_transform:
+
+    if "normalize_min1_plus1" in args.dataset_transform:
+        transform_list.append(transforms.Normalize((0.5,), (0.5,)))
+
+    if "normalize_mnist_mean_std" in args.dataset_transform:
+        transform_list.append(transforms.Normalize((0.1307,), (0.3081,)))
+    
+    if "random_rotation" in args.dataset_transform:
+        transform_list.append(transforms.RandomRotation(degrees=20))
+    
+
+# # Create the transform
+# print("TODO ADD COMPASE TRANSFORMS")
+composed_transform = transforms.Compose(transform_list)
+
+
+base_train_dataset = torchvision.datasets.MNIST(root=DATASET_PATH, train=True, transform=composed_transform, download=True)
+base_test_dataset = torchvision.datasets.MNIST(root=DATASET_PATH, train=False, transform=composed_transform, download=True)
 
 print("hidden_size", hidden_size)
 # Wrap it in the GraphFormattedMNIST class
@@ -758,6 +778,7 @@ train_set, val_set = random_split(train_dataset, [50000, 10000])
 
 
 # Create DataLoaders
+# QUICK FIX for now TODO, 
 val_loader_batch_size = (args.batch_size if args.batch_size > 10 else 20)
 
 train_loader = DataLoader(train_set, batch_size=args.batch_size, shuffle=True, drop_last=False, num_workers=4, pin_memory=True)
@@ -785,20 +806,44 @@ from model_latest2 import PCgraph
 
 model_params = {
     "delta_w_selection": args.delta_w_selection,  # "all" or "internal_only"
-    "use_bias": args.use_bias,
     "batch_size": train_loader.batch_size, 
  
  }
 
 
+# structure = only for single_hidden_layer (discriminative_hidden_layers, generative_hidden_layers): number of nodes in each layer
+if args.graph_type == "single_hidden_layer":
+    
+    # give both layers as a list
+    structure = {
+        "discriminative_hidden_layers": args.discriminative_hidden_layers or [200, 100, 50],  # Default if not provided
+        "generative_hidden_layers": args.generative_hidden_layers or [50, 100, 200],  # Default if not provided
+    }
+
+    # insert sensory nodes to the structure for both
+    structure["discriminative_hidden_layers"].insert(0, input_size)  # Add input layer size
+    structure["generative_hidden_layers"].insert(0, input_size)  # Add input layer size
+
+else:
+    structure = None
+        
+
 model_params = {
 
     "graph_type": args.graph_type,
+    "structure": structure,
     "task": TASK,
+
+    "use_bias": args.use_bias,
+
 
     "activation": args.activation_func,  
     "device": device,
     
+    "init_hidden_values": args.init_hidden_values,  # Initial value for hidden nodes in the model. This is a small value for initialization of hidden nodes. Used as mean for normal distribution at the start of each training sample
+    "init_hidden_mu": args.init_hidden_mu,  # Initial value for hidden nodes in the model. This is a small value for initialization of hidden nodes. Used as mean for normal distribution at the start of each training sample
+    "delta_w_selection": args.delta_w_selection,  # "all" or "internal_only",
+
     "num_vertices": input_size + hidden_size + output_size,
     # "num_vertices": graph.num_vertices,
     # "num_vertices": num_vertices,
@@ -821,7 +866,7 @@ model_params = {
     "weight_init": args.weight_init,   # xavier, 'uniform', 'based_on_f', 'zero', 'kaiming'
 
     # "edge_type":  custom_dataset_train.edge_type,
-    "use_learning_optimizer": args.use_learning_optimizer,    # False or [0], [(weight_decay=)]
+    "weight_decay": (args.w_decay_lr_values, args.w_decay_lr_weights),    # False or [0], [(weight_decay=)]
     "use_grokfast": args.grokfast,  # False or True
     "grad_clip_lr_x_lr_w": (grad_clip_lr_x, grad_clip_lr_w), 
 }
@@ -840,6 +885,7 @@ plot_model_weights(model, args.graph_type, model_dir=None, save_wandb="before_tr
 print("------------- compile model ------------- ")
 # model = torch.compile(model, disable=True) 
 # torch.compile(model, dynamic=True)
+# TODO: torch.compile is not supported for all models yet, so we disable it for now
 model = torch.compile(model, mode="max-autotune")
 model.task = ""   # classification or generation, or both 
 
@@ -880,6 +926,13 @@ num_of_trained_imgs = 0
 tc = TerminalColor()
 
 print(f"{tc.RED} ---------- Training ------- .{tc.RESET}")
+weight_table = wandb.Table(columns=["epoch", "std", "mean"])
+
+model_weight_std_mean = {
+    "epoch": [],
+    "std": [],
+    "mean": [],
+}
 
 
 with torch.no_grad():
@@ -899,12 +952,35 @@ with torch.no_grad():
         
         # log mean, min and max of weights to wandb
         w = PCG.w.detach().cpu().numpy()
+        # collect weights
+        mean = w.mean().item()
+        std = w.std().item()
+
         wandb.log({
             "epoch": epoch,
             "Weights/mean": w.mean(),
             "Weights/min": w.min(),
             "Weights/max": w.max(),
+            "Weights/std": w.std(),
         })
+
+
+        # add row to table
+        # weight_table.add_data(epoch, std, mean)
+
+        # # log growing scatter plot
+        # wandb.log({
+        #     "Weights/weights_scatter": wandb.plot.scatter(
+        #         weight_table,
+        #         x="std",
+        #         y="mean",
+        #         title="Weights: std vs mean"
+        #     )
+        # }, step=epoch)
+
+        # log std weight and mean weight to wandb, on both x and y axis
+       
+
 
         print("\n-----train_supervised-----")
         print(len(train_loader))
@@ -936,6 +1012,10 @@ with torch.no_grad():
                 break
             
             model.do_log_error_map = False
+
+        model_weight_std_mean["epoch"].append(epoch)
+        model_weight_std_mean["std"].append(std)
+        model_weight_std_mean["mean"].append(mean)
 
         wandb.log({
             "epoch": epoch,
@@ -975,8 +1055,16 @@ with torch.no_grad():
 
             # # do generation once
             if "generation" in TASK_copy and "classification" in TASK_copy:
-                TASK_copy = ["classification"]
+                # pop generation from TASK_copy
+                TASK_copy.remove("generation")
+            
+            # 
 
+            # # do generation once
+            if "occlusion" in TASK_copy and "classification" in TASK_copy:
+                # pop generation from TASK_copy
+                TASK_copy.remove("occlusion")
+            
             # print("y_pred", y_pred.shape)
             # print("y_pred", y_batch.shape)
             if "classification" in TASK_copy:
@@ -1107,64 +1195,173 @@ with torch.no_grad():
         # plt.close()
 
 
-print("done training")
-if len(accuracy_means) > 0:
-    print(max(accuracy_means))
-    print(accuracy_means)
 
-
-    if max(accuracy_means) > 0.90 or accuracy_means[-1] >= 0.85:
-
-        # save weights; TODO
-
-        # eval on test set
-
-        
-        # for batch_no, batch in enumerate(tqdm(val_loader, total=min(len(val_loader)), desc=f"Epoch {epoch+1} - Validation", leave=False)):
-        for batch_no, (X_batch, y_batch)  in enumerate(tqdm(test_loader, total=len(test_loader), desc=f"Epoch {epoch+1} - Test Eval. | {TASK}", leave=False)):
-        
-            X_batch, y_batch = X_batch.to(DEVICE), y_batch.to(DEVICE)  # Move to GPU
-            
-            # y_pred = PCG.test_iterative(batch, eval_types=TASK_copy, remove_label=True)
-
-            for task in TASK_copy:
-                y_pred = PCG.test_iterative( (X_batch, y_batch), 
-                                            eval_types=[task], remove_label=True)
-
-            # # do generation once
-            if "generation" in TASK_copy and "classification" in TASK_copy:
-                TASK_copy = ["classification"]
-
-            # print("y_pred", y_pred.shape)
-            # print("y_pred", y_batch.shape)
-            if "classification" in TASK_copy:
-                mean_correct = torch.mean((y_pred == y_batch).float()).item()
-                acc += mean_correct
-                accs.append(mean_correct)
-            
-        print("Done test eval")
-
-        if "classification" in TASK:
-            accuracy_mean = (sum(accs) / len(accs)) if accs else 0
-            val_acc.append(accuracy_mean)
-            accuracy_means.append(accuracy_mean)
-
-            print("epoch", epoch, "accuracy_mean", accuracy_mean, "on size test set", len(accs) * args.batch_size)
-
-            # if epoch % 10 == 0 or accuracy_mean > 0.90:
-            #     print("delta pred ", y_pred - y_batch)
-
-            wandb.log({
-                "epoch": epoch,
-                "classification_test/accuracy_mean": accuracy_mean,
-                "classification_test/size":  len(accs) * args.batch_size,
-            })
-
-
-
+print("Training completed in:", datetime.now() - start_time)
+print("save last model weights to wandb")
 if args.use_wandb in ['online', 'run']:
         plot_model_weights(model, args.graph_type, model_dir=None, save_wandb=str(int(args.epochs)))
 
+
+# plot model_weight_std_mean plt.quiver x-axis std, y-axis mean, epoch over time with arrows
+# Convert to numpy arrays for plotting
+# Example data
+stds = np.array(model_weight_std_mean["std"])
+means = np.array(model_weight_std_mean["mean"])
+epochs = np.arange(len(stds))
+
+# Arrow origins (start of each arrow)
+x = stds[:-1]
+y = means[:-1]
+
+# Arrow directions (difference to next point)
+u = stds[1:] - stds[:-1]
+v = means[1:] - means[:-1]
+
+# Plot
+plt.figure(figsize=(8, 6))
+plt.quiver(x, y, u, v, angles='xy', scale_units='xy', scale=1, color='blue', alpha=0.6)
+plt.plot(stds, means, 'o--', color='gray', alpha=0.3)  # optional path trace
+plt.xlabel('Std Weights')
+plt.ylabel('Mean Weights')
+plt.title('Weight Evolution Over Epochs (Std vs Mean)')
+plt.grid()
+# plt.savefig(f"{model_dir}/model_weights_std_mean.png")
+# save to wandb "weights/quiver_plot.png"
+if args.use_wandb in ['online', 'run']:
+    wandb.log({
+        "Weights/quiver_plot": wandb.Image(plt),
+    })
+# Clear memory
+plt.close() 
+
+
+
+# model.clear_memory()
+model.trace_data = None  # Clear trace data to free memory
+# clear memory
+torch.cuda.empty_cache()
+import gc
+gc.collect()
+print("Training completed")
+
+try:
+    print("done training")
+
+    # torch no grad
+    with torch.no_grad():
+
+        if len(accuracy_means) > 0:
+            print(max(accuracy_means))
+            print(accuracy_means)
+
+
+            if max(accuracy_means) > 0.90 or accuracy_means[-1] >= 0.85:
+
+                # save weights; TODO
+
+                # eval on test set
+
+                
+                # for batch_no, batch in enumerate(tqdm(val_loader, total=min(len(val_loader)), desc=f"Epoch {epoch+1} - Validation", leave=False)):
+                for batch_no, (X_batch, y_batch)  in enumerate(tqdm(test_loader, total=len(test_loader), desc=f"Epoch {epoch+1} - Test Eval. | {TASK}", leave=False)):
+                
+                    X_batch, y_batch = X_batch.to(DEVICE), y_batch.to(DEVICE)  # Move to GPU
+                    
+                    # y_pred = PCG.test_iterative(batch, eval_types=TASK_copy, remove_label=True)
+
+                    for task in TASK_copy:
+                        y_pred = PCG.test_iterative( (X_batch, y_batch), 
+                                                    eval_types=[task], remove_label=True)
+
+                    # # do generation once
+                    if "generation" in TASK_copy and "classification" in TASK_copy:
+                        TASK_copy = ["classification"]
+
+                    # print("y_pred", y_pred.shape)
+                    # print("y_pred", y_batch.shape)
+                    if "classification" in TASK_copy:
+                        mean_correct = torch.mean((y_pred == y_batch).float()).item()
+                        acc += mean_correct
+                        accs.append(mean_correct)
+                    
+                print("Done test eval")
+
+                if "classification" in TASK:
+                    accuracy_mean = (sum(accs) / len(accs)) if accs else 0
+                    val_acc.append(accuracy_mean)
+                    accuracy_means.append(accuracy_mean)
+
+                    print("epoch", epoch, "accuracy_mean", accuracy_mean, "on size test set", len(accs) * args.batch_size)
+
+                    # if epoch % 10 == 0 or accuracy_mean > 0.90:
+                    #     print("delta pred ", y_pred - y_batch)
+
+                    wandb.log({
+                        "epoch": epoch,
+                        "classification_test/accuracy_mean": accuracy_mean,
+                        "classification_test/size":  len(accs) * args.batch_size,
+                    })
+                print("Test evaluation completed with accuracy:", accuracy_mean)
+# Catch
+except Exception as e:
+    print("Error during training or evaluation:", e)
+    print("Training might not have been successful. Check the logs for details.")
+    # Optionally, you can raise the exception again if you want to stop execution
+    # raise e
+
+
+
+# only if we are doing discriminative training
+if args.train_mlp and args.graph_type == "single_hidden_layer" and sum(args.discriminative_hidden_layers) > 0:
+    # from helper.plot import plot_model_weights
+    from helper.plot import train_mlp_classifier
+    
+
+    # hidden_layers = [512, 256, 128]          # or go deeper: [485, 176, 131, 122]
+    # optimizer = torch.optim.Adam(
+    #     mlp.parameters(),
+    #     lr=1.3e-4,                           # ~0.00012885
+    #     weight_decay=1e-4                   # small L2 regularization
+    # )
+
+    batch_size = 128
+    epochs = 20
+    print(args.discriminative_hidden_layers[1:])
+
+    print("---------------- TRAIN MLP CLASSIFIER -----------------")
+    # if args.discriminative_hidden_layers[1:] == hidden_layers:
+    # else:
+    #     PC_weights = None 
+    PC_weights = model.w.cpu().detach().numpy()
+
+    # if the first item in args.discriminative_hidden_layers is 784, don't include it
+    # assert both first and second item are not 784
+
+    if args.discriminative_hidden_layers[0] == 784:
+        # remove the first item
+        hidden_layers = args.discriminative_hidden_layers[1:]
+    else:
+        # keep the first item
+        hidden_layers = args.discriminative_hidden_layers
+
+    # assert (args.discriminative_hidden_layers[1] != 784) and (args.discriminative_hidden_layers[0] != 784), "First item in discriminative_hidden_layers should not be 784"
+
+    
+    # hidden_layers = args.discriminative_hidden_layers[1:]     
+    print("hidden_layers", hidden_layers)
+
+    train_mlp_classifier(run_id=run.id, 
+                         PC_weights=PC_weights, 
+                         hidden_layer=hidden_layers, activation_fn="relu", 
+               base_train_dataset=base_test_dataset,
+               base_test_dataset=base_test_dataset,
+               batch_size=batch_size, 
+               epochs=epochs,
+                lr_w=1.3e-4, 
+                weight_decay=1e-4,                   # small L2 regularization
+                seed=args.seed, 
+                graph_type="mlp_bp")
+    
 
 
 wandb.finish()
