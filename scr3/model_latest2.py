@@ -336,6 +336,10 @@ class vanZwol_AMB_withTransformerAttentionHebbian(UpdateRule):
         self.num_vertices = num_vertices
         self.device = device
         self.adj = adj.float().to(device)  # [N, N]
+        
+        # self most of hidden nodes to zero 
+        # self.adj[800:-30, 800:-30] = 0.0
+
         self.lr_attn = lr_attn
         self.use_attention = use_attention
         self.d_qk = d_qk
@@ -946,11 +950,11 @@ class PCgraph(torch.nn.Module):
     def _reset_grad(self):
         self.dw, self.db = None, None
 
-    def reset_nodes(self, batch_size=1):
+    def reset_nodes(self, batch_size=1, force=False):
         self.t = 0 
 
         # VERIFY self.mode == "train" and task != occlusion
-        if self.mode == "train":
+        if self.mode == "train" or force:
             if self.reshape:
                 self.errors = torch.empty(batch_size, self.num_vertices, device=DEVICE)
                 self.values = torch.zeros(batch_size, self.num_vertices, device=DEVICE)
@@ -1236,7 +1240,7 @@ class PCgraph(torch.nn.Module):
             if self.grokfast_type == 'ema':
                 # Adjust the gradient with EMA Grokfast
                 final_grad, self.avg_grad = gradfilter_ema_adjust(
-                    delta, self.avg_grad, alpha=0.8, lamb=0.1
+                    delta, self.avg_grad, alpha=0.65, lamb=0.6
                 )
                 delta = final_grad  # Replace delta with smoothed version
             
@@ -2211,7 +2215,8 @@ class PCgraph(torch.nn.Module):
             if self.reshape:
                 self.values[:, :] = data
                 # self.values[:, 0:input_size] = torch.randn_like(self.values[:, 0:input_size])
-                self.values[:, 0:input_size] = torch.rand_like(self.values[:, 0:input_size])
+                # self.values[:, 0:input_size] = torch.rand_like(self.values[:, 0:input_size])
+                self.values[:, 0:input_size] = 0
 
                 # assert (self.values[:, -output_size:].argmax(dim=1) == labels).all()
             else:
@@ -2222,6 +2227,7 @@ class PCgraph(torch.nn.Module):
             # data already occluded 
             # in 1/3 of the times:
             x = np.random.rand()
+
             # if x < 0.3:
             #     # Zero out the sensory nodes (first 392 nodes)
             #     data[:, :392] = torch.randn_like(data[:, :392])  # Add noise to sensory nodes
@@ -2232,13 +2238,14 @@ class PCgraph(torch.nn.Module):
             # elif x >= 0.6:
             #     data[:, 392:784] = 0
 
-            if remove_label:
-                if x < 0.5:
-                    data[:, 392:784] = 0
-                else:
-                    # with random values
-                    data[:, 392:784] = torch.randn_like(data[:, 392:784])  # Add noise to sensory nodes
+            # if self.epoch % 2 == 0:
+            #     if x < 0.5:
+            #         data[:, 392:784] = 0
+            #     else:
+            #         # with random values
+            #         data[:, 392:784] = torch.randn_like(data[:, 392:784])  # Add noise to sensory nodes
             # data[:, 392:784] = torch.randn_like(data[:, 392:784])  # Add noise to sensory nodes
+            data[:, 392:784] = 0
 
 
             # log x to wandb
@@ -2277,14 +2284,14 @@ class PCgraph(torch.nn.Module):
         # else:
         #     self.update_xs(train=False, trace=True)
         
-        if self.task == "occlusion" and remove_label:
-            self.set_task("generation")       # not update the supervised nodes, only sensory nodes
-            self.task = "generation"
+        # if self.task == "occlusion" and remove_label:
+        #     self.set_task("generation")       # not update the supervised nodes, only sensory nodes
+        #     self.task = "generation"
 
         self.update_xs(train=False, trace=True)
         
-        if self.task == "occlusion" and remove_label:
-            self.task = "occlusion"
+        # if self.task == "occlusion":
+        #     self.task = "occlusion"
         
         logits = self.values.view(self.batch_size, self.num_vertices)
         generated_imgs = logits[:, :784].view(self.batch_size, 28, 28)
@@ -2377,6 +2384,16 @@ class PCgraph(torch.nn.Module):
             # axs_raw[1, 0].set_title("Occluded Data")
             # axs_raw[2, 0].set_title("Generated Images (Raw)")
             
+            # normalize generated_imgs_raw
+            min_val = generated_imgs_raw.min(dim=1, keepdim=True)[0].min(dim=2, keepdim=True)[0]
+            max_val = generated_imgs_raw.max(dim=1, keepdim=True)[0].max(dim=2, keepdim=True)[0]
+            generated_imgs_raw = (generated_imgs_raw - min_val) / (max_val - min_val + 1e-8)
+
+            data_occluded = (data_occluded - data_occluded.min(dim=1, keepdim=True)[0].min(dim=2, keepdim=True)[0]) / \
+                            (data_occluded.max(dim=1, keepdim=True)[0].max(dim=2, keepdim=True)[0] - data_occluded.min(dim=1, keepdim=True)[0].min(dim=2, keepdim=True)[0] + 1e-8)
+            data_original = (data_original - data_original.min(dim=1, keepdim=True)[0].min(dim=2, keepdim=True)[0]) / \
+                            (data_original.max(dim=1, keepdim=True)[0].max(dim=2, keepdim=True)[0] - data_original.min(dim=1, keepdim=True)[0].min(dim=2, keepdim=True)[0] + 1e-8)
+
             for img_idx in range(n_images):
                 img_idx = random_offset + img_idx
                 axs_raw[0, img_idx].imshow(data_original[img_idx].cpu().numpy(), cmap='gray')

@@ -81,7 +81,7 @@ parser.add_argument('--tasks',nargs='+',choices=allowed_tasks,required=True,help
 #data_dir default --data_dir default to $TMPDIR
 parser.add_argument('--data_dir', type=str, default='../data', help='Path to the directory to store the dataset. Use $TMPDIR for scratch. or use ../data ')
 
-parser.add_argument('--dataset_transform', nargs='*', default=[], help='List of transformations to apply.', choices=['normalize_min1_plus1', 'normalize_mnist_mean_std', 'random_rotation', 'none', 'None'])
+parser.add_argument('--dataset_transform', nargs='*', default=[], help='List of transformations to apply.', choices=['normalize_min1_plus1', 'normalize_mnist_mean_std', 'random_rotation', 'zoom_out', 'random_translation','None'])
 parser.add_argument('--numbers_list', type=valid_int_list, default=[0, 1, 3, 4, 5, 6, 7], help="A comma-separated list of integers describing which distinct classes we take during training alone")
 parser.add_argument('--N', type=valid_int_or_all, default=20, help="Number of distinct trainig images per class; greater than 0 or the string 'all' for all instances o.")
 
@@ -395,7 +395,7 @@ adj_matrix_pyg = to_dense_adj(graph.edge_index)[0]
 num_vertices = adj_matrix_pyg.shape[0]
 graph.num_vertices = adj_matrix_pyg.shape[0]
 
-if graph_params["graph_type"]["name"] == "sbm_two_branch_chain":
+if graph_params["graph_type"]["name"] in ["sbm_two_branch_chain", "two_branch_graph", "custom_two_branch", "dual_branch_sbm"]:
 
     # print(graph.num_vertices)
     # if "internal_indices" in graph.__dict__:
@@ -683,6 +683,8 @@ if graph_params["graph_type"]["name"] in ["stochastic_block", "sbm_two_branch_ch
 #     break 
 
 
+
+
 class GraphFormattedMNIST(torch.utils.data.Dataset):
     def __init__(self, dataset, input_size, hidden_size, output_size, label_value=1):
         self.input_size = input_size
@@ -718,6 +720,41 @@ class GraphFormattedMNIST(torch.utils.data.Dataset):
         return self.data[idx], self.labels[idx]  # No transformations here!
 
 
+class GraphFormattedMNISTGraphAware(torch.utils.data.Dataset):
+    def __init__(self, dataset, graph, label_value=1.0):
+        self.graph = graph
+        self.label_value = label_value
+
+        self.data = []
+        self.labels = []
+
+        for img, label in dataset:
+            image_flat = img.view(-1).to(torch.float32)
+            x = torch.zeros(graph.num_vertices, dtype=torch.float32)
+
+            # Sensory nodes (set with the image)
+            x[graph.sensory_indices] = image_flat
+
+            # Set the correct label cluster to 1s
+            if hasattr(graph, "label_cluster_map"):
+                if label not in graph.label_cluster_map:
+                    raise ValueError(f"⚠️ Label {label} not found in label_cluster_map")
+                label_nodes = graph.label_cluster_map[label]
+                x[label_nodes] = self.label_value
+            else:
+                raise ValueError("⚠️ Graph must define label_cluster_map for supervision nodes")
+
+            self.data.append(x)
+            self.labels.append(label)
+
+        self.data = torch.stack(self.data)
+        self.labels = torch.tensor(self.labels, dtype=torch.long)
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        return self.data[idx], self.labels[idx]
 
 DATASET_PATH = "../data"
 
@@ -748,6 +785,8 @@ transform_list = [
     transforms.ToTensor()
 ]
 
+original_mnist = 28
+
 if args.dataset_transform:
 
     if "normalize_min1_plus1" in args.dataset_transform:
@@ -755,10 +794,25 @@ if args.dataset_transform:
 
     if "normalize_mnist_mean_std" in args.dataset_transform:
         transform_list.append(transforms.Normalize((0.1307,), (0.3081,)))
-    
+
+    if "random_translation" in args.dataset_transform:
+        transform_list.append(transforms.RandomAffine(degrees=0, translate=(0.2, 0.2)))
+
     if "random_rotation" in args.dataset_transform:
-        transform_list.append(transforms.RandomRotation(degrees=20))
-    
+        transform_list.append(transforms.RandomRotation(degrees=25))
+
+    if "zoom_out" in args.dataset_transform:
+        transform_list.append(transforms.Resize((20, 20)))
+
+        # Compute padding to go from 20x20 back to 28x28
+        total_padding = original_mnist - 20  # 8
+        pad_left = total_padding // 2       # 4
+        pad_right = total_padding - pad_left  # 4
+
+        transform_list.append(transforms.Pad((pad_left, pad_left, pad_right, pad_right), fill=0, padding_mode='constant'))
+
+
+
 
 # # Create the transform
 # print("TODO ADD COMPASE TRANSFORMS")
@@ -770,8 +824,21 @@ base_test_dataset = torchvision.datasets.MNIST(root=DATASET_PATH, train=False, t
 
 print("hidden_size", hidden_size)
 # Wrap it in the GraphFormattedMNIST class
-train_dataset = GraphFormattedMNIST(base_train_dataset, input_size, hidden_size, output_size, label_value=args.supervision_label_val)
-test_dataset = GraphFormattedMNIST(base_test_dataset, input_size, hidden_size, output_size, label_value=args.supervision_label_val)
+
+if args.graph_type == "dual_branch_sbm": 
+    if hasattr(graph, "label_cluster_map"):
+        print("Using label-aware dataset (GraphFormattedMNISTGraphAware)")
+
+    print("Using dual_branch_sbm graph type")
+    print("making GraphFormattedMNISTGraphAware dataset")
+    print(graph.num_vertices)
+    train_dataset = GraphFormattedMNISTGraphAware(base_train_dataset, graph, label_value=args.supervision_label_val)     
+    test_dataset = GraphFormattedMNISTGraphAware(base_test_dataset, graph, label_value=args.supervision_label_val)
+    # test_dataset = GraphFormattedMNIST(base_test_dataset, input_size, hidden_size, output_size, label_value=args.supervision_label_val)
+
+else:
+    train_dataset = GraphFormattedMNIST(base_train_dataset, input_size, hidden_size, output_size, label_value=args.supervision_label_val)
+    test_dataset = GraphFormattedMNIST(base_test_dataset, input_size, hidden_size, output_size, label_value=args.supervision_label_val)
 
 # Split the dataset
 train_set, val_set = random_split(train_dataset, [50000, 10000])
@@ -779,7 +846,8 @@ train_set, val_set = random_split(train_dataset, [50000, 10000])
 
 # Create DataLoaders
 # QUICK FIX for now TODO, 
-val_loader_batch_size = (args.batch_size if args.batch_size > 10 else 20)
+val_loader_batch_size = (args.batch_size if args.batch_size >= 10 else 10)
+# val_loader_batch_size = args.batch_size
 
 train_loader = DataLoader(train_set, batch_size=args.batch_size, shuffle=True, drop_last=False, num_workers=4, pin_memory=True)
 val_loader = DataLoader(val_set, batch_size=val_loader_batch_size, shuffle=True, drop_last=False, num_workers=4, pin_memory=True)
@@ -790,7 +858,70 @@ test_loader = DataLoader(test_dataset, batch_size=val_loader_batch_size, shuffle
 # task       [classification, generation, denoise, occlusion]
 
 
+next(iter(train_loader))  # Preload the first batch to ensure everything is set up correctly
+# take a sample from the train_loader to get the input size
+sample_batch = next(iter(train_loader))
 
+# plot the values of the first item in the batch
+import matplotlib.pyplot as plt
+# using the sensory indices from the graph
+# sensory_indices = graph.sensory_indices
+# hidden_indices = graph.internal_indices
+# output_indices = graph.supervision_indices
+
+print("batch shape", sample_batch[0].shape)  # Should be [batch_size, input_size + hidden_size + output_size]
+print("x shape", sample_batch[1].shape)  # Should be [batch_size
+
+if args.graph_type == "dual_branch_sbm":
+
+    # # flattten the item and round up to the nearest 100 and plot imshow of shape Nx100
+    # graph_values = sample_batch  # [batch_size, num_vertices]
+
+    # # first item batch
+    # graph_values = graph_values[0]  # Take the first item in the batch
+    # print("graph_values shape", graph_values.shape)  # Should be [num_vertices]
+    
+    # # plot imshow the sensory values using graph.sensory_indices
+    # sensory_values = graph_values[graph.sensory_indices]  # Get sensory values
+    # # reshape to (28, 28) for plotting
+    # sensory_values = sensory_values.view(28, 28).detach().cpu().numpy()
+    # plt.imshow(sensory_values, cmap='gray')
+    # plt.title("Sensory Values")
+
+    # plot the graph.supervision_indices values
+    print("graph.supervision_indices", graph.supervision_indices)
+    for i, supervision_indices in enumerate(graph.supervision_indices):
+        print("i and value ", i, graph.supervision_indices[i], end="_")
+
+    supervision_values = sample_batch[0][:, graph.supervision_indices]  # Get supervision
+    supervision_values = supervision_values.view(-1, 10).detach().cpu().numpy()  # Reshape to (batch_size, 10)
+    plt.imshow(supervision_values, cmap='hot', aspect='auto')
+    plt.title("Supervision Values")
+    plt.colorbar()
+    # save to wandb monitor
+    if args.use_wandb in ['online', 'run']:
+        wandb.log({"Monitoring/supervision_values": wandb.Image(plt)})
+    plt.close()
+
+
+
+
+
+
+print("-------------IMPORTANT CHECK----------------")
+
+# num_vertices_batch = sample_batch[0].shape[1]  # Get the number of vertices from the first batch
+
+num_vertices_batch = graph.num_vertices
+print("Model will use num_vertices =", num_vertices)
+
+
+print("Number of vertices in the first batch:", num_vertices_batch)
+hidden_size = len(graph.internal_indices)
+
+print(input_size + hidden_size + output_size)
+print(adj_matrix_pyg.shape)
+print(graph.num_vertices)
 
 ################################# discriminative model lr         ##########################################
 ################################# generative model lr         ##########################################
@@ -844,10 +975,11 @@ model_params = {
     "init_hidden_mu": args.init_hidden_mu,  # Initial value for hidden nodes in the model. This is a small value for initialization of hidden nodes. Used as mean for normal distribution at the start of each training sample
     "delta_w_selection": args.delta_w_selection,  # "all" or "internal_only",
 
-    "num_vertices": input_size + hidden_size + output_size,
+    # "num_vertices": (input_size + hidden_size + output_size) if args.graph_type != "dual_branch_sbm" else (graph.num_vertices),
+    # "num_vertices": (input_size + hidden_size + output_size) if args.graph_type != "dual_branch_sbm" else (adj_matrix_pyg.shape[0]),
+    "num_vertices": num_vertices_batch,
     # "num_vertices": graph.num_vertices,
-    # "num_vertices": num_vertices,
-    # "num_vertices": num_vertices,
+    # "num_vertices": num_vertices,    
 
     "num_internal": sum(graph.internal_indices),
     "adj": adj_matrix_pyg,             # 2d Adjacency matrix
@@ -934,6 +1066,28 @@ model_weight_std_mean = {
     "mean": [],
 }
 
+# initialize history buffer
+weight_history = []
+
+# load model weights if they exist
+load_model_weights = False
+# load scr3/trained_models/weight_matrix_pypc.npy
+# if load_model_weights and os.path.exists("trained_models/weight_matrix_pypc.npy"):
+#     print("Loading model weights from trained_models/weight_matrix_pypc.npy")
+
+#     print(model.w.shape)
+
+#     W = np.load("trained_models/weight_matrix_pypc.npy").T
+#     print("W shape", W.shape)
+#     W = torch.from_numpy(W).to(device).float()
+
+#     with torch.no_grad():        # avoid tracking in autograd
+#         PCG.w.copy_(W)           # copy *into* the existing Parameter
+
+# TODO
+print("fix error map do_log_error_map")
+
+
 
 with torch.no_grad():
 
@@ -964,64 +1118,60 @@ with torch.no_grad():
             "Weights/std": w.std(),
         })
 
+        weight_history.append(w.copy())  # shape: [epoch, N, N]
 
-        # add row to table
-        # weight_table.add_data(epoch, std, mean)
 
-        # # log growing scatter plot
-        # wandb.log({
-        #     "Weights/weights_scatter": wandb.plot.scatter(
-        #         weight_table,
-        #         x="std",
-        #         y="mean",
-        #         title="Weights: std vs mean"
-        #     )
-        # }, step=epoch)
 
-        # log std weight and mean weight to wandb, on both x and y axis
-       
 
 
         print("\n-----train_supervised-----")
         print(len(train_loader))
 
-        model.do_log_error_map = True 
-        # for batch_no, batch in enumerate(tqdm(train_loader, total=min(break_num, len(train_loader)), desc=f"Epoch {epoch+1} - Training", leave=False)):
-        for batch_no, (X_batch, y_batch) in enumerate(tqdm(train_loader, total=min(break_num, len(train_loader)), desc=f"Epoch {epoch+1} - Training", leave=False)):
-            
+        # model.do_log_error_map = True 
+        model.do_log_error_map = False
 
-            X_batch, y_batch = X_batch.to(DEVICE), y_batch.to(DEVICE)  # Move to GPU
-            
-            # batch = batch.to(model.device)
+        # --------------- EVAL -----------------
+        if not load_model_weights:
+            # for batch_no, batch in enumerate(tqdm(train_loader, total=min(break_num, len(train_loader)), desc=f"Epoch {epoch+1} - Training", leave=False)):
+            for batch_no, (X_batch, y_batch) in enumerate(tqdm(train_loader, total=min(break_num, len(train_loader)), desc=f"Epoch {epoch+1} - Training", leave=False)):
+                
 
-            history = model.train_supervised(X_batch)  # history is [..., ...]
-            # history = model.train_supervised(batch)  # history is [..., ...]
-            # append all items in history to epoch_history
-            # for energy in history:
-            #     epoch_history.append(energy)
+                X_batch, y_batch = X_batch.to(DEVICE), y_batch.to(DEVICE)  # Move to GPU
+                
+                # batch = batch.to(model.device)
 
-            #     wandb.log({
-            #         "epoch": epoch,
-            #         "Training/internal_energy_mean": energy,
-            #         # "Training/sensory_energy_mean": history_epoch["sensory_energy_mean"],
+                history = model.train_supervised(X_batch)  # history is [..., ...]
+                # history = model.train_supervised(batch)  # history is [..., ...]
+                # append all items in history to epoch_history
+                # for energy in history:
+                #     epoch_history.append(energy)
 
-            #     })
+                #     wandb.log({
+                #         "epoch": epoch,
+                #         "Training/internal_energy_mean": energy,
+                #         # "Training/sensory_energy_mean": history_epoch["sensory_energy_mean"],
 
-            num_of_trained_imgs += X_batch.shape[0]
-            if batch_no >= break_num:
-                break
-            
-            model.do_log_error_map = False
+                #     })
 
-        model_weight_std_mean["epoch"].append(epoch)
-        model_weight_std_mean["std"].append(std)
-        model_weight_std_mean["mean"].append(mean)
+                num_of_trained_imgs += X_batch.shape[0]
+                if batch_no >= break_num:
+                    break
+                
+                model.do_log_error_map = False
 
-        wandb.log({
-            "epoch": epoch,
-            "Training/num_of_trained_imgs": num_of_trained_imgs,
-        })
-    
+            model_weight_std_mean["epoch"].append(epoch)
+            model_weight_std_mean["std"].append(std)
+            model_weight_std_mean["mean"].append(mean)
+
+            wandb.log({
+                "epoch": epoch,
+                "Training/num_of_trained_imgs": num_of_trained_imgs,
+            })
+
+        model.do_log_error_map = False
+
+        if load_model_weights:
+            model.reset_nodes(batch_size=val_loader_batch_size, force=True)
         #### 
         loss, acc = 0, 0
         model.test_(epoch)
@@ -1198,8 +1348,66 @@ with torch.no_grad():
 
 print("Training completed in:", datetime.now() - start_time)
 print("save last model weights to wandb")
+
 if args.use_wandb in ['online', 'run']:
-        plot_model_weights(model, args.graph_type, model_dir=None, save_wandb=str(int(args.epochs)))
+        plot_model_weights(model, args.graph_type, model_dir=None, save_wandb="after_training")
+
+        # plot_model_weights(model, args.graph_type, model_dir=None, save_wandb=str(int(args.epochs)))
+
+
+from sklearn.decomposition import PCA
+
+weight_history = np.array(weight_history)  # shape: [T, N, N]
+flat_weights = weight_history.reshape(weight_history.shape[0], -1)
+
+logs = {}
+
+from sklearn.decomposition import PCA
+import matplotlib.pyplot as plt
+import wandb
+import numpy as np
+
+# flat_weights: [T, N*N] from weight_history.reshape(T, -1)
+pca = PCA(n_components=2)
+pca_vals = pca.fit_transform(flat_weights)  # shape [T, 2]
+x, y = pca_vals[:-1, 0], pca_vals[:-1, 1]
+u, v = pca_vals[1:, 0] - x, pca_vals[1:, 1] - y
+
+# Plot
+plt.figure(figsize=(8, 6))
+plt.quiver(x, y, u, v, angles='xy', scale_units='xy', scale=1, color='blue', alpha=0.7)
+plt.plot(pca_vals[:, 0], pca_vals[:, 1], 'o--', color='gray', alpha=0.4)
+plt.xlabel("PCA 1")
+plt.ylabel("PCA 2")
+plt.title("PCA Trajectory of Weights Over Epochs")
+plt.grid()
+
+# Log to wandb
+wandb.log({
+    "Weights/PCA_quiver_plot": wandb.Image(plt)
+})
+plt.close()
+
+# # ✅ 2. L2 distance from initial weights
+# init = flat_weights[0]
+# final = flat_weights[-1]
+# l2 = np.linalg.norm(final - init)
+# logs["Weights/L2_from_init"] = l2
+
+
+# # ✅ 4. Loss landscape via interpolation
+# if flat_weights.shape[0] >= 3:  # or just >= 2
+#     W_a = flat_weights[0]       # early weight
+#     W_b = flat_weights[-1]      # final weight
+
+#     alphas = np.linspace(0, 1, 20)
+#     interpolated = np.array([(1 - a) * W_a + a * W_b for a in alphas])
+#     midpoint = 0.5 * (W_a + W_b)
+#     losses = np.linalg.norm(interpolated - midpoint, axis=1) ** 2
+#     logs["Weights/Loss_landscape_max"] = np.max(losses)
+#     logs["Weights/Loss_landscape_min"] = np.min(losses)
+
+wandb.log(logs)
 
 
 # plot model_weight_std_mean plt.quiver x-axis std, y-axis mean, epoch over time with arrows
@@ -1233,6 +1441,41 @@ if args.use_wandb in ['online', 'run']:
     })
 # Clear memory
 plt.close() 
+
+
+# Compute std/mean trajectory
+stds = np.std(flat_weights, axis=1)
+means = np.mean(flat_weights, axis=1)
+
+import os
+import numpy as np
+import pandas as pd
+from sklearn.decomposition import PCA
+
+
+# WandB table
+table = wandb.Table(columns=["run_id", "epoch", "PC1", "PC2", "std", "mean"])
+run_id = wandb.run.id  # 👈 use short W&B ID
+for i in range(len(flat_weights)):
+    table.add_data(run_id, i, pca_vals[i, 0], pca_vals[i, 1], stds[i], means[i])
+
+# Get run ID (use actual string if not using wandb)
+# run_id = "pkt55489"  # or use timestamp etc.
+run_id = wandb.run.id if args.use_wandb in ['online', 'run'] else "local_run"
+save_dir = f"jobs/plotting/trajectories/{run_id}"
+os.makedirs(save_dir, exist_ok=True)
+
+# Create and save DataFrame
+df = pd.DataFrame({
+    "epoch": np.arange(len(pca_vals)),
+    "PC1": pca_vals[:, 0],
+    "PC2": pca_vals[:, 1],
+    "std": stds,
+    "mean": means,
+})
+df.to_csv(os.path.join(save_dir, "trajectory.csv"), index=False)
+print(f"✓ Saved trajectory to {save_dir}/trajectory.csv")
+
 
 
 
@@ -1308,6 +1551,10 @@ except Exception as e:
     print("Training might not have been successful. Check the logs for details.")
     # Optionally, you can raise the exception again if you want to stop execution
     # raise e
+
+
+
+
 
 
 

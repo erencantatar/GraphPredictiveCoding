@@ -47,7 +47,20 @@ graph_type_options = {
             }
         }, 
 
-         
+        
+        "single_hidden_layer_clusters": {
+            "params": {
+                "discriminative_hidden_layers": [100],
+                "generative_hidden_layers": [0],
+                "num_clusters_per_layer": 10,
+                "remove_sens_2_sens": True,
+                "remove_sens_2_sup": True,
+                "p_intra": 0.5,
+                "p_inter": 0.5,
+            }
+        },
+
+
         "stochastic_block_hierarchy": {
             "params": {
                             # "remove_sens_2_sens": True, 
@@ -68,6 +81,39 @@ graph_type_options = {
                 # "remove_sens_2_sup": False, 
                 }
         },
+
+            "dual_branch_sbm": {
+                "params": {
+                    "p_intra": 0.0,     # Probability of edges within the same community
+                    "p_inter": 1,   # Probability of edges between different communities
+                    "remove_sens_2_sens": True,  # Placeholder for removing sensory to sensory connections
+                    "remove_sens_2_sup": True,   # Placeholder for removing sensory to supervision connections
+                    "discriminative_layer": [
+                        {"num_clusters": 49, "nodes_per_cluster": 16, "p_to_next": 1.0},
+                        {"num_clusters": 40, "nodes_per_cluster": 1, "p_to_next": 1.0},
+                        # {"num_clusters": 100, "nodes_per_cluster": 16, "p_to_next": 1.0},
+                        {"num_clusters": 10, "nodes_per_cluster": 10, "p_to_next": 1.0}
+                    ],
+                    "generative_layer": [
+                        {"num_clusters": 10, "nodes_per_cluster": 10, "p_to_next": 0.0},
+                        {"num_clusters": 49, "nodes_per_cluster": 16, "p_to_next": 0.0}
+                    ]
+                    # "discriminative_layer": [
+                    #     {"num_clusters": 49, "nodes_per_cluster": 16, "p_to_next": 0},
+                    #     {"num_clusters": 10, "nodes_per_cluster": 10, "p_to_next": 0}
+                    # ],
+                    # "generative_layer": [
+                    #     {"num_clusters": 10, "nodes_per_cluster": 10, "p_to_next": 1.0},
+                    #     {"num_clusters": 1, "nodes_per_cluster": 16, "p_to_next": 1.0},
+                    #     # {"num_clusters": 4, "nodes_per_cluster": 8, "p_to_next": 1.0},
+                    #     {"num_clusters": 49, "nodes_per_cluster": 16, "p_to_next": 1.0}
+                    # ]
+
+                }
+            }
+
+
+        ,
         
         "sbm_two_branch_chain": {
             "params": {
@@ -258,13 +304,32 @@ class GraphBuilder:
                                     # add_residual=True,
                                     add_residual=False,
                                     # add_residual= self.graph_params.get("add_residual", False)  # Use the parameter from graph_params if available
-                                    )
+                                            )
+
+        elif self.graph_type["name"] == "single_hidden_layer_clusters":
+            self.single_hidden_layer_clusters(
+                discriminative_hidden_layers=self.graph_params["discriminative_hidden_layers"],
+                generative_hidden_layers=self.graph_params["generative_hidden_layers"],
+                num_clusters_per_layer=self.graph_params.get("num_clusters_per_layer", 10),
+                no_sens2sens=self.graph_params["remove_sens_2_sens"],
+                no_sens2supervised=self.graph_params["remove_sens_2_sup"],
+                p_intra=self.graph_params.get("p_intra", 0.0),
+                p_inter=self.graph_params.get("p_inter", 1.0),
+            )
+
         
         elif self.graph_type["name"] == "barabasi":
             self.barabasi()
         elif self.graph_type["name"] == "stochastic_block":
             self.stochastic_block(no_sens2sens=self.graph_params["remove_sens_2_sens"], 
                                  no_sens2supervised=self.graph_params["remove_sens_2_sup"])
+        elif self.graph_type["name"] == "dual_branch_sbm":
+            self.generate_dual_sbm_graph(self.graph_params, image_size=28, patch_size=4,
+                                                 remove_sens_2_sens=self.graph_params["remove_sens_2_sens"],
+                                                 remove_sens_2_sup=self.graph_params["remove_sens_2_sup"])
+
+                                   
+                                    
         elif self.graph_type["name"] == "sbm_two_branch_chain":
             self.sbm_two_branch_chain(
                 self.graph_params["branch1_config"],
@@ -357,6 +422,137 @@ class GraphBuilder:
             random.seed(seed)  # Seed for random module (if used)
         else:
             print("No seed provided. Using default behavior.")
+
+
+    def single_hidden_layer_clusters(self, discriminative_hidden_layers, generative_hidden_layers,
+                                 num_clusters_per_layer=10, p_intra=0.0, p_inter=0.1,
+                                 no_sens2sens=False, no_sens2supervised=False):
+        """
+        Like single_hidden_layer but layers are divided into clusters with probabilistic intra- and inter-cluster connections.
+        """
+        
+        def build_clustered_layer(start_idx, total_nodes, clusters):
+            """Divide layer into roughly equal-sized clusters."""
+            if total_nodes == 0 or clusters == 0:
+                return []
+
+            nodes_per_cluster = max(1, total_nodes // clusters)
+            cluster_nodes = []
+            for i in range(clusters):
+                start = start_idx + i * nodes_per_cluster
+                end = start + nodes_per_cluster
+                if start >= start_idx + total_nodes:
+                    break
+                end = min(end, start_idx + total_nodes)
+                cluster = list(range(start, end))
+                if cluster:
+                    cluster_nodes.append(cluster)
+            return cluster_nodes
+
+
+        def add_probabilistic_edges(src_nodes, tgt_nodes, edge_type, p):
+            """Add directed edges with probability p."""
+            for src in src_nodes:
+                for tgt in tgt_nodes:
+                    if src != tgt and np.random.rand() < p:
+                        self.edge_index.append([src, tgt])
+                        self.edge_type.append(edge_type)
+
+        
+        # swap 
+        # TODO; explain this??? something with edge_index (source, target) and edge_type??
+        # also fix add_residual_connections_to_generative_layer() with the swap
+        discriminative_hidden_layers, generative_hidden_layers = generative_hidden_layers, discriminative_hidden_layers
+
+        current_idx = 784  # After sensory nodes
+
+        # Step 1: Clustered discriminative layers
+        discrim_layers = []
+        for layer_size in discriminative_hidden_layers:
+            layer = build_clustered_layer(current_idx, layer_size, num_clusters_per_layer)
+            discrim_layers.append(layer)
+            current_idx += layer_size
+
+        # Step 2: Clustered generative layers
+        gen_layers = []
+        for layer_size in generative_hidden_layers:
+            layer = build_clustered_layer(current_idx, layer_size, num_clusters_per_layer)
+            gen_layers.append(layer)
+            current_idx += layer_size
+
+        # Step 3: Supervision nodes
+        supervision_nodes = list(range(current_idx, current_idx + 10))
+        self.supervision_indices = supervision_nodes
+        current_idx += 10
+
+        # Track internal node indices
+        self.internal_indices = [n for layer in discrim_layers + gen_layers for cluster in layer for n in cluster]
+        self.supervision_indices = supervision_nodes
+
+        # === Discriminative path ===
+
+        # Sensory → First discriminative layer
+        for s in self.sensory_indices:
+            for cluster in discrim_layers[0]:
+                add_probabilistic_edges([s], cluster, "Sens2Inter", p_inter)
+
+        # Discriminative hidden layers
+        for i in range(len(discrim_layers) - 1):
+            for src_cluster in discrim_layers[i]:
+                for dst_cluster in discrim_layers[i + 1]:
+                    add_probabilistic_edges(src_cluster, dst_cluster, "Inter2Inter", p_inter)
+
+        # Discriminative last → supervision
+        for cluster in discrim_layers[-1]:
+            add_probabilistic_edges(cluster, supervision_nodes, "Inter2Sup", p_inter)
+
+        # Intra-cluster edges in discriminative layers
+        for layer in discrim_layers:
+            for cluster in layer:
+                add_probabilistic_edges(cluster, cluster, "Inter2Inter", p_intra)
+
+        # === Generative path ===
+
+        # Supervision → top generative layer
+        for cluster in gen_layers[-1]:
+            add_probabilistic_edges(supervision_nodes, cluster, "Sup2Inter", p_inter)
+
+        # Generative hidden layers (reverse direction)
+        for i in range(len(gen_layers) - 1, 0, -1):
+            for src_cluster in gen_layers[i]:
+                for dst_cluster in gen_layers[i - 1]:
+                    add_probabilistic_edges(src_cluster, dst_cluster, "Inter2Inter", p_inter)
+
+        # Bottom generative layer → sensory
+        for cluster in gen_layers[0]:
+            add_probabilistic_edges(cluster, self.sensory_indices, "Inter2Sens", p_inter)
+
+        # Intra-cluster edges in generative layers
+        for layer in gen_layers:
+            for cluster in layer:
+                add_probabilistic_edges(cluster, cluster, "Inter2Inter", p_intra)
+
+        # === Sensory to sensory and supervision (optional) ===
+        if not no_sens2sens:
+            for i in self.sensory_indices:
+                for j in self.sensory_indices:
+                    if i != j:
+                        self.edge_index.append([i, j])
+                        self.edge_type.append("Sens2Sens")
+
+        if not no_sens2supervised:
+            for s in self.sensory_indices:
+                for sup in supervision_nodes:
+                    self.edge_index.append([s, sup])
+                    self.edge_type.append("Sens2Sup")
+
+        print("✅ single_hidden_layer_clusters (probabilistic) constructed.")
+        self.NUM_INTERNAL_NODES = len(self.internal_indices)
+        self.num_vertices = len(self.sensory_indices) + len(self.internal_indices)
+        
+        if self.supervised_learning:
+            self.num_vertices += len(self.supervision_indices)
+
 
 
 
@@ -727,6 +923,179 @@ class GraphBuilder:
             print(f"⚠️ Added self-loops for {len(missing)} disconnected nodes: {sorted(missing)}")
         else:
             print("✅ All nodes connected.")
+
+
+
+    def build_branch(self, layers_config, direction="forward", global_node_offset=0, shared_nodes=None,
+                 p_intra=0.3, p_inter=0.05):
+        G = nx.DiGraph()
+        node_offset = global_node_offset
+        layers = []
+
+        for l, cfg in enumerate(layers_config):
+            num_clusters = cfg['num_clusters']
+            nodes_per_cluster = cfg['nodes_per_cluster']
+            p_to_next = cfg.get('p_to_next', 0.0)
+            layer_clusters = []
+
+            for c in range(num_clusters):
+                if l == 0:
+                    if direction == "forward" and shared_nodes and 'sensory' in shared_nodes:
+                        cluster_nodes = shared_nodes['sensory'][c]
+                    elif direction == "backward" and shared_nodes and 'supervision' in shared_nodes:
+                        cluster_nodes = shared_nodes['supervision'][c]
+                    else:
+                        cluster_nodes = list(range(node_offset, node_offset + nodes_per_cluster))
+                        node_offset += nodes_per_cluster
+                elif l == len(layers_config) - 1:
+                    if direction == "forward" and shared_nodes and 'supervision' in shared_nodes:
+                        cluster_nodes = shared_nodes['supervision'][c]
+                    elif direction == "backward" and shared_nodes and 'sensory' in shared_nodes:
+                        cluster_nodes = shared_nodes['sensory'][c]
+                    else:
+                        cluster_nodes = list(range(node_offset, node_offset + nodes_per_cluster))
+                        node_offset += nodes_per_cluster
+                else:
+                    cluster_nodes = list(range(node_offset, node_offset + nodes_per_cluster))
+                    node_offset += nodes_per_cluster
+
+                G.add_nodes_from(cluster_nodes, layer=l, cluster=c)
+                layer_clusters.append(cluster_nodes)
+
+                # Intra-cluster connections
+                for u in cluster_nodes:
+                    for v in cluster_nodes:
+                        if u != v and np.random.rand() < p_intra:
+                            G.add_edge(u, v)
+
+            # Inter-layer, inter-cluster connections
+            if l > 0:
+                prev_layer = layers[-1]
+                for src_cluster in prev_layer:
+                    for src_node in src_cluster:
+                        for tgt_cluster in layer_clusters:
+                            if np.random.rand() < p_inter:
+                                for tgt_node in tgt_cluster:
+                                    if np.random.rand() < layers_config[l - 1]['p_to_next']:
+                                        G.add_edge(src_node, tgt_node)
+
+            layers.append(layer_clusters)
+
+        return G, node_offset, layers
+
+
+    def generate_dual_sbm_graph(self, layers_config_dict, image_size=28, patch_size=4,
+                            remove_sens_2_sens=False, remove_sens_2_sup=False):
+        assert 'discriminative_layer' in layers_config_dict
+        assert 'generative_layer' in layers_config_dict
+
+        discrim_layers = layers_config_dict['discriminative_layer']
+        generative_layers = layers_config_dict['generative_layer']
+        p_intra = layers_config_dict.get('p_intra', 0.3)
+        p_inter = layers_config_dict.get('p_inter', 0.05)
+
+        num_patches = (image_size // patch_size) ** 2
+        sensory_M = patch_size ** 2
+        num_sensory_clusters = max(discrim_layers[0]['num_clusters'], num_patches)
+        num_supervision_clusters = 10
+        supervision_M = 10
+
+        assert discrim_layers[0]['num_clusters'] >= num_patches, \
+            f"Discriminative first layer must have ≥ {num_patches} clusters"
+
+        assert (
+            generative_layers[-1]['num_clusters'] == num_supervision_clusters or
+            discrim_layers[-1]['num_clusters'] == num_supervision_clusters
+        ), "Either discriminative or generative must end (or start) with 10 clusters"
+
+        shared_sensory = []
+        shared_supervision = []
+        node_id = 0
+
+        for i in range(num_sensory_clusters):
+            nodes = list(range(node_id, node_id + sensory_M))
+            shared_sensory.append(nodes)
+            node_id += sensory_M
+
+        for i in range(num_supervision_clusters):
+            nodes = list(range(node_id, node_id + supervision_M))
+            shared_supervision.append(nodes)
+            node_id += supervision_M
+
+        shared_nodes = {
+            'sensory': shared_sensory,
+            'supervision': shared_supervision
+        }
+
+        G_discrim, offset, discrim_clusters = self.build_branch(
+            discrim_layers, "forward", node_id, shared_nodes, p_intra=p_intra, p_inter=p_inter)
+        G_generative, _, gen_clusters = self.build_branch(
+            generative_layers, "backward", node_id, shared_nodes, p_intra=p_intra, p_inter=p_inter)
+
+        G = nx.compose(G_discrim, G_generative)
+
+        # Sensory ↔ Sensory and Sensory → Supervision
+        if not remove_sens_2_sens:
+            for u in [n for cluster in shared_sensory for n in cluster]:
+                for v in [n for cluster in shared_sensory for n in cluster]:
+                    if u != v:
+                        G.add_edge(u, v)
+
+        if not remove_sens_2_sup:
+            for u in [n for cluster in shared_sensory for n in cluster]:
+                for v in [n for cluster in shared_supervision for n in cluster]:
+                    G.add_edge(u, v)
+
+        label_cluster_map = {}
+        for i, cluster_nodes in enumerate(discrim_clusters[-1]):
+            label_cluster_map[i] = cluster_nodes
+
+        sensory_indices = [n for cluster in shared_sensory for n in cluster]
+        supervision_indices = [n for nodes in label_cluster_map.values() for n in nodes]
+        all_nodes = list(G.nodes)
+        internal_indices = list(set(all_nodes) - set(sensory_indices) - set(supervision_indices))
+
+        if remove_sens_2_sens:
+            for u in sensory_indices:
+                for v in sensory_indices:
+                    if u != v and G.has_edge(u, v):
+                        G.remove_edge(u, v)
+
+        if remove_sens_2_sup:
+            for u in sensory_indices:
+                for v in supervision_indices:
+                    if G.has_edge(u, v):
+                        G.remove_edge(u, v)
+
+        new_order = sensory_indices + internal_indices + supervision_indices
+        old_to_new = {old: new for new, old in enumerate(new_order)}
+        relabeled_edges = [(old_to_new[u], old_to_new[v]) for u, v in G.edges]
+        self.edge_index = torch.tensor(relabeled_edges, dtype=torch.long).t().contiguous()
+
+        self.sensory_indices = [old_to_new[n] for n in sensory_indices]
+        self.supervision_indices = [old_to_new[n] for n in supervision_indices]
+        self.internal_indices = [old_to_new[n] for n in internal_indices]
+        self.label_cluster_map = {lbl: [old_to_new[n] for n in nodes] for lbl, nodes in label_cluster_map.items()}
+
+        self.num_sensory_nodes = len(self.sensory_indices)
+        self.num_supervision_nodes = len(self.supervision_indices)
+        self.num_internal_nodes = len(self.internal_indices)
+        self.num_vertices = len(new_order)
+        self.num_all_nodes = list(range(self.num_vertices))
+
+        adj_matrix = torch.zeros(self.num_vertices, self.num_vertices)
+        for u, v in relabeled_edges:
+            adj_matrix[u, v] = 1.0
+        self.adj_matrix = adj_matrix
+
+        return G
+
+
+
+
+
+
+
 
 
     def fully_connected(self, self_connection, no_sens2sens=False, no_sens2supervised=False):
