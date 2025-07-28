@@ -71,3 +71,15 @@ scr3/trained_models/**/
 scr3/trained_models/degree_distribution.png
 scr3/attention/*
 scr3/attention/** */
+scr3/jobs/plotting/outputs/*.png
+scr3/jobs/plotting/*/*.png
+scr3/jobs/plotting/outputs/*.pdf
+scr3/jobs/plotting/*/*.pdf
+scr3/jobs/plotting/outputs/*.txt
+scr3/jobs/plotting/*/*.txt
+
+# anything in scr3/jobs/... 
+scr3/jobs/outputs/*
+scr3/jobs/plotting/*
+scr3/trained_models/*
+scr3/trained_models_experimenting/*

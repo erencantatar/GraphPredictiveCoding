@@ -548,6 +548,9 @@ class PCgraph(torch.nn.Module):
             "structure": self.structure,
         })
 
+        self.generative_variations = False
+
+
         # import torch_geometric 
         # self.edge_index = torch_geometric.utils.dense_to_sparse(adj)[0]
 
@@ -1755,47 +1758,48 @@ class PCgraph(torch.nn.Module):
         # self.init_hidden_feedforward()
 
         # self.values[:, 784:-10] = self.updates.pred(self.values, self.w.to(self.device))[:, 784:-10]
+        if not self.generative_variations:
+                
+            if self.init_hidden_values:
+            
+                # self.values[:, 784:-10] += torch.normal(mean=0, std=self.init_hidden_values, size=self.values[:, 784:-10].shape, device=self.device)
+                # self.values[:, 784:-10] += torch.normal(mean=0, std=0.0001, size=self.values[:, 784:-10].shape, device=self.device)
+                self.values[:, 784:-10] = torch.normal(mean=0, std=self.init_hidden_values, size=self.values[:, 784:-10].shape, device=self.device)
 
-        if self.init_hidden_values:
-           
-            # self.values[:, 784:-10] += torch.normal(mean=0, std=self.init_hidden_values, size=self.values[:, 784:-10].shape, device=self.device)
-            # self.values[:, 784:-10] += torch.normal(mean=0, std=0.0001, size=self.values[:, 784:-10].shape, device=self.device)
-            self.values[:, 784:-10] = torch.normal(mean=0, std=self.init_hidden_values, size=self.values[:, 784:-10].shape, device=self.device)
-
-            wandb.log({
-                "Monitoring/initialization": f"Normal(mean=0, std={self.init_hidden_values}) for hidden nodes",
-                # "epoch": self./epoch, "step": self.t
-            })
-
-
-            # make uniform
-
-            # if self.reshape:
-            #     # self.values[:, 784:-10] = torch.zeros_like(self.values[:, 784:-10]) + self.init_hidden_values
-            #     self.values[:, 784:-10] = torch.ones_like(self.values[:, 784:-10]) * self.init_hidden_values    
-            # else:
-            #     # self.values[:, 784:-10] = torch.zeros_like(self.values) + self.init_hidden_values
-            #     self.values[:, 784:-10] = torch.ones_like(self.values) * self.init_hidden_values
+                wandb.log({
+                    "Monitoring/initialization": f"Normal(mean=0, std={self.init_hidden_values}) for hidden nodes",
+                    # "epoch": self./epoch, "step": self.t
+                })
 
 
-            # if self.reshape:
-            #     self.values[:, 784:-10] = torch.randn_like(self.values[:, 784:-10]) * self.init_hidden_values
-            # else:
-            #     self.values[:, 784:-10] = torch.randn_like(self.values) * self.init_hidden_values                
+                # make uniform
 
-        # only hidden nodes
-        # if self.init_mu:
-        if self.init_hidden_mu:
-        #     # normal(mean=0, std=0.01)
-            std = self.init_hidden_mu
-            self.mu[:, 784:-10] = torch.normal(mean=0, std=std, size=self.mu[:, 784:-10].shape, device=self.device)
+                # if self.reshape:
+                #     # self.values[:, 784:-10] = torch.zeros_like(self.values[:, 784:-10]) + self.init_hidden_values
+                #     self.values[:, 784:-10] = torch.ones_like(self.values[:, 784:-10]) * self.init_hidden_values    
+                # else:
+                #     # self.values[:, 784:-10] = torch.zeros_like(self.values) + self.init_hidden_values
+                #     self.values[:, 784:-10] = torch.ones_like(self.values) * self.init_hidden_values
 
-            wandb.log({
-                "Monitoring/initialization_mu": f"Normal(mean=0, std={std}) for hidden nodes",
-                # "epoch": self./epoch, "step": self.t
-            })
-        else:
-            self.mu[:, 784:-10] = torch.ones_like(self.values[:, 784:-10]) * self.init_hidden_mu
+
+                # if self.reshape:
+                #     self.values[:, 784:-10] = torch.randn_like(self.values[:, 784:-10]) * self.init_hidden_values
+                # else:
+                #     self.values[:, 784:-10] = torch.randn_like(self.values) * self.init_hidden_values                
+
+            # only hidden nodes
+            # if self.init_mu:
+            if self.init_hidden_mu:
+            #     # normal(mean=0, std=0.01)
+                std = self.init_hidden_mu
+                self.mu[:, 784:-10] = torch.normal(mean=0, std=std, size=self.mu[:, 784:-10].shape, device=self.device)
+
+                wandb.log({
+                    "Monitoring/initialization_mu": f"Normal(mean=0, std={std}) for hidden nodes",
+                    # "epoch": self./epoch, "step": self.t
+                })
+            else:
+                self.mu[:, 784:-10] = torch.ones_like(self.values[:, 784:-10]) * self.init_hidden_mu
 
         T = self.T_train if train else self.T_test
 
@@ -2385,20 +2389,35 @@ class PCgraph(torch.nn.Module):
             # axs_raw[2, 0].set_title("Generated Images (Raw)")
             
             # normalize generated_imgs_raw
-            min_val = generated_imgs_raw.min(dim=1, keepdim=True)[0].min(dim=2, keepdim=True)[0]
-            max_val = generated_imgs_raw.max(dim=1, keepdim=True)[0].max(dim=2, keepdim=True)[0]
-            generated_imgs_raw = (generated_imgs_raw - min_val) / (max_val - min_val + 1e-8)
+            # min_val = generated_imgs_raw.min(dim=1, keepdim=True)[0].min(dim=2, keepdim=True)[0]
+            # max_val = generated_imgs_raw.max(dim=1, keepdim=True)[0].max(dim=2, keepdim=True)[0]
+            # generated_imgs_raw = (generated_imgs_raw - min_val) / (max_val - min_val + 1e-8)
+            # generated_unnorm = generated_imgs * 0.3081 + 0.1307
 
-            data_occluded = (data_occluded - data_occluded.min(dim=1, keepdim=True)[0].min(dim=2, keepdim=True)[0]) / \
-                            (data_occluded.max(dim=1, keepdim=True)[0].max(dim=2, keepdim=True)[0] - data_occluded.min(dim=1, keepdim=True)[0].min(dim=2, keepdim=True)[0] + 1e-8)
-            data_original = (data_original - data_original.min(dim=1, keepdim=True)[0].min(dim=2, keepdim=True)[0]) / \
-                            (data_original.max(dim=1, keepdim=True)[0].max(dim=2, keepdim=True)[0] - data_original.min(dim=1, keepdim=True)[0].min(dim=2, keepdim=True)[0] + 1e-8)
+            def unnormalize_batch(images: torch.Tensor, mean=0.1307, std=0.3081):
+                """
+                Unnormalize a batch of images and return a tensor on CPU.
+                Shape: [B, 1, H, W] or [B, H, W]
+                """
+                if images.dim() == 4:  # [B, 1, H, W]
+                    images = images.squeeze(1)
+                return (images * std + mean).cpu()
+
+            # data_occluded = (data_occluded - data_occluded.min(dim=1, keepdim=True)[0].min(dim=2, keepdim=True)[0]) / \
+            #                 (data_occluded.max(dim=1, keepdim=True)[0].max(dim=2, keepdim=True)[0] - data_occluded.min(dim=1, keepdim=True)[0].min(dim=2, keepdim=True)[0] + 1e-8)
+            # data_original = (data_original - data_original.min(dim=1, keepdim=True)[0].min(dim=2, keepdim=True)[0]) / \
+            #                 (data_original.max(dim=1, keepdim=True)[0].max(dim=2, keepdim=True)[0] - data_original.min(dim=1, keepdim=True)[0].min(dim=2, keepdim=True)[0] + 1e-8)
+
+            generated_imgs_raw = unnormalize_batch(generated_imgs_raw)
+            data_occluded = unnormalize_batch(data_occluded)
+            data_original = unnormalize_batch(data_original)
+
 
             for img_idx in range(n_images):
                 img_idx = random_offset + img_idx
-                axs_raw[0, img_idx].imshow(data_original[img_idx].cpu().numpy(), cmap='gray')
-                axs_raw[1, img_idx].imshow(data_occluded[img_idx].cpu().numpy(), cmap='gray')
-                axs_raw[2, img_idx].imshow(generated_imgs_raw[img_idx].cpu().numpy(), cmap='gray')
+                axs_raw[0, img_idx].imshow(data_original[img_idx].numpy(), cmap='gray')
+                axs_raw[1, img_idx].imshow(data_occluded[img_idx].numpy(), cmap='gray')
+                axs_raw[2, img_idx].imshow(generated_imgs_raw[img_idx].numpy(), cmap='gray')
                 axs_raw[0, img_idx].axis("off")
                 axs_raw[1, img_idx].axis("off")
                 axs_raw[2, img_idx].axis("off")
@@ -2559,6 +2578,301 @@ class PCgraph(torch.nn.Module):
         print("test_generative() complete!\n")
         return True
 
+  
+
+    def test_generative_variations2(self, data, labels=None, fixed_value=0.5, fix_ratio=0.2, wandb_logging=True):
+        """
+        Similar to test_generative, but freezes some random nodes in the top-most internal layer
+        closest to the label nodes (e.g., last hidden layer in generative branch).
+
+        Args:
+            data (Tensor): Input tensor of shape [batch_size, num_vertices]
+            labels (Tensor): Optional labels for replacing output nodes
+            fixed_value (float): Value to clamp some hidden nodes to
+            fix_ratio (float): Fraction of hidden nodes to fix
+        """
+
+        input_size = 784
+        output_size = 10
+        self.copy_task = None 
+        self.fixed_value = fixed_value
+        self.fixed_ratio = fix_ratio
+
+        # self.reset_nodes(batch_size=self.batch_size)
+        # self.reset_nodes(batch_size=self.batch_size)
+        self.reset_nodes(batch_size=data.shape[0])  
+
+        data = data.clone().view(-1, self.num_vertices)
+        labels_original = data[:, -output_size:].clone().argmax(dim=1)
+        print("labels_original", labels_original.shape)
+
+        # 🔁 Set label to SAME digit for all items
+        same_digit = np.random.randint(0, 10) 
+        same_digit = 5
+        one_hot = F.one_hot(torch.tensor([same_digit], device=data.device), num_classes=10).float()
+        one_hot_labels = one_hot.repeat(self.batch_size, 1)
+        data[:, -output_size:] = one_hot_labels
+
+        data_original = data.clone()
+
+        if self.task == "generation":
+            if self.reshape:
+                self.values = torch.zeros_like(data)  # fresh allocation
+                self.values[:, :] = data
+
+                noise_scale = 0.01 * self.epoch if self.epoch < 20 else 0.01
+                noise_scale = 0.01 
+                # noise_scale = np.random.uniform(0.0001, 0.1)  # Random noise scale 
+                self.mu[:, 784:-output_size] = noise_scale * torch.randn_like(self.mu[:, 784:-output_size])
+                self.values[:, 784:-output_size] = noise_scale * torch.randn_like(self.values[:, 784:-output_size])
+                self.values[:, 0:input_size] = 0  # clear sensory input
+            else:
+                data[:, 0:input_size] = 0
+                self.values = data.view(self.batch_size * self.num_vertices, 1)
+
+        # ====== STEP 2: Get top-most internal layer closest to labels ======
+        layer_sizes = self.structure["generative_hidden_layers"]
+        if len(layer_sizes) < 2:
+            raise ValueError("Expected at least two generative hidden layers for selecting last hidden layer.")
+
+        # Get index range of last hidden layer (before label layer)
+        print("Layer sizes:", layer_sizes)
+        start = sum(layer_sizes[:-1])
+        end = sum(layer_sizes)
+        print(f"Last hidden layer indices: {start} to {end} (exclusive)")
+
+        layer_indices = list(range(start, end))
+
+        # ====== STEP 3: Choose random subset and fix values ======
+        num_to_fix = int(len(layer_indices) * fix_ratio)
+        chosen_indices = np.random.choice(layer_indices, size=num_to_fix, replace=False)
+
+        # # Store in `fixed_node_mask` for traceability/logging
+        # self.fixed_node_mask = torch.zeros_like(self.values)
+        # self.fixed_node_mask[:, chosen_indices] = 1.0
+
+        # Fix these values across all batches
+        self.values[:, chosen_indices] = fixed_value
+
+        # # Log fixed mask image (optional)
+        # if self.wandb_logging:
+        #     wandb.log({"Variation/fixed_node_mask": wandb.Image(self.fixed_node_mask[0].cpu().view(28, 28).numpy())})
+
+        # ====== STEP 4: Run inference as normal ======
+        self.generative_variations = True
+        self.update_xs(train=False, trace=True)
+
+        logits = self.values.view(self.batch_size, self.num_vertices)
+        generated_imgs = logits[:, :784].view(self.batch_size, 28, 28).detach().cpu()
+
+        # take the first 10 or if lower n items from the batch
+        n_variations = 10
+        n_images = min(n_variations, len(generated_imgs))
+
+        # Normalize images for display
+        gen_min = generated_imgs.min(dim=1, keepdim=True)[0].min(dim=2, keepdim=True)[0]
+        gen_max = generated_imgs.max(dim=1, keepdim=True)[0].max(dim=2, keepdim=True)[0]
+        generated_imgs = (generated_imgs - gen_min) / (gen_max - gen_min + 1e-8)
+
+        # Plot first 10
+        n_images = min(10, self.batch_size)
+        fig, axs = plt.subplots(1, n_images, figsize=(n_images * 2, 2))
+        axs = [axs] if n_images == 1 else axs
+
+        for i in range(n_images):
+            axs[i].imshow(generated_imgs[i], cmap="gray")
+            axs[i].axis("off")
+            axs[i].set_title(str(same_digit))
+
+        fig.subplots_adjust(wspace=0, hspace=0)
+
+        if wandb_logging:
+            wandb.log({
+                f"generation/Variations_digit2": wandb.Image(fig, caption=f"Digit {same_digit} Variations at Epoch {self.epoch}")
+            })
+
+        plt.close(fig)
+        
+
+
+    def test_generative_variations(self, data, labels, remove_label=False, save_imgs=True, wandb_logging=False):
+        """
+        Runs a generative test on a batch, processes the batch, and plots:
+            - 10 random generated images
+            - Trace over time + sensory/internal energy (in a mosaic layout)
+        """
+        import os
+        import matplotlib.pyplot as plt
+        import numpy as np
+        import wandb
+
+        # Directory for saving outputs
+        folder = self.task
+        save_dir = f"trained_models/gen_test"
+        # os.makedirs(save_dir, exist_ok=True)
+
+        DEVICE = self.device
+        input_size = 784
+        output_size = 10
+        self.copy_task = None 
+        self.batch_size = data.shape[0]
+
+        # self.reset_nodes(batch_size=self.batch_size)
+        # self.reset_nodes(batch_size=self.batch_size)
+        self.reset_nodes(batch_size=data.shape[0])  
+
+        data = data.clone().view(-1, self.num_vertices)
+        labels_original = data[:, -output_size:].clone().argmax(dim=1)
+        print("labels_original", labels_original.shape)
+
+        # 🔁 Set label to SAME digit for all items
+        same_digit = np.random.randint(0, 10) 
+        same_digit = 7
+        one_hot = F.one_hot(torch.tensor([same_digit], device=data.device), num_classes=10).float()
+        one_hot_labels = one_hot.repeat(self.batch_size, 1)
+        data[:, -output_size:] = one_hot_labels
+
+        output_size = 10
+        epsilon = 0.2  # small weight for other class
+
+        # Create pure one-hot for class 7
+        base_onehot = F.one_hot(torch.tensor(same_digit), num_classes=output_size).float().to(data.device)
+
+        # Construct batch
+        one_hot_labels = torch.zeros((self.batch_size, output_size), device=data.device)
+
+        output_size = 10
+        same_digit = 5
+        base_val = 0.7
+        inject_val = 0.1 + ((self.epoch+1) / 10)
+
+        one_hot_labels = torch.zeros((self.batch_size, output_size), device=data.device)
+
+        for i in range(self.batch_size):
+            # Cycle through all digits (skip 7 as base is always set there)
+            inject_digit = i % output_size
+            if inject_digit == same_digit:
+                inject_digit = (inject_digit + 1) % output_size  # skip 7
+            
+            label_vec = torch.zeros(output_size, device=data.device)
+            label_vec[same_digit] = base_val
+            label_vec[inject_digit] = inject_val
+
+            one_hot_labels[i] = label_vec
+
+        # Assign to label part of data
+        data[:, -output_size:] = one_hot_labels
+
+        # Assign to label part of data
+        print("one_hot_labels", one_hot_labels.shape)
+        for i in range(10):
+            print(f"one_hot_labels[{i}]: {one_hot_labels[i]}")
+
+        # data[:, -output_size:] = one_hot_labels
+
+
+        data_original = data.clone()
+
+        if self.task == "generation":
+            if self.reshape:
+                self.values = torch.zeros_like(data)  # fresh allocation
+                self.values[:, :] = data
+
+                # noise_scale = 0.01 * self.epoch if self.epoch < 20 else 0.01
+                
+                # take a random value inbetween 0.001 and 1
+                # noise_scale = np.random.uniform(0.05,1)
+                noise_scale = np.random.uniform(0.01,1.5)
+                wandb.log({"generation/noise_scale": noise_scale, "epoch": self.epoch, "step": self.t})
+
+                 
+                hidden_size = self.num_vertices - input_size - output_size
+                # devide hidden size in 10 and for each of the first 10 items in batch add noise to the hidden nodes for that part of the hidden 
+                # # nodes. So first item in batch first 
+
+                # layer_sizes = self.structure["generative_hidden_layers"]
+                # start = sum(layer_sizes[:-1])
+                # end = sum(layer_sizes)
+                # total_hidden_size = end - start
+                # print(f"Last hidden layer indices: {start} to {end} (exclusive)")
+
+                # self.values[:, 784:-output_size] = 0
+                # self.mu[:, 784:-output_size] = 0
+
+                # for i in range(10):
+                #     start_idx = start + i * total_hidden_size // 10
+                #     end_idx = start + (i + 1) * total_hidden_size // 10 if i < 9 else end
+                #     self.values[i, start_idx:end_idx] = noise_scale * torch.randn_like(self.values[i, start_idx:end_idx])
+                    # self.mu[i, start_idx:end_idx] = noise_scale * torch.randn_like(self.mu[i, start_idx:end_idx])
+                    # self.mu[i, start_idx:end_idx] = noise_scale * torch.randn_like(self
+                    # self.values[i, 784 + start_idx:784 + end_idx] = noise_scale * torch.randn_like(self.values[i, 784 + start_idx:784 + end_idx])
+                    # self.mu[i, 784 + start_idx:784 + end_idx] = noise_scale * torch.randn_like(self.mu[i, 784 + start_idx:784 + end_idx])
+
+                # self.values[:, 784:-output_size] = noise_scale * torch.randn_like(self.values[:, 784:-output_size])
+                # self.mu[:, 784:-output_size] = noise_scale * torch.randn_like(self.mu[:, 784:-output_size])
+                self.values[:, 0:input_size] = 0  # clear sensory input
+            else:
+                data[:, 0:input_size] = 0
+                self.values = data.view(self.batch_size * self.num_vertices, 1)
+
+
+        if remove_label:
+            # Remove the label part from the input data
+            if self.reshape:
+                self.values[:, -output_size:] = 0
+            else:
+                data[:, -output_size:] = 0
+
+
+        data_occluded = data.clone()
+
+        # ===== INFERENCE =====
+        self.trace_data = []
+
+        self.trace_values = []
+        self.trace_errors = []
+
+        self.trace = False
+
+        self.generative_variations = False
+        self.update_xs(train=False, trace=False)
+
+        logits = self.values.view(self.batch_size, self.num_vertices)
+        generated_imgs = logits[:, :784].view(self.batch_size, 28, 28).detach().cpu()
+
+        # take the first 10 or if lower n items from the batch
+        n_variations = 10
+        n_images = min(n_variations, len(generated_imgs))
+
+        # Normalize images for display
+        gen_min = generated_imgs.min(dim=1, keepdim=True)[0].min(dim=2, keepdim=True)[0]
+        gen_max = generated_imgs.max(dim=1, keepdim=True)[0].max(dim=2, keepdim=True)[0]
+        generated_imgs = (generated_imgs - gen_min) / (gen_max - gen_min + 1e-8)
+
+        # Plot first 10
+        n_images = min(10, self.batch_size)
+        fig, axs = plt.subplots(1, n_images, figsize=(n_images * 2, 2))
+        axs = [axs] if n_images == 1 else axs
+
+        for i in range(n_images):
+            axs[i].imshow(generated_imgs[i], cmap="gray")
+            axs[i].axis("off")
+            axs[i].set_title(str(same_digit))
+
+        fig.subplots_adjust(wspace=0, hspace=0)
+
+        if wandb_logging:
+            wandb.log({
+                f"generation/Variations_digit": wandb.Image(fig, caption=f"Digit {same_digit} Variations at Epoch {self.epoch} noise_scale={noise_scale}")
+            })
+
+        plt.close(fig)
+        
+
+        return True
+
+
+
     def clear_memory(self):
         """
         Clears memory by deleting unnecessary variables and calling garbage collector.
@@ -2616,6 +2930,17 @@ class PCgraph(torch.nn.Module):
                                     remove_label=False, save_imgs=True, wandb_logging=True)
                 # clear 
                 self.trace_data = []
+
+                if (self.structure) and self.generative_variations:
+
+                    self.test_generative_variations(graph.clone().to(self.device), 
+                                        label.clone().to(self.device),
+                                        remove_label=False, save_imgs=False, wandb_logging=True)
+                    
+
+                    # self.test_generative_variations2(graph.clone().to(self.device), labels=None, fixed_value=0.0001, fix_ratio=0.5, wandb_logging=True)
+                    self.test_generative_variations2(graph.clone().to(self.device), labels=None, fixed_value=0.0000001, fix_ratio=0.2, wandb_logging=True)
+
 
                 self.do_gen = False 
 

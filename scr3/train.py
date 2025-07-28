@@ -82,6 +82,8 @@ parser.add_argument('--tasks',nargs='+',choices=allowed_tasks,required=True,help
 parser.add_argument('--data_dir', type=str, default='../data', help='Path to the directory to store the dataset. Use $TMPDIR for scratch. or use ../data ')
 
 parser.add_argument('--dataset_transform', nargs='*', default=[], help='List of transformations to apply.', choices=['normalize_min1_plus1', 'normalize_mnist_mean_std', 'random_rotation', 'zoom_out', 'random_translation','None'])
+parser.add_argument('--dataset_transform_test', nargs='*', default=[], help='List of transformations to apply.', choices=['normalize_min1_plus1', 'normalize_mnist_mean_std', 'random_rotation', 'zoom_out', 'random_translation','None'])
+
 parser.add_argument('--numbers_list', type=valid_int_list, default=[0, 1, 3, 4, 5, 6, 7], help="A comma-separated list of integers describing which distinct classes we take during training alone")
 parser.add_argument('--N', type=valid_int_or_all, default=20, help="Number of distinct trainig images per class; greater than 0 or the string 'all' for all instances o.")
 
@@ -784,6 +786,10 @@ output_size = 10  # Number of classes
 transform_list = [
     transforms.ToTensor()
 ]
+transform_list_test = [
+    transforms.ToTensor()
+]
+
 
 original_mnist = 28
 
@@ -799,7 +805,7 @@ if args.dataset_transform:
         transform_list.append(transforms.RandomAffine(degrees=0, translate=(0.2, 0.2)))
 
     if "random_rotation" in args.dataset_transform:
-        transform_list.append(transforms.RandomRotation(degrees=25))
+        transform_list.append(transforms.RandomRotation(degrees=95))
 
     if "zoom_out" in args.dataset_transform:
         transform_list.append(transforms.Resize((20, 20)))
@@ -812,15 +818,45 @@ if args.dataset_transform:
         transform_list.append(transforms.Pad((pad_left, pad_left, pad_right, pad_right), fill=0, padding_mode='constant'))
 
 
+if args.dataset_transform_test:
+
+
+    if "normalize_min1_plus1" in args.dataset_transform_test:
+        transform_list_test.append(transforms.Normalize((0.5,), (0.5,)))
+
+    if "normalize_mnist_mean_std" in args.dataset_transform_test:
+        transform_list_test.append(transforms.Normalize((0.1307,), (0.3081,)))
+
+    if "random_translation" in args.dataset_transform_test:
+        transform_list_test.append(transforms.RandomAffine(degrees=0, translate=(0.2, 0.2)))
+
+    if "random_rotation" in args.dataset_transform_test:
+        transform_list_test.append(transforms.RandomRotation(degrees=95))
+
+    if "zoom_out" in args.dataset_transform_test:
+        transform_list_test.append(transforms.Resize((20, 20)))
+
+        # Compute padding to go from 20x20 back to 28x28
+        total_padding = original_mnist - 20  # 8
+        pad_left = total_padding // 2       # 4
+        pad_right = total_padding - pad_left  # 4
+
+        transform_list_test.append(transforms.Pad((pad_left, pad_left, pad_right, pad_right), fill=0, padding_mode='constant'))
+else:
+    # If no test transforms are specified, use the same as train
+    transform_list_test = transform_list.copy()
+
 
 
 # # Create the transform
 # print("TODO ADD COMPASE TRANSFORMS")
 composed_transform = transforms.Compose(transform_list)
-
+print("composed_transform", composed_transform)
+composed_transform_test = transforms.Compose(transform_list_test)
+print("composed_transform_test", composed_transform_test)
 
 base_train_dataset = torchvision.datasets.MNIST(root=DATASET_PATH, train=True, transform=composed_transform, download=True)
-base_test_dataset = torchvision.datasets.MNIST(root=DATASET_PATH, train=False, transform=composed_transform, download=True)
+base_test_dataset = torchvision.datasets.MNIST(root=DATASET_PATH, train=False, transform=composed_transform_test, download=True)
 
 print("hidden_size", hidden_size)
 # Wrap it in the GraphFormattedMNIST class
@@ -1453,28 +1489,35 @@ import pandas as pd
 from sklearn.decomposition import PCA
 
 
-# WandB table
-table = wandb.Table(columns=["run_id", "epoch", "PC1", "PC2", "std", "mean"])
-run_id = wandb.run.id  # 👈 use short W&B ID
-for i in range(len(flat_weights)):
-    table.add_data(run_id, i, pca_vals[i, 0], pca_vals[i, 1], stds[i], means[i])
+# # WandB table
+# table = wandb.Table(columns=["run_id", "epoch", "PC1", "PC2", "std", "mean"])
+# run_id = wandb.run.id  # 👈 use short W&B ID
+# for i in range(len(flat_weights)):
+#     table.add_data(run_id, i, pca_vals[i, 0], pca_vals[i, 1], stds[i], means[i])
 
 # Get run ID (use actual string if not using wandb)
 # run_id = "pkt55489"  # or use timestamp etc.
 run_id = wandb.run.id if args.use_wandb in ['online', 'run'] else "local_run"
 save_dir = f"jobs/plotting/trajectories/{run_id}"
+history_path = os.path.join(save_dir, "weights.npy")
+
 os.makedirs(save_dir, exist_ok=True)
 
-# Create and save DataFrame
-df = pd.DataFrame({
-    "epoch": np.arange(len(pca_vals)),
-    "PC1": pca_vals[:, 0],
-    "PC2": pca_vals[:, 1],
-    "std": stds,
-    "mean": means,
-})
-df.to_csv(os.path.join(save_dir, "trajectory.csv"), index=False)
-print(f"✓ Saved trajectory to {save_dir}/trajectory.csv")
+
+# At the end of training:
+np.save(history_path, np.array(weight_history))  # shape: [T, N, N]
+print(f"✓ Saved weight history to {history_path}")
+
+# # Create and save DataFrame
+# df = pd.DataFrame({
+#     "epoch": np.arange(len(pca_vals)),
+#     "PC1": pca_vals[:, 0],
+#     "PC2": pca_vals[:, 1],
+#     "std": stds,
+#     "mean": means,
+# })
+# df.to_csv(os.path.join(save_dir, "trajectory.csv"), index=False)
+# print(f"✓ Saved trajectory to {save_dir}/trajectory.csv")
 
 
 
