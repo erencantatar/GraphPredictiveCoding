@@ -1,1 +1,0 @@
-{"name": "single_hidden_layer", "params": {"remove_sens_2_sens": true, "remove_sens_2_sup": true, "discriminative_hidden_layers": [32, 16], "generative_hidden_layers": [0]}}

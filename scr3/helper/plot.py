@@ -272,23 +272,167 @@ import scipy.sparse as sp
 import os
 import matplotlib.pyplot as plt
 import scipy.sparse as sp
+import numpy as np
+import scipy.sparse as sp
+import matplotlib.pyplot as plt
+from matplotlib.colors import SymLogNorm, TwoSlopeNorm
+
+
+import numpy as np
+import matplotlib.pyplot as plt
+import scipy.sparse as sp
+from matplotlib.colors import SymLogNorm
+
+def plot_weights_symlog_adaptive(
+    model,
+    title="Weights (symlog)",
+    max_dense_pixels=1_200_000,   # if N*N exceeds this, bin instead of imshow dense
+    target_bins=768,              # coarse image size for binned view
+    clip_percentiles=(5, 95),     # robust clipping for tails
+    linthresh_quantile=0.70,      # linear window around zero from |w| quantile
+    force_bins=None,              # None=auto, True/False to override
+    return_img=False
+):
+    """
+    Renders a symlog heatmap that adapts to very sparse/large matrices.
+
+    - If N*N is small enough, draws dense symlog heatmap with masked zeros.
+    - Else, bins edges into a smaller grid and draws symlog on that.
+    - linthresh/vmax/vmin computed on nonzero entries only (robust).
+    """
+
+    # --- pull weights and edges ---
+    N = model.num_vertices
+    edge_index = model.edge_index_single_graph.detach().cpu().numpy()
+    w = model.w.detach().cpu().numpy()
+
+    # If w is dense NxN, convert to COO edges; if it is 1D per-edge, assemble sparse
+    if w.ndim == 2 and w.shape == (N, N):
+        # Use sparsity if possible
+        W_sparse = sp.coo_matrix(w)  # cheap view if already sparse-like
+        rows, cols, vals = W_sparse.row, W_sparse.col, W_sparse.data
+    else:
+        # Per-edge weights assumed at indices (edge_index[0], edge_index[1])
+        rows, cols = edge_index[0], edge_index[1]
+        vals = w[rows, cols] if w.ndim == 2 else w  # handle both cases
+
+    nnz = vals.size
+    total_pixels = N * N
+
+    # Decide dense vs binned
+    if force_bins is None:
+        use_bins = (total_pixels > max_dense_pixels) or (nnz == 0)
+    else:
+        use_bins = bool(force_bins)
+
+    if use_bins:
+        # ----- BIN into a target grid -----
+        bins = min(target_bins, max(N, 1))
+        rbin = (rows * bins // max(N, 1)).astype(np.int32)
+        cbin = (cols * bins // max(N, 1)).astype(np.int32)
+        acc = np.zeros((bins, bins), dtype=np.float32)
+        cnt = np.zeros((bins, bins), dtype=np.float32)
+
+        # Sum and counts per bin (fast, vectorized)
+        np.add.at(acc, (rbin, cbin), vals)
+        np.add.at(cnt, (rbin, cbin), 1.0)
+        # Use mean per bin (smoother); switch to sum by replacing this line
+        img = acc / np.maximum(cnt, 1e-12)
+        img_mask = cnt == 0  # true zeros = empty bins
+
+        data_for_stats = img[~img_mask]
+        mode_str = f"binned {bins}×{bins}"
+    else:
+        # ----- DENSE ARRAY but keep it memory-conscious -----
+        # Build sparse and toarray only if it fits, else fall back to bins
+        if total_pixels > max_dense_pixels:
+            # safety net — should not happen given the earlier condition
+            return plot_weights_symlog_adaptive(
+                model, title, max_dense_pixels, target_bins, clip_percentiles,
+                linthresh_quantile, force_bins=True, return_img=return_img
+            )
+        W = sp.coo_matrix((vals, (rows, cols)), shape=(N, N)).toarray()
+        img = W
+        img_mask = (img == 0)
+        data_for_stats = img[~img_mask]
+        mode_str = f"dense {N}×{N}"
+
+    # --- stats on nonzeros only ---
+    if data_for_stats.size == 0:
+        # nothing to show — create a blank and return
+        fig, ax = plt.subplots(figsize=(8, 7))
+        ax.imshow(np.zeros((10,10)), cmap='RdBu_r', vmin=-1, vmax=1)
+        ax.set_title(f"{title} — empty")
+        ax.axis("off")
+        fig.tight_layout()
+        return (fig, img) if return_img else fig
+
+    lo, hi = np.percentile(data_for_stats, clip_percentiles)
+    img_clipped = np.clip(img, lo, hi)
+
+    abs_data = np.abs(data_for_stats)
+    vmax = np.percentile(abs_data, clip_percentiles[1])  # symmetric limit
+    vmax = float(max(vmax, 1e-12))
+    linthresh = np.percentile(abs_data, 100 * linthresh_quantile)
+    linthresh = float(max(linthresh, 1e-9))
+
+    # --- masked array for clean background ---
+    img_ma = np.ma.masked_where(img_mask, img_clipped)
+
+    # --- symlog norm ---
+    norm = SymLogNorm(vmin=-vmax, vmax=vmax, linthresh=linthresh, base=10)
+
+    # # --- plot ---
+    # fig, ax = plt.subplots(figsize=(10, 10))
+    # im = ax.imshow(img_ma, cmap='RdBu_r', norm=norm, origin='upper', aspect='auto')
+
+    fig, ax = plt.subplots(figsize=(15, 15))
+    im = ax.imshow(
+        img_ma,
+        cmap='RdBu_r',
+        norm=norm,
+        origin='upper',
+        aspect='auto',
+        interpolation='nearest',
+        extent=(-0.5, N-0.5, N-0.5, -0.5)  # <<< map image -> node index range
+    )
+    ax.set_xlim(-0.5, N-0.5)
+    ax.set_ylim(N-0.5, -0.5)
+
+    # increase title font size and xy labels size 
+    ax.title.set_fontsize(16)
+    ax.xaxis.label.set_fontsize(14)
+    ax.yaxis.label.set_fontsize(14)
+    
+    cbar = fig.colorbar(im, ax=ax)
+    cbar.set_label("weight")
+    # ax.set_title(f"{title} — {mode_str}\nlinthresh≈{linthresh:.2g}, vmax≈{vmax:.2g}, clip={clip_percentiles}")
+    ax.set_title(f"{title}")
+    ax.set_xlabel("j (columns)")
+    ax.set_ylabel("i (rows)")
+    fig.tight_layout()
+
+    return (fig, img_ma) if return_img else fig
+
 
 def plot_model_weights(model, GRAPH_TYPE=None, model_dir=None, save_wandb=None):
-    # Ensure the output directory exists
-    # os.makedirs(model_dir, exist_ok=True)
-
     # Extract the edge indices and weights
     edge_index = model.edge_index_single_graph.cpu().numpy()
-    weights = model.w.cpu().detach().numpy()
+    weights = model.w.detach().cpu().numpy()
 
     if weights.ndim == 1:
-        W_sparse = sp.coo_matrix((weights, (edge_index[0], edge_index[1])), shape=(model.num_vertices, model.num_vertices))
+        W_sparse = sp.coo_matrix(
+            (weights, (edge_index[0], edge_index[1])),
+            shape=(model.num_vertices, model.num_vertices)
+        )
     else:
         W_sparse = sp.coo_matrix(weights)
 
-    # Convert to dense for detailed visualization (if the graph is not too large)
     W = W_sparse.toarray()
 
+    # ---------------------------
+    # Main 4x2 panel (your plot)
+    # ---------------------------
     fig, axes = plt.subplots(4, 2, figsize=(20, 30))
     title = f'Visualization of Weight Matrix of {GRAPH_TYPE}' if GRAPH_TYPE else 'Visualization of Weight Matrix'
     fig.suptitle(title, fontsize=20)
@@ -311,43 +455,73 @@ def plot_model_weights(model, GRAPH_TYPE=None, model_dir=None, save_wandb=None):
 
     plt.tight_layout(rect=[0, 0, 1, 0.97])
 
+    # ---------------------------
+    # Separate symlog figure
+    # ---------------------------
+    # percentile clip to stop outliers from crushing the scale
+    # lo, hi = np.percentile(W, 1), np.percentile(W, 99)
+    # Wc = np.clip(W, lo, hi)
+    # v = np.max(np.abs(Wc))
+    # # pick a small linear window around zero (median abs magnitude works well)
+    # linthresh = np.percentile(np.abs(Wc[Wc != 0]), 50) if np.any(Wc != 0) else 1e-6
+    # norm = SymLogNorm(vmin=-v, vmax=v, linthresh=linthresh, base=10)
+
+    # fig_symlog, ax_symlog = plt.subplots(figsize=(10, 10))
+    # im_symlog = ax_symlog.imshow(Wc, cmap='RdBu_r', norm=norm, aspect='auto')
+    # cb = fig_symlog.colorbar(im_symlog, ax=ax_symlog)
+    # cb.set_label('weight')
+    # ax_symlog.set_title(f'Weights (signed symlog) — linthresh ≈ {linthresh:.2g}')
+    # ax_symlog.set_xlabel('j (columns)')
+    # ax_symlog.set_ylabel('i (rows)')
+    # fig_symlog.tight_layout()
+
+    # ---------------------------
+    # Log to Weights & Biases
+    # ---------------------------
     if save_wandb:
         epoch_x = save_wandb
         wandb.log({f"Weights/weights_{epoch_x}": [wandb.Image(fig)]})
-        print("Weights logged to wandb")
 
-        # if negative weights are present, log a single small image
+        fig_symlog = plot_weights_symlog_adaptive(model, title=f"Weights (symlog) — {GRAPH_TYPE}")
+        if save_wandb:
+            wandb.log({f"Weights/weights_symlog_{save_wandb}_{epoch_x}": wandb.Image(fig_symlog)})
+
+        # wandb.log({f"Weights/weights_symlog_{epoch_x}": [wandb.Image(fig_symlog)]})
+
+        # Negative-only quick view (bugfix: log the correct figure)
         if (W < 0).any():
             fig_neg, ax_neg = plt.subplots(figsize=(10, 8))
-            negative_weights = W * (W < 0)
-            im_neg = ax_neg.imshow(negative_weights, cmap='coolwarm', aspect='auto')
+            neg = W * (W < 0)
+            im_neg = ax_neg.imshow(neg, cmap='coolwarm', aspect='auto')
             fig_neg.colorbar(im_neg, ax=ax_neg, label='Negative weight magnitude')
             ax_neg.set_title('Negative Weights and Their Magnitudes')
-            plt.axis('off')
-            wandb.log({f"Weights_neg/weights_negative_{epoch_x}": [wandb.Image(fig)]})
+            ax_neg.set_xlabel('j (columns)'); ax_neg.set_ylabel('i (rows)')
+            fig_neg.tight_layout()
+            wandb.log({f"Weights_neg/weights_negative_{epoch_x}": [wandb.Image(fig_neg)]})
+            plt.close(fig_neg)
 
-
-        # 🟨 Log bias if present
-        if model.use_bias:
-            bias = model.b.cpu().detach().numpy().flatten()
+        # Bias distribution if present
+        if getattr(model, 'use_bias', False):
+            bias = model.b.detach().cpu().numpy().flatten()
             fig_bias, ax_bias = plt.subplots(figsize=(10, 4))
-            ax_bias.hist(bias, bins=100, color='green', alpha=0.7)
-            ax_bias.set_title('Distribution of Bias')
-            ax_bias.set_xlabel('Bias Value')
-            ax_bias.set_ylabel('Frequency')
-
-            if save_wandb:
-                wandb.log({f"Weights/bias_distribution_{save_wandb}": wandb.Image(fig_bias)})
-                print("Bias distribution logged to wandb")
+            ax_bias.hist(bias, bins=100, alpha=0.8)
+            ax_bias.set_title('Distribution of Bias'); ax_bias.set_xlabel('Bias'); ax_bias.set_ylabel('Count')
+            fig_bias.tight_layout()
+            wandb.log({f"Weights/bias_distribution_{epoch_x}": wandb.Image(fig_bias)})
             plt.close(fig_bias)
 
-
-    if model_dir:
-        plt.savefig(model_dir)
-        plt.close(fig)
-        print(f'Figure saved to {model_dir}')
-    # else:
-    #     plt.show()
+    # ---------------------------
+    # Save to disk (two files)
+    # ---------------------------
+    # if model_dir:
+    #     # main grid
+    #     fig.savefig(model_dir, dpi=200)
+    #     # symlog figure (adds suffix)
+    #     symlog_path = model_dir.rsplit('.', 1)[0] + '_symlog.png'
+    #     fig_symlog.savefig(symlog_path, dpi=200)
+    #     print(f'Figures saved to:\n  • {model_dir}\n  • {symlog_path}')
+    #     plt.close(fig_symlog)
+    #     plt.close(fig)
 
     return W
 

@@ -21,6 +21,13 @@ and 784 sensory vertices
 7. Single MP that does all (pred, call error, dEdX)
 
 
+## Usefull other PC papers / repo
+1. ... 
+
+## Wandb reproducibility
+.. 
+
+
 
 ## Installation
 1. **todo** Install conda env. with Pytorch Geometric (PYG)

@@ -9,6 +9,8 @@ from helper.plot import plot_model_weights, plot_energy_graphs
 from helper.log import TerminalColor
 
 
+import math
+
 
 # args = {
 #     "model_type": "IPC",
@@ -83,6 +85,7 @@ parser.add_argument('--data_dir', type=str, default='../data', help='Path to the
 
 parser.add_argument('--dataset_transform', nargs='*', default=[], help='List of transformations to apply.', choices=['normalize_min1_plus1', 'normalize_mnist_mean_std', 'random_rotation', 'zoom_out', 'random_translation','None'])
 parser.add_argument('--dataset_transform_test', nargs='*', default=[], help='List of transformations to apply.', choices=['normalize_min1_plus1', 'normalize_mnist_mean_std', 'random_rotation', 'zoom_out', 'random_translation','None'])
+parser.add_argument('--force_overfit', action='store_true', help='Use only 1000 training images for debugging/overfitting')
 
 parser.add_argument('--numbers_list', type=valid_int_list, default=[0, 1, 3, 4, 5, 6, 7], help="A comma-separated list of integers describing which distinct classes we take during training alone")
 parser.add_argument('--N', type=valid_int_or_all, default=20, help="Number of distinct trainig images per class; greater than 0 or the string 'all' for all instances o.")
@@ -306,6 +309,8 @@ graph_params = {
 
 eval_generation, eval_classification, eval_denoise, eval_occlusion = True, True, 0, 0 
 
+# 
+
 
 # add graph specific info: 
 # print("zzz", args.remove_sens_2_sens, args.remove_sens_2_sup)
@@ -376,7 +381,46 @@ if graph_params["graph_type"]["name"] in ["single_hidden_layer"]:
 
     # TODO ; still unsure about which graph does which task
     eval_generation, eval_classification, eval_denoise, eval_occlusion = True, True, 0, 0 
+# --- NEW: sbm_interleave (set tunables + internal_nodes) ---
+# if graph_params["graph_type"]["name"] == "sbm_interleave":
 
+#     P  = graph_params["graph_type"]["params"].get("patch_size", 4)
+#     SB = graph_params["graph_type"]["params"].get("super_block", 2)
+#     H1 = graph_params["graph_type"]["params"].get("h1_per_cluster", 16)
+#     H2 = graph_params["graph_type"]["params"].get("h2_per_cluster", 16)
+
+#     G1 = 28 // P                       # patches per side
+#     num_patch_clusters = G1 * G1
+#     G2 = math.ceil(G1 / SB)            # macros per side
+#     num_macro_clusters = G2 * G2
+
+#     graph_params["internal_nodes"] = num_patch_clusters * H1 + num_macro_clusters * H2
+if graph_params["graph_type"]["name"] == "sbm_interleave":
+    P   = graph_params["graph_type"]["params"].get("patch_size", 4)
+    S   = graph_params["graph_type"]["params"].get("overlap_stride", P)
+    F1  = graph_params["graph_type"]["params"].get("h1_filters", 1)
+    M1  = graph_params["graph_type"]["params"].get("h1_per_filter", 16)
+    F2  = graph_params["graph_type"]["params"].get("h2_filters", 1)
+    M2  = graph_params["graph_type"]["params"].get("h2_per_filter", 16)
+    SB  = graph_params["graph_type"]["params"].get("super_block", 2)
+
+    # patch grid with overlap
+    G1r = (28 - P) // S + 1
+    G1c = (28 - P) // S + 1
+    num_patch_locs = G1r * G1c
+
+    # macro grid induced by super_block (ceil grouping)
+    G2r = math.ceil(G1r / SB)
+    G2c = math.ceil(G1c / SB)
+    num_macro_locs = G2r * G2c
+
+    h1_nodes = num_patch_locs * F1 * M1
+    h2_nodes = num_macro_locs * F2 * M2
+    graph_params["internal_nodes"] = h1_nodes + h2_nodes
+
+    # sensible defaults for tasks
+    eval_classification = True
+    eval_generation = True
 
 
 print("graph_params 1 :", graph_params)
@@ -449,6 +493,8 @@ print()
 #     else:
 #         TASK.append("generation")
         
+
+
 
 TASK = args.tasks
 
@@ -574,6 +620,14 @@ if graph_params["graph_type"]["name"] in ["stochastic_block", "sbm_two_branch_ch
 
 
 
+
+# save graph_params[params] to wandb
+wandb.config.update({"graph_params": graph_params})
+
+# save to wandb the number of edges in the graph
+wandb.config.update({"num_edges": graph.edge_index.shape[1]})
+
+graph.log_graph_to_wandb()
 
 # from torch_geometric.data import Data
 # from torch_geometric.loader import DataLoader
@@ -844,6 +898,8 @@ if args.dataset_transform_test:
         transform_list_test.append(transforms.Pad((pad_left, pad_left, pad_right, pad_right), fill=0, padding_mode='constant'))
 else:
     # If no test transforms are specified, use the same as train
+    print("No test transforms specified, using train transforms for test set")
+    print("Using the same transforms for test set as train set")
     transform_list_test = transform_list.copy()
 
 
@@ -876,8 +932,27 @@ else:
     train_dataset = GraphFormattedMNIST(base_train_dataset, input_size, hidden_size, output_size, label_value=args.supervision_label_val)
     test_dataset = GraphFormattedMNIST(base_test_dataset, input_size, hidden_size, output_size, label_value=args.supervision_label_val)
 
+
+generator = torch.Generator().manual_seed(args.seed)
+
 # Split the dataset
-train_set, val_set = random_split(train_dataset, [50000, 10000])
+if args.force_overfit:
+    print("⚠️ Force overfit mode activated: Using only 1000 training images")
+    print("Used for grokking and grokfast experiments")
+
+    # First split: train 1000, val 2000
+    small_train_set, remaining = torch.utils.data.random_split(
+        train_dataset, [1000, len(train_dataset) - 1000], generator=generator
+    )
+    
+    # Second split: validation 2000, test rest (or just 1000 test)
+    val_set, test_set = torch.utils.data.random_split(
+        remaining, [2000, len(remaining) - 2000], generator=generator
+    )
+
+    train_set = small_train_set
+else:
+    train_set, val_set = random_split(train_dataset, [50000, 10000], generator=generator)
 
 
 # Create DataLoaders
@@ -971,6 +1046,60 @@ print("adj_matrix_pyg", adj_matrix_pyg.shape)
 from model_latest2 import PCgraph
 # from model import PCgraph
 
+
+
+# load model weights if they exist
+load_model_weights = False
+# load scr3/trained_models/weight_matrix_pypc.npy
+# file_path = "trained_models/weight_matrix_pypc.npy"
+# file_path = "trained_models/full_both_ways.npy"  
+file_path = "trained_models/full_discrim.npy"  
+if load_model_weights and os.path.exists(file_path):
+    print("Loading model weights from", file_path)
+
+    # W = np.load("trained_models/weight_matrix_pypc.npy").T
+    # W = np.load(file_path)
+    # print("W shape", W.shape)
+    # W = torch.from_numpy(W).to(device).float()
+
+    # with torch.no_grad():        # avoid tracking in autograd
+    #     PCG.w.copy_(W)           # copy *into* the existing Parameter
+
+    # make this the adj matrix
+    adj = np.load(file_path)
+    print("adj shape", adj.shape)
+    # Convert the matrix to a binary adjacency matrix.
+    # np.where checks the condition (adj != 0).
+    # If true, it assigns 1. If false, it assigns 0.
+    # The result is a new array with only 0s and 1s.
+    adj_binary = np.where(adj != 0, 1, 0)
+    print("Binary adj shape:", adj_binary.shape)
+    
+    # You can also use a simple boolean comparison, which is often faster:
+    # adj_binary = (adj != 0).astype(int)
+
+    # Convert the binary NumPy array to a PyTorch tensor and move it to the device
+    adj_matrix_pyg = torch.from_numpy(adj_binary).to(device).float()
+    print("Torch tensor created with shape:", adj_matrix_pyg.shape)
+
+else:
+    print(f"Error: File not found at {file_path}")
+
+
+#     PCG.adj.copy_(adj_matrix_pyg)  # copy *into* the existing Parameter
+
+#     # weights is weights * adj 
+#     # PCG.w.copy_(PCG.w * adj_matrix_pyg)  # copy *into* the existing Parameter
+    
+# #         PCG.w.copy_(PCG.w * adj_matrix_pyg)  # copy *into* the existing Parameter
+# # RuntimeError: a leaf Variable that requires grad is being used in an in-place operation.
+#     with torch.no_grad():        # avoid tracking in autograd
+#         PCG.w.data.copy_(PCG.w.data * adj_matrix_pyg)  #
+        
+
+
+
+
 model_params = {
     "delta_w_selection": args.delta_w_selection,  # "all" or "internal_only"
     "batch_size": train_loader.batch_size, 
@@ -995,6 +1124,11 @@ else:
     structure = None
         
 
+# transpose adj_matrix_pyg
+# adj_matrix_pyg = adj_matrix_pyg.T  # Transpose the adjacency matrix for PyTorch Geometric
+if args.graph_type in ["sbm_interleave"]:
+    adj_matrix_pyg = adj_matrix_pyg + adj_matrix_pyg.T
+
 model_params = {
 
     "graph_type": args.graph_type,
@@ -1002,7 +1136,7 @@ model_params = {
     "task": TASK,
 
     "use_bias": args.use_bias,
-
+    "force_overfit": args.force_overfit,  # Force overfit mode for grokking experiments
 
     "activation": args.activation_func,  
     "device": device,
@@ -1048,7 +1182,6 @@ PCG.set_task(TASK)
 
 model = PCG
 
-plot_model_weights(model, args.graph_type, model_dir=None, save_wandb="before_training")
 
 print("------------- compile model ------------- ")
 # model = torch.compile(model, disable=True) 
@@ -1105,24 +1238,10 @@ model_weight_std_mean = {
 # initialize history buffer
 weight_history = []
 
-# load model weights if they exist
-load_model_weights = False
-# load scr3/trained_models/weight_matrix_pypc.npy
-# if load_model_weights and os.path.exists("trained_models/weight_matrix_pypc.npy"):
-#     print("Loading model weights from trained_models/weight_matrix_pypc.npy")
-
-#     print(model.w.shape)
-
-#     W = np.load("trained_models/weight_matrix_pypc.npy").T
-#     print("W shape", W.shape)
-#     W = torch.from_numpy(W).to(device).float()
-
-#     with torch.no_grad():        # avoid tracking in autograd
-#         PCG.w.copy_(W)           # copy *into* the existing Parameter
-
 # TODO
 print("fix error map do_log_error_map")
 
+plot_model_weights(model, args.graph_type, model_dir=None, save_wandb="before_training")
 
 
 with torch.no_grad():
@@ -1208,6 +1327,7 @@ with torch.no_grad():
 
         if load_model_weights:
             model.reset_nodes(batch_size=val_loader_batch_size, force=True)
+        
         #### 
         loss, acc = 0, 0
         model.test_(epoch)
@@ -1225,8 +1345,46 @@ with torch.no_grad():
         # break_num_eval = 10
             
         print("\n----test_iterative-----")
-        accs = []
+        accs_train = []
         TASK_copy = TASK.copy()
+
+        # also log accuracy mean of training set
+        accu_train = []
+        if args.force_overfit:            
+
+            # for (X_batch, y_batch) in train_loader:
+            for batch_no, (X_batch, y_batch) in enumerate(tqdm(train_loader, total=len(train_loader), desc=f"Epoch {epoch+1} - validate train set | {TASK}", leave=False)):
+                X_batch, y_batch = X_batch.to(DEVICE), y_batch.to(DEVICE)
+
+
+                y_pred = PCG.test_iterative( (X_batch, y_batch), 
+                                            eval_types=["classification"], remove_label=True)
+    
+     
+                mean_correct = torch.mean((y_pred == y_batch).float()).item()
+                accu_train.append(mean_correct)
+                # accs.append(mean_correct)
+                # print("y_pred", y_pred.shape)
+
+                if batch_no >= break_num_eval:
+                    break
+
+            accu_train = (sum(accu_train) / len(accu_train)) if accu_train else 0
+            print("epoch", epoch, "accu_train", accu_train)
+
+
+            # wandb log classification accuracy mean of training set
+            wandb.log({
+                "epoch": epoch,
+                "classification/accuracy_mean_train": accu_train,
+                "classification/size_train": len(train_loader) * args.batch_size,
+            })
+           
+        val_accs = []                # <-- a fresh list
+        accs = []
+        loss, acc = 0, 0
+
+        model.reset_nodes(batch_size=val_loader_batch_size, force=True)
 
         # for batch_no, batch in enumerate(tqdm(val_loader, total=min(len(val_loader)), desc=f"Epoch {epoch+1} - Validation", leave=False)):
         for batch_no, (X_batch, y_batch)  in enumerate(tqdm(val_loader, total=len(val_loader), desc=f"Epoch {epoch+1} - Validation | {TASK}", leave=False)):
@@ -1289,7 +1447,7 @@ with torch.no_grad():
 
        
 
-        if epoch % 10 == 1 and args.use_wandb in ['online', 'run']:
+        if epoch % 10 == 1 and args.use_wandb in ['online', 'run'] and not args.force_overfit:
             plot_model_weights(model, args.graph_type, model_dir=None, save_wandb=str(epoch))
 
 
@@ -1652,6 +1810,96 @@ if args.train_mlp and args.graph_type == "single_hidden_layer" and sum(args.disc
                 seed=args.seed, 
                 graph_type="mlp_bp")
     
+
+
+# if generative layers are not empty, train the generative model
+if args.graph_type == "single_hidden_layer" and sum(args.generative_hidden_layers) > 0:
+
+    import numpy as np
+    import matplotlib.pyplot as plt
+
+    if args.generative_hidden_layers[0] == 784:
+        # remove the first item
+        hidden_layers = args.generative_hidden_layers[1:]
+    else:
+        # keep the first item
+        hidden_layers = args.generative_hidden_layers
+
+
+    # --- Params like your snippet ---
+    # num_hidden_neurons = hidden_layer[0]  # not used directly, we infer from indices
+
+    #s unpack_layers = "_".join(map(str, layers))
+    unpack_hidden_layers = "_".join(map(str, hidden_layers))
+    # make dir_path have all the parameters but string as short as possible
+    run_id = str(run_id) if run_id is not None else "mlp_run"
+    dir_path = f"trained_models/mlp/weights/mlp_generative_{run_id}_{unpack_hidden_layers}"
+    
+    os.makedirs(dir_path, exist_ok=True)
+
+    os.makedirs(f"{dir_path}/weights", exist_ok=True)
+
+    input_size = 784  # 28x28 flattened image
+
+    # Architecture setup (match your run)
+    input_size = 784
+    hidden_size = hidden_layers[0]    # pre-sensory layer size you want to visualize
+    output_size = 10
+    N = input_size + hidden_size + output_size
+
+    # Full weight matrix
+    # IMPORTANT:
+    #   - If this is the *generative* matrix, use it directly (W_gen).
+    #   - If you only have the discriminative matrix (W_disc), set W_gen = W_disc.T
+    PC_weights = model.w.cpu().detach().numpy()
+
+    W_gen = model.w.cpu().detach().numpy()
+
+    # W_gen = PC_weights if PC_weights is not None else np.random.randn(N, N)
+    # W_gen = np.zeros((N, N)) 
+
+    # Indices
+    sensory_start = 0
+    sensory_end   = input_size
+    hidden_start  = input_size
+    hidden_end    = input_size + hidden_size
+
+    # For the generative view just-before sensory:
+    # Take weights FROM hidden TO sensory.
+    # Shape we want to plot per unit: 784 vector (sensory pixels).
+    # Slice as S x H and then transpose to [H, 784] to match your loop.
+    W_hidden_to_sens = W_gen[sensory_start:sensory_end, hidden_start:hidden_end].T   # [hidden_size, 784]
+
+    # Optional: per-unit normalization for nicer contrast (comment out if you do not want this)
+    # W_hidden_to_sens = W_hidden_to_sens / (np.max(np.abs(W_hidden_to_sens), axis=1, keepdims=True) + 1e-12)
+
+    # Plot each hidden neuron's outgoing weights into sensory as a 28x28 image
+    grid_cols = min(hidden_size, 8)
+    grid_rows = (hidden_size + grid_cols - 1) // grid_cols
+
+    plt.figure(figsize=(grid_cols * 2, grid_rows * 2))
+    for i in range(hidden_size):
+        weight_img = W_hidden_to_sens[i].reshape(28, 28)
+        plt.subplot(grid_rows, grid_cols, i + 1)
+        plt.imshow(weight_img, cmap='viridis')
+        plt.axis('off')
+
+    plt.subplots_adjust(wspace=0, hspace=0)
+    plt.suptitle(
+        f"PC Generative: Pre-sensory → Sensory\nHidden={hidden_size}, Sensory={input_size}",
+        fontsize=16, y=1.02
+    )
+    plt.tight_layout()
+    plt.savefig(f"{dir_path}/PC_generative_pre_sens.png")
+
+    # save to wandb
+    if args.use_wandb in ['online', 'run']:
+        wandb.log({
+            "Weights/PC_generative_pre_sens": wandb.Image(plt)
+        })
+    plt.close()
+
+
 
 
 wandb.finish()

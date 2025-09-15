@@ -11,7 +11,7 @@ import torch
 import random 
 import wandb
 import matplotlib.pyplot as plt
-
+import math
 
 # import os
 # os.environ['NX_CUGRAPH_AUTOCONFIG'] = 'True'
@@ -69,14 +69,27 @@ graph_type_options = {
         },
 
         
-        "stochastic_block": {
+        # "stochastic_block": {
+        #     "params": {
+        #         "num_communities": 5,      # Number of communities (50)
+        #         "community_size": 100,       # Size of each community (40)
+        #         "p_intra": 0.25,             # Probability of edges within the same community
+        #         "p_inter": 0.1,             # Probability of edges between different communities
+        #         "full_con_last_cluster_w_sup": False,
+        #         "min_full_con_last_cluster_w_sup": 0,
+        #         # "remove_sens_2_sens": False, 
+        #         # "remove_sens_2_sup": False, 
+        #         }
+        # },
+
+          "stochastic_block": {
             "params": {
-                "num_communities": 5,      # Number of communities (50)
-                "community_size": 100,       # Size of each community (40)
+                "num_communities": 15,      # Number of communities (50)
+                "community_size": 100,       # Size of each community (40)P
                 "p_intra": 0.25,             # Probability of edges within the same community
                 "p_inter": 0.1,             # Probability of edges between different communities
-                "full_con_last_cluster_w_sup": False,
-                "min_full_con_last_cluster_w_sup": 0,
+                "full_con_last_cluster_w_sup": True,
+                "min_full_con_last_cluster_w_sup": 3,
                 # "remove_sens_2_sens": False, 
                 # "remove_sens_2_sup": False, 
                 }
@@ -133,6 +146,23 @@ graph_type_options = {
                 # "remove_sens_2_sup": True
                 }
         },
+
+
+        "sbm_interleave": {
+            "params": {
+                "patch_size": 4,
+                "overlap_stride": 4,      # 13×13 patch grid
+                "h1_filters": 4, "h1_per_filter": 50,
+                "h2_filters": 4, "h2_per_filter": 50,
+                "filter_connect": "all_to_all",   # all_to_all, matched
+                "remove_sens_2_sens": True,
+                "remove_sens_2_sup": True,
+                "connect_h2_to_sup_dense": True,
+                "connect_sup_to_h2_dense": True  # new, default off to preserve old behavior
+            }
+        },
+
+        
 
         "custom_two_branch": {
             "params": {
@@ -317,7 +347,29 @@ class GraphBuilder:
                 p_inter=self.graph_params.get("p_inter", 1.0),
             )
 
-        
+        elif self.graph_type["name"] == "sbm_interleave":
+            self.sbm_interleave(
+                patch_size=self.graph_params.get("patch_size", 4),
+                super_block=self.graph_params.get("super_block", 2),
+
+                # NEW (overlap + filters)
+                overlap_stride=self.graph_params.get("overlap_stride", None),   # None → no overlap (stride=patch_size)
+                h1_filters=self.graph_params.get("h1_filters", 1),
+                h1_per_filter=self.graph_params.get("h1_per_filter",
+                                                    self.graph_params.get("h1_per_cluster", 16)),  # backward-compat
+                h2_filters=self.graph_params.get("h2_filters", 1),
+                h2_per_filter=self.graph_params.get("h2_per_filter",
+                                                    self.graph_params.get("h2_per_cluster", 16)),  # backward-compat
+                filter_connect=self.graph_params.get("filter_connect", "matched"),  # or "all_to_all"
+
+                no_sens2sens=self.graph_params.get("remove_sens_2_sens", True),
+                no_sens2supervised=self.graph_params.get("remove_sens_2_sup", True),
+                connect_h2_to_sup_dense=self.graph_params.get("connect_h2_to_sup_dense", True),
+                connect_sup_to_h2_dense=self.graph_params.get("connect_sup_to_h2_dense", True),  # <-- add
+
+            )
+
+
         elif self.graph_type["name"] == "barabasi":
             self.barabasi()
         elif self.graph_type["name"] == "stochastic_block":
@@ -390,6 +442,24 @@ class GraphBuilder:
         if self.save_graph:
             self.save_graph_to_file()
 
+
+    def log_graph_to_wandb(self):
+
+        # ... after ensuring self.edge_index is [2, E] and self.num_vertices is set
+        try:
+            self.log_graph_metrics_to_wandb()
+            print("✅ Graph metrics logged to wandb.")
+        except Exception as e:
+            print(f"⚠️ log_graph_metrics_to_wandb failed: {e}")
+
+        # (Optional) Keep your detailed hop plots as well:
+        try:
+            self.log_hop_distribution_to_wandb()
+            print("✅ Hop distribution logged to wandb.")
+        except Exception as e:
+            print(f"⚠️ log_hop_distribution_to_wandb failed: {e}")
+
+
     def save_graph_to_file(self):
         print("---------save_graph_to_file--------------------")
         
@@ -412,6 +482,198 @@ class GraphBuilder:
 
         print(f"Graph data saved in {new_folder_path}")
     
+        # ===== Graph metrics → wandb =====
+    def _nx_digraph(self):
+        G = nx.DiGraph()
+        G.add_nodes_from(range(self.num_vertices))
+        ei = self.edge_index
+        if isinstance(ei, torch.Tensor):
+            if ei.shape[0] == 2:  # [2, E]
+                edges = ei.t().tolist()
+            else:                 # [E, 2]
+                edges = ei.tolist()
+        else:
+            edges = ei
+        G.add_edges_from(edges)
+        return G
+
+    @staticmethod
+    def _bincount_hist(deg_list):
+        if len(deg_list) == 0:
+            return [0]
+        arr = np.asarray(deg_list, dtype=int)
+        return np.bincount(arr, minlength=int(arr.max()) + 1).tolist()
+
+    def log_graph_metrics_to_wandb(self, log_hop_hist=True, spectral_radius_max_n=3000):
+        G = self._nx_digraph()
+        N = G.number_of_nodes()
+        M = G.number_of_edges()
+        denom_pairs = N * (N - 1)
+
+        # Degrees
+        in_deg  = [d for _, d in G.in_degree()]
+        out_deg = [d for _, d in G.out_degree()]
+
+        # Clustering (directed, Fagiolo)
+        try:
+            dc = nx.directed_clustering(G)
+            clust_mean = float(np.mean(list(dc.values()))) if len(dc) else 0.0
+        except Exception:
+            clust_mean = None
+
+        # Shortest-path matrix (once), reachability & global efficiency
+        spl = dict(nx.all_pairs_shortest_path_length(G))
+        reachable_pairs = sum(len(d) - 1 for d in spl.values()) if N > 0 else 0
+        reach_ratio = (reachable_pairs / denom_pairs) if denom_pairs else 0.0
+
+        # Global efficiency (Latora–Marchiori, directed distances; unreachable→0)
+        total_inv = 0.0
+        if denom_pairs:
+            for u in G:
+                Lu = spl.get(u, {})
+                for v in G:
+                    if u == v:
+                        continue
+                    d = Lu.get(v)
+                    if d is not None and d > 0:
+                        total_inv += 1.0 / d
+        global_eff = (total_inv / denom_pairs) if denom_pairs else 0.0
+
+        # SCC structure & diameter on largest SCC
+        sccs = list(nx.strongly_connected_components(G))
+        num_scc = len(sccs)
+        largest_scc_size = max((len(s) for s in sccs), default=0)
+        diam_largest_scc = None
+        if largest_scc_size > 1:
+            try:
+                H = G.subgraph(max(sccs, key=len)).copy()
+                diam_largest_scc = nx.diameter(H.to_undirected())
+            except Exception:
+                diam_largest_scc = None
+
+        # Reciprocity
+        try:
+            reciprocity = nx.reciprocity(G) if M else 0.0
+        except Exception:
+            reciprocity = None
+
+        # Storage-capacity proxies
+        Gu = G.to_undirected(as_view=False)
+        cyclomatic = Gu.number_of_edges() - Gu.number_of_nodes() + nx.number_connected_components(Gu)
+        # Approx. minimum feedback arc set size
+        try:
+            from networkx.algorithms import approximation as approx
+            fas_size = len(approx.minimum_feedback_arc_set(G))
+        except Exception:
+            fas_size = None
+
+        # Spectral radius of symmetrized adjacency (power iteration, skip if huge)
+        rho_sym = None
+        if N and N <= spectral_radius_max_n:
+            try:
+                A = nx.to_numpy_array(G, nodelist=range(N), dtype=float)
+                As = (A + A.T) / 2.0
+                x = np.random.rand(N)
+                x /= np.linalg.norm(x) + 1e-12
+                last = 0.0
+                for _ in range(100):
+                    y = As @ x
+                    normy = np.linalg.norm(y)
+                    if normy == 0:
+                        last = 0.0
+                        break
+                    x_new = y / normy
+                    if np.linalg.norm(x_new - x) < 1e-6:
+                        last = normy
+                        break
+                    x = x_new
+                    last = normy
+                rho_sym = float(last)
+            except Exception:
+                rho_sym = None
+
+        # ---- Sensory → Supervision hop stats ----
+        hop_min_s2sup = None
+        hop_mean_s2sup = None
+        hop_samples_s2sup = []
+        if getattr(self, "supervised_learning", False) and hasattr(self, "supervision_indices"):
+            sens_nodes = list(self.sensory_indices)
+            sup_nodes  = list(self.supervision_indices)
+            if len(sens_nodes) and len(sup_nodes):
+                for s in sens_nodes:
+                    ds = spl.get(s, {})
+                    for t in sup_nodes:
+                        d = ds.get(t)
+                        if d is not None and d > 0:
+                            hop_samples_s2sup.append(d)
+                if hop_samples_s2sup:
+                    hop_min_s2sup  = int(np.min(hop_samples_s2sup))
+                    hop_mean_s2sup = float(np.mean(hop_samples_s2sup))
+
+        # ---- Log to wandb ----
+        # ----- TABLE: single row with static metrics -----
+        row = {
+            "graph_name": self.graph_type["name"],
+            "seed": self.seed,
+            "n_nodes": N,
+            "n_edges": M,
+            "density": (M / denom_pairs) if denom_pairs else 0.0,
+            "reciprocity": reciprocity,
+            "clustering_mean_fagiolo": clust_mean,
+            "reachability_ratio": reach_ratio,
+            "global_efficiency": global_eff,
+            "num_SCC": num_scc,
+            "largest_SCC_size": largest_scc_size,
+            "diameter_largest_SCC": diam_largest_scc,
+            "cyclomatic_number": cyclomatic,
+            "feedback_arc_set_size_approx": fas_size,
+            "spectral_radius_sym": rho_sym,
+            "mean_in_degree": float(np.mean(in_deg)) if N else 0.0,
+            "mean_out_degree": float(np.mean(out_deg)) if N else 0.0,
+            "sens_to_sup_hop_min": hop_min_s2sup,
+            "sens_to_sup_hop_mean": hop_mean_s2sup,
+            "sens_to_sup_hop_count_pairs": len(hop_samples_s2sup),
+        }
+        cols = list(row.keys())
+        table = wandb.Table(columns=cols)
+        table.add_data(*[row[c] for c in cols])
+        wandb.log({"graph/metrics_table": table}, commit=True)
+
+        # Also mirror key scalars to the summary for quick filtering
+        try:
+            wandb.run.summary.update({f"graph/{k}": v for k, v in row.items() if isinstance(v, (int, float))})
+        except Exception:
+            pass
+
+        # ----- PLOTS: degree histograms (as images, not wandb.Histogram) -----
+        def plot_hist(vals, title, xlab="Value", ylab="Count"):
+            if not len(vals): return None
+            fig, ax = plt.subplots()
+            bins = np.arange(min(vals), max(vals) + 2) - 0.5
+            ax.hist(vals, bins=bins, edgecolor="black")
+            ax.set_title(title)
+            ax.set_xlabel(xlab)
+            ax.set_ylabel(ylab)
+            ax.grid(True, alpha=0.3)
+            img = wandb.Image(fig)
+            plt.close(fig)
+            return img
+
+        in_img = plot_hist(in_deg,  "In-degree Histogram")
+        out_img= plot_hist(out_deg, "Out-degree Histogram")
+
+        payload = {}
+        if in_img is not None:
+            payload["graph/in_degree_hist_plot"] = in_img
+        if out_img is not None:
+            payload["graph/out_degree_hist_plot"] = out_img
+
+        if payload:
+            wandb.log(payload, commit=True)
+
+        print("✅ Graph metrics table + degree hist plots logged to W&B.")
+
+
     def set_seed(self, seed):
         if seed is not None:
             print(f"Setting seed: {seed}")
@@ -424,9 +686,169 @@ class GraphBuilder:
             print("No seed provided. Using default behavior.")
 
 
+    def sbm_interleave(self,
+                   patch_size=4,
+                   super_block=2,
+                   overlap_stride=None,       # None→no overlap; else < patch_size for overlap
+                   h1_filters=1,
+                   h1_per_filter=16,
+                   h2_filters=1,
+                   h2_per_filter=16,
+                   filter_connect="matched",  # "matched" or "all_to_all"
+                   no_sens2sens=True,
+                   no_sens2supervised=True,
+                   connect_h2_to_sup_dense=True,
+                   connect_sup_to_h2_dense=True):
+
+
+        IMG_H = IMG_W = 28
+        S = overlap_stride or patch_size
+
+        # ---- enumerate patch locations (top-left of each 4x4 window) ----
+        patch_rows = list(range(0, IMG_H - patch_size + 1, S))
+        patch_cols = list(range(0, IMG_W - patch_size + 1, S))
+        G1r, G1c = len(patch_rows), len(patch_cols)
+        num_patch_locs = G1r * G1c
+
+        def patch_id(pr, pc): return pr * G1c + pc
+
+        # ---- pixels per patch (and implicitly, pixels may belong to multiple patches if S < patch_size) ----
+        pixels_in_patch = [[] for _ in range(num_patch_locs)]
+        for pr, r0 in enumerate(patch_rows):
+            for pc, c0 in enumerate(patch_cols):
+                pid = patch_id(pr, pc)
+                for r in range(r0, r0 + patch_size):
+                    for c in range(c0, c0 + patch_size):
+                        pixels_in_patch[pid].append(r * IMG_W + c)
+
+        # ---- macro grouping on the (G1r x G1c) patch grid ----
+        G2r = math.ceil(G1r / super_block)
+        G2c = math.ceil(G1c / super_block)
+        num_macro_locs = G2r * G2c
+
+        def macro_id_from_patch(pr, pc):
+            mr = pr // super_block
+            mc = pc // super_block
+            return mr * G2c + mc
+
+        sensory = list(range(0, self.SENSORY_NODES))  # 0..783
+
+        # ---- allocate H1: per patch-loc × h1_filters × h1_per_filter ----
+        H1 = [[None for _ in range(h1_filters)] for _ in range(num_patch_locs)]
+        next_id = self.SENSORY_NODES
+        for pid in range(num_patch_locs):
+            for f in range(h1_filters):
+                cluster = list(range(next_id, next_id + h1_per_filter))
+                H1[pid][f] = cluster
+                next_id += h1_per_filter
+
+        # ---- allocate H2: per macro-loc × h2_filters × h2_per_filter ----
+        H2 = [[None for _ in range(h2_filters)] for _ in range(num_macro_locs)]
+        for mid in range(num_macro_locs):
+            for g in range(h2_filters):
+                cluster = list(range(next_id, next_id + h2_per_filter))
+                H2[mid][g] = cluster
+                next_id += h2_per_filter
+
+        # ---- supervision nodes (10) ----
+        supervision = list(range(next_id, next_id + 10))
+        next_id += 10
+
+        # expose indices
+        self.sensory_indices = sensory
+        self.supervision_indices = supervision
+        self.internal_indices = [n for pid in range(num_patch_locs) for f in range(h1_filters) for n in H1[pid][f]] + \
+                                [n for mid in range(num_macro_locs) for g in range(h2_filters) for n in H2[mid][g]]
+        self.NUM_INTERNAL_NODES = len(self.internal_indices)
+        self.num_vertices = len(self.sensory_indices) + len(self.internal_indices) + len(self.supervision_indices)
+
+        self.edge_index = []
+        self.edge_type  = []
+
+        # -------- 1) Sensory → H1 (to all filters at that patch-loc) --------
+        for pid in range(num_patch_locs):
+            src_pixels = pixels_in_patch[pid]
+            for s in src_pixels:
+                for f in range(h1_filters):
+                    for t in H1[pid][f]:
+                        self.edge_index.append([s, t])
+                        self.edge_type.append("Sens2Inter")
+
+        # optional Sens2Sens / Sens2Sup
+        if not no_sens2sens:
+            for i in sensory:
+                for j in sensory:
+                    if i != j:
+                        self.edge_index.append([i, j]); self.edge_type.append("Sens2Sens")
+
+        if not no_sens2supervised:
+            for s in sensory:
+                for sup in supervision:
+                    self.edge_index.append([s, sup]); self.edge_type.append("Sens2Sup")
+
+        # -------- 2) H1 → H2 (per macro). Filter wiring policy --------
+        for pr in range(G1r):
+            for pc in range(G1c):
+                pid = patch_id(pr, pc)
+                mid = macro_id_from_patch(pr, pc)
+
+                if filter_connect == "matched":
+                    # link H1 filter f → H2 filter f%h2_filters
+                    for f in range(h1_filters):
+                        tgt_filter = f % h2_filters
+                        for u in H1[pid][f]:
+                            for v in H2[mid][tgt_filter]:
+                                self.edge_index.append([u, v])
+                                self.edge_type.append("Inter2Inter")
+                elif filter_connect == "all_to_all":
+                    for f in range(h1_filters):
+                        for g in range(h2_filters):
+                            for u in H1[pid][f]:
+                                for v in H2[mid][g]:
+                                    self.edge_index.append([u, v])
+                                    self.edge_type.append("Inter2Inter")
+                else:
+                    raise ValueError(f"Unknown filter_connect={filter_connect}")
+
+        # -------- 3) H2 → Supervision (dense or not) --------
+        if connect_h2_to_sup_dense:
+            for mid in range(num_macro_locs):
+                for g in range(h2_filters):
+                    for u in H2[mid][g]:
+                        for sup in supervision:
+                            self.edge_index.append([u, sup])
+                            self.edge_type.append("Inter2Sup")
+
+        # -------- 3b) Supervision → H2 (top-down generative; optional) --------
+        if connect_sup_to_h2_dense:
+            for mid in range(num_macro_locs):
+                for g in range(h2_filters):
+                    for u in H2[mid][g]:
+                        for sup in supervision:
+                            self.edge_index.append([sup, u])
+                            self.edge_type.append("Sup2Inter")
+
+
+        print(f"✅ sbm_interleave+filters built: patches={G1r}x{G1c} (stride={S}), "
+            f"H1 filters={h1_filters}×{h1_per_filter}, H2 filters={h2_filters}×{h2_per_filter}, "
+            f"macros={G2r}x{G2c}, edges={len(self.edge_index)}")
+
+        # keep meta
+        self.sbm_interleave_meta = {
+            "patch_size": patch_size,
+            "overlap_stride": S,
+            "super_block": super_block,
+            "G1r": G1r, "G1c": G1c,
+            "G2r": G2r, "G2c": G2c,
+            "h1_filters": h1_filters, "h1_per_filter": h1_per_filter,
+            "h2_filters": h2_filters, "h2_per_filter": h2_per_filter,
+            "filter_connect": filter_connect,
+        }
+
+
     def single_hidden_layer_clusters(self, discriminative_hidden_layers, generative_hidden_layers,
-                                 num_clusters_per_layer=10, p_intra=0.0, p_inter=0.1,
-                                 no_sens2sens=False, no_sens2supervised=False):
+                                num_clusters_per_layer=10, p_intra=0.0, p_inter=0.1,
+                                no_sens2sens=False, no_sens2supervised=False):
         """
         Like single_hidden_layer but layers are divided into clusters with probabilistic intra- and inter-cluster connections.
         """
@@ -1601,27 +2023,56 @@ class GraphBuilder:
 
         log_dict = {}
 
-        if hop_s2l:
-            log_dict.update({
-                "hop/hop_dist_sens_to_sup": wandb.Histogram(hop_s2l),
-                "hop/hop_s2l_min": np.min(hop_s2l),
-                "hop/hop_s2l_max": np.max(hop_s2l),
-                "hop/hop_s2l_mean": np.mean(hop_s2l),
-                "hop/hop_s2l_hist_plot": plot_histogram(hop_s2l, "Sensory → Supervision Hop Distribution"),
-            })
-        else:
-            log_dict["hop/hop_s2l_unreachable"] = True
+        # ---- TABLE: summary stats for both directions ----
+        def stat_dict(hops, prefix):
+            if hops:
+                return {
+                    f"{prefix}_min": int(np.min(hops)),
+                    f"{prefix}_max": int(np.max(hops)),
+                    f"{prefix}_mean": float(np.mean(hops)),
+                    f"{prefix}_count": int(len(hops)),
+                }
+            else:
+                return {
+                    f"{prefix}_min": None,
+                    f"{prefix}_max": None,
+                    f"{prefix}_mean": None,
+                    f"{prefix}_count": 0,
+                    f"{prefix}_unreachable": True,
+                }
 
-        if hop_l2s:
-            log_dict.update({
-                "hop/hop_dist_sup_to_sens": wandb.Histogram(hop_l2s),
-                "hop/hop_l2s_min": np.min(hop_l2s),
-                "hop/hop_l2s_max": np.max(hop_l2s),
-                "hop/hop_l2s_mean": np.mean(hop_l2s),
-                "hop/hop_l2s_hist_plot": plot_histogram(hop_l2s, "Supervision → Sensory Hop Distribution"),
-            })
-        else:
-            log_dict["hop/hop_l2s_unreachable"] = True
+        def plot_hist(hops, title):
+            if not hops: return None
+            fig, ax = plt.subplots()
+            bins = np.arange(min(hops), max(hops) + 2) - 0.5
+            ax.hist(hops, bins=bins, edgecolor="black")
+            ax.set_title(title)
+            ax.set_xlabel("Hop Length")
+            ax.set_ylabel("Count")
+            ax.grid(True, alpha=0.3)
+            img = wandb.Image(fig)
+            plt.close(fig)
+            return img
+    
+        row = {
+            "graph_name": self.graph_type["name"],
+            "seed": self.seed,
+            **stat_dict(hop_s2l, "s2sup"),
+            **stat_dict(hop_l2s, "sup2s"),
+        }
+        cols = list(row.keys())
+        table = wandb.Table(columns=cols); table.add_data(*[row[c] for c in cols])
+        wandb.log({"graph/hop_metrics_table": table}, commit=True)
 
-        wandb.log(log_dict)
-        print("✅ Hop distributions (with axes) logged to wandb.")
+        # ---- PLOTS: histograms as images ----
+        payload = {}
+        img_s2l = plot_hist(hop_s2l, "Sensory → Supervision Hop Distribution")
+        img_l2s = plot_hist(hop_l2s, "Supervision → Sensory Hop Distribution")
+        if img_s2l is not None:
+            payload["graph/hops_sens_to_sup_hist_plot"] = img_s2l
+        if img_l2s is not None:
+            payload["graph/hops_sup_to_sens_hist_plot"] = img_l2s
+        if payload:
+            wandb.log(payload, commit=True)
+
+        print("✅ Hop stats table + plots logged to W&B.")

@@ -67,6 +67,10 @@ def validate_weight_init(value):
         if len(parts) == 1:
             return f"{init_type} {default_mean} {default_std}"
 
+    elif init_type == "8timeskaiming":
+        # return defaults mean and std
+        if len(parts) == 1:
+            return f"{init_type} {default_mean} {default_std}"
     return value
 
 

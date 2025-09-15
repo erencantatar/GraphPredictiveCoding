@@ -529,10 +529,12 @@ class PCgraph(torch.nn.Module):
     def __init__(self, graph_type, task, activation, device, num_vertices, num_internal, adj, edge_index,
                     batch_size, learning_rates, T, incremental_learning, use_input_error,
                     update_rules, weight_init, grad_clip_lr_x_lr_w, use_bias,
-                    delta_w_selection, init_hidden_values, init_hidden_mu, structure=None,
+                    delta_w_selection, init_hidden_values, init_hidden_mu, force_overfit=False, structure=None,
                     early_stop=None, edge_type=None, weight_decay=(0,0), use_grokfast=None, clamping=None,
                     wandb_logging=None, debug=False, **kwargs):
         super().__init__()
+
+        import wandb
 
         self.device = device
 
@@ -549,6 +551,36 @@ class PCgraph(torch.nn.Module):
         })
 
         self.generative_variations = False
+
+        # --- Classification consensus tracking ---
+        # self.consensus_thresholds = (0.10, 0.50, 0.90)   # 10%, 50%, 90%
+        # self.consensus_t_budget   = (5, 10)              # t=5, t=10
+        # self.classif_consensus_history = []              # appended once per epoch/test run
+        # self.consensus_mode = "margin"      # "softmax" for old behavior
+        # self.consensus_temperature = 0.5    # try 0.25–1.0; we’ll auto-tune below
+
+        # --- Classification consensus tracking ---
+        # For margin→sigmoid, P(correct) baseline ≈ 0.5 at t=0.
+        # So choose thresholds comfortably above 0.5.
+        self.consensus_mode = "margin"      # keep using margin (robust to scale)
+        self.consensus_temperature = 0.5    # used below; auto-bumped per step
+
+        # Safe defaults per mode; we'll still auto-raise vs observed t=0 in _finalize_consensus.
+        if self.consensus_mode == "margin":
+            self.consensus_thresholds = (0.50, 0.75, 0.90)
+
+        else:  # "softmax" (chance ≈ 1/C). With C=10, chance=0.1 → push slightly above.
+            self.consensus_thresholds = (0.12, 0.60, 0.90)
+
+        self.consensus_t_budget   = (5, 10)  # unchanged
+        self.classif_consensus_history = []  # unchanged
+
+
+        # one-shot flags used during a classification test
+        self._collect_consensus = False
+        self._p_correct_over_t  = None   # [T, B] (filled by update_xs)
+        self._consensus_labels  = None   # ground-truth labels for P(correct)
+
 
 
         # import torch_geometric 
@@ -737,6 +769,14 @@ class PCgraph(torch.nn.Module):
         self.w_decay_lr_values, self.w_decay_lr_weights = weight_decay
 
         self.optimizer_weights = torch.optim.Adam([self.w], lr=self.lr_weights, betas=(0.9, 0.999), eps=1e-7, weight_decay=self.w_decay_lr_weights)
+        
+        if graph_type == "sbm_interleave": 
+            self.optimizer_weights = torch.optim.AdamW([self.w], lr=self.lr_weights, betas=(0.9, 0.999), eps=1e-7, weight_decay=self.w_decay_lr_weights)
+
+        if force_overfit:
+            # use adamW
+            self.optimizer_weights = torch.optim.AdamW([self.w], lr=self.lr_weights, betas=(0.9, 0.999), eps=1e-7, weight_decay=self.w_decay_lr_weights)
+
         # self.optimizer_weights = torch.optim.AdamW([self.w], lr=self.lr_weights, betas=(0.9, 0.999), eps=1e-7, weight_decay=self.w_decay_lr_weights)
         # self.optimizer_values = torch.optim.Adam([self.values_dummy], lr=self.lr_values, betas=(0.9, 0.999), eps=1e-7, weight_decay=0)
         self.optimizer_values = torch.optim.SGD([self.values_dummy], lr=self.lr_values, weight_decay=self.w_decay_lr_values, momentum=0, nesterov=False) # nestrov only for momentum > 0
@@ -811,7 +851,7 @@ class PCgraph(torch.nn.Module):
         # bias    init normal (mean=0, std=0.0)
 
 
-        # Weight initialization
+        # Weight initialization; see function "def validate_weight_init()"
         init_type, m, std_val = self.weight_init.split()
 
         # Convert parsed values to appropriate types
@@ -867,6 +907,10 @@ class PCgraph(torch.nn.Module):
             noise = torch.randn_like(self.w) * std_val
             self.w.data.add_(noise)
 
+        if init_type == "8timeskaiming":
+            # Kaiming initialization scaled by 8
+            nn.init.kaiming_uniform_(self.w, nonlinearity='relu')
+            self.w.data *= 8.0
 
         if init_type == "MLP_like":
 
@@ -1239,11 +1283,23 @@ class PCgraph(torch.nn.Module):
             })
 
             param_type = "weights"
+            # grokfast_ema_alpha = 0.65  # Adjust as needed
+            # grokfast_ma_alpha = 0.6  # Adjust as needed
+
+            grokfast_ema_alpha, grokfast_ma_alpha = 0.8, 0.1
+            # save one time to wandb
+            wandb.log({
+                # "Grokfast/Type": self.grokfast_type,
+                "Grokfast/EMA_Alpha": grokfast_ema_alpha,
+                "Grokfast/MA_Alpha": grokfast_ma_alpha,
+                # "Grokfast/Parameter_Type": param_type
+            })
             
             if self.grokfast_type == 'ema':
                 # Adjust the gradient with EMA Grokfast
                 final_grad, self.avg_grad = gradfilter_ema_adjust(
-                    delta, self.avg_grad, alpha=0.65, lamb=0.6
+                    delta, self.avg_grad, alpha=grokfast_ema_alpha, lamb=grokfast_ma_alpha                  # ha 0.8 --lamb 0.1 -
+                    # delta, self.avg_grad, alpha=0.65, lamb=0.6                  # ha 0.8 --lamb 0.1 -
                 )
                 delta = final_grad  # Replace delta with smoothed version
             
@@ -1465,7 +1521,41 @@ class PCgraph(torch.nn.Module):
                     self.errors[self.supervised_labels_batch] = 0
                     # self.errors[self.sensory_indices_batch] = 0
 
-            
+        # if total_internal_error NaN or too low or to high report to wandb
+        if np.isnan(total_internal_error) or np.isnan(total_sensor_error):
+            print("Total internal error or total sensor error is NaN. Stopping training.")
+            wandb.log({
+                "epoch": self.epoch,
+                "Training/total_sensor_error": total_sensor_error,
+                "Training/total_internal_error": total_internal_error,
+                "step": self.t
+            })
+            wandb.finish()
+            exit(1)
+        if total_internal_error < 0 or total_sensor_error < 0:
+            print("Total internal error or total sensor error is negative. Stopping training.")
+            wandb.log({
+                "epoch": self.epoch,
+                "Training/total_sensor_error": total_sensor_error,
+                "Training/total_internal_error": total_internal_error,
+                "step": self.t
+            })
+            wandb.finish()
+            exit(1)
+        if total_internal_error > 1e+25 or total_sensor_error > 1e+25:
+            print("Total internal error or total sensor error is too high. Stopping training.")
+            wandb.log({
+                "epoch": self.epoch,
+                "Training/total_sensor_error": total_sensor_error,
+                "Training/total_internal_error": total_internal_error,
+                "step": self.t
+            })
+            wandb.finish()
+            exit(1)
+
+        # print("total_internal_error", total_internal_error, self.train)
+        # print("total_sensor_error", total_sensor_error, self.epoch, self.t)
+
         if self.train:
             wandb.log({
                         "epoch": self.epoch,
@@ -1510,6 +1600,27 @@ class PCgraph(torch.nn.Module):
                         "step": self.t
 
                         })
+
+        # if total_sensor_error is bigger than 1e+25
+        if total_sensor_error > 1e+25 or total_internal_error > 1e+25:
+            # stop training and exit
+            print("Total sensor error or total internal error is too high. Stopping training.")
+            # wandb error logging to stop
+            
+            # wandb finish and exit program 
+            wandb.log({
+                "epoch": self.epoch,
+                "Training/total_sensor_error": total_sensor_error,
+                "Training/total_internal_error": total_internal_error,
+                "step": self.t
+            })
+            wandb.finish()
+
+            # raise ValueError("Total sensor error or total internal error is too high. Stopping training.")
+
+            # stop training and exit
+            exit(1)
+            
          
 
         # self.norm_errors = True
@@ -1752,7 +1863,11 @@ class PCgraph(torch.nn.Module):
         else:
             raise ValueError(f"Unknown initialization type: {init_type}")
         
-
+        # if self._collect_consensus:
+        #     self._p_correct_over_t = []  # will become [T, B]
+        if self._collect_consensus:
+            self._p_correct_over_t = []   # list of [B] tensors
+            self._is_correct_over_t = []  # list of [B] floats (1 if argmax correct)
 
         # """Feedforward sweep init"""
         # self.init_hidden_feedforward()
@@ -1875,6 +1990,35 @@ class PCgraph(torch.nn.Module):
                 self.values[:] = self.values_dummy.data
 
             ## for some reason breaks, but makes more sense self.get_dw()
+
+            # --- record P(correct) at this t ---
+            if self._collect_consensus:
+                B = self.batch_size
+                logits_t = self.values.reshape(B, self.num_vertices)[:, -10:]  # safer than view
+                y = self._consensus_labels
+                idx = torch.arange(B, device=self.device)
+
+                # argmax correctness for fallback plots
+                yhat_t = logits_t.argmax(dim=1)
+                is_correct_t = (yhat_t == y).float()
+
+                # margin
+                correct = logits_t[idx, y]
+                mask = torch.ones_like(logits_t, dtype=torch.bool); mask[idx, y] = False
+                best_other = logits_t.masked_fill(~mask, float('-inf')).max(dim=1).values
+                margin = correct - best_other
+
+                # **Adaptive tau (change this)**
+                rs  = torch.quantile(margin.abs(), 0.67).clamp(min=1e-6).item()
+                tau = rs                      # or: tau = 0.75 * rs   (slightly “sharper”)
+
+                p_correct_t = torch.sigmoid(margin / tau)
+
+                self._p_correct_over_t.append(p_correct_t.detach())
+                self._is_correct_over_t.append(is_correct_t.detach())
+
+                        
+
 
             if train and self.incremental and self.dw is not None:
             # if train and self.incremental:
@@ -2099,6 +2243,114 @@ class PCgraph(torch.nn.Module):
                     grad_clip=self.grad_clip_lr_w,
                 )
 
+    def _finalize_consensus(self, p_over_t: torch.Tensor, epoch: int):
+        T, B = p_over_t.shape
+        med_curve = torch.quantile(p_over_t, 0.5, dim=1)  # [T]
+
+        def first_hit(tb: torch.Tensor, thr: float) -> torch.Tensor:
+            # tb: [T,B] probabilities; return [B] first indices in [0..T], or T if never
+            T, B = tb.shape
+            m = tb >= thr
+            hits = torch.full((B,), float(T), device=tb.device)  # censor at T
+            for b in range(B):
+                idx = torch.nonzero(m[:, b], as_tuple=False)
+                if idx.numel():
+                    hits[b] = float(idx[0].item())
+            return hits
+
+        # median curve (unchanged)
+        med_curve = torch.quantile(p_over_t, 0.5, dim=1)  # [T]
+
+        # per-threshold medians + hit rates
+        t_hits, hit_rates = {}, {}
+        T, B = p_over_t.shape
+        for thr in self.consensus_thresholds:
+            hits = first_hit(p_over_t, thr)          # [B], values in [0..T]
+            t_hits[thr] = float(torch.median(hits).item())
+            hit_rates[thr] = float((hits < T).float().mean().item())
+
+        # early confidence + AUC (unchanged)
+        p_t5  = float(med_curve[min(5,  T-1)].item())
+        p_t10 = float(med_curve[min(10, T-1)].item())
+        auc_med = float(torch.trapezoid(med_curve, torch.arange(T, device=med_curve.device)).item() / max(T-1,1))
+
+        # store & log
+        entry = dict(epoch=int(epoch), T=int(T),
+                    median_curve=med_curve.detach().cpu().numpy(),
+                    t_hits=t_hits, p_at_t5=p_t5, p_at_t10=p_t10, auc_med=auc_med,
+                    hit_rates=hit_rates)
+        self.classif_consensus_history.append(entry)
+
+        log_payload = {"epoch": epoch,
+                    "Consensus/P@t=5": p_t5,
+                    "Consensus/P@t=10": p_t10,
+                    "Consensus/AUC(median)": auc_med}
+        for thr in self.consensus_thresholds:
+            pct = int(round(thr * 100))
+            log_payload[f"Consensus/t{pct}"]   = t_hits[thr]
+            log_payload[f"Consensus/hit@{pct}"] = hit_rates[thr]
+        wandb.log(log_payload)
+
+        with torch.no_grad():
+            last_p = p_over_t[-1]
+            wandb.log({
+                "Consensus/FinalStep_P_median": float(torch.nanmedian(last_p).item()),
+                "Consensus/FinalStep_P_mean": float(torch.nanmean(last_p).item()),
+                "Consensus/FinalStep_P_hist": wandb.Histogram(last_p.cpu().numpy()),
+            })
+
+        self._plot_consensus()
+
+
+
+
+    def _plot_consensus(self):
+        H = self.classif_consensus_history
+        if not H:
+            return
+        epochs = np.array([h["epoch"] for h in H])
+
+        # Which thresholds to draw
+        thrs = sorted(H[-1]["t_hits"].keys())  # use latest entry
+
+        # 1) Time vs Epoch
+        fig1 = plt.figure(figsize=(9,6))
+        for thr in thrs:
+            ys = np.array([h["t_hits"].get(thr, np.nan) for h in H])
+            lbl = f"t{int(round(thr*100))}"
+            style = "--" if thr >= 0.90 else "-"
+            plt.plot(epochs, ys, label=lbl, linewidth=2.4, linestyle=style)
+        plt.xlabel("Epoch"); plt.ylabel("Inference steps")
+        plt.title("Consensus Time Vs Epoch (Lower Is Faster)", fontsize=15)
+        plt.legend(); plt.grid(alpha=0.3); plt.tight_layout()
+        wandb.log({"Consensus/Time_vs_Epoch": wandb.Image(fig1)})
+        plt.close(fig1)
+
+        # 2) Early confidence
+        p_t5  = np.array([h["p_at_t5"]  for h in H])
+        p_t10 = np.array([h["p_at_t10"] for h in H])
+        fig2 = plt.figure(figsize=(9,6))
+        plt.plot(epochs, p_t5,  label="P(correct) at t=5",  linewidth=2.4)
+        plt.plot(epochs, p_t10, label="P(correct) at t=10", linewidth=2.4, linestyle="--")
+        plt.xlabel("Epoch"); plt.ylabel("Confidence"); plt.ylim(0,1)
+        plt.title("Early Inference Confidence Vs Epoch", fontsize=15)
+        plt.legend(); plt.grid(alpha=0.3); plt.tight_layout()
+        wandb.log({"Consensus/EarlyConfidence": wandb.Image(fig2)})
+        plt.close(fig2)
+
+        # 3) Representative median curves
+        keep = np.linspace(0, len(H)-1, num=min(5, len(H)), dtype=int)
+        fig3 = plt.figure(figsize=(9,6))
+        for k in keep:
+            mc = H[k]["median_curve"]
+            t  = np.arange(len(mc))
+            plt.plot(t, mc, linewidth=2.4, label=f"Epoch {H[k]['epoch']}")
+        plt.xlabel("Inference step t"); plt.ylabel("Median P(correct)"); plt.ylim(0,1)
+        plt.title("Representative Inference Trajectories (Median Over Batch)", fontsize=15)
+        plt.legend(); plt.grid(alpha=0.3); plt.tight_layout()
+        wandb.log({"Consensus/Rep_Trajectories": wandb.Image(fig3)})
+        plt.close(fig3)
+
 
 
     def train_supervised(self, data):
@@ -2168,6 +2420,23 @@ class PCgraph(torch.nn.Module):
         y_pred = torch.argmax(logits, axis=1).squeeze()
         # print("logits ", logits.shape)
         # print("y_pred ", y_pred.shape)
+
+        # if self._collect_consensus:
+        #     self._p_correct_over_t = torch.stack(self._p_correct_over_t, dim=0)  # [T,B]
+        #     self._finalize_consensus(self._p_correct_over_t, epoch=self.epoch)
+
+        #     # reset one-shot state
+        #     self._collect_consensus = False
+        #     self._consensus_labels  = None
+
+        if self._collect_consensus:
+            self._p_correct_over_t = torch.stack(self._p_correct_over_t, dim=0)  # [T,B]
+            self._finalize_consensus(self._p_correct_over_t, epoch=self.epoch)
+            self._collect_consensus = False
+            self._consensus_labels  = None
+            self._is_correct_over_t = []      # <- clear
+
+
         return y_pred
     
 
@@ -2563,6 +2832,9 @@ class PCgraph(torch.nn.Module):
             # ====== SAVE MOSAIC LOCALLY ======
             if save_imgs:
                 trace_path = os.path.join(save_dir, f"trace_and_energy_epoch_{self.epoch}.png")
+                # crease folder is 
+                os.makedirs(save_dir, exist_ok=True)
+                
                 fig_mosaic.savefig(trace_path)
                 print(f"Saved trace & energy mosaic to: {trace_path}")
 
@@ -2914,10 +3186,22 @@ class PCgraph(torch.nn.Module):
 
             # clear pytorch memory
             torch.cuda.empty_cache()
+            self._collect_consensus = True
+            # self._collect_consensus = True
+
+            y = label
+            if y.ndim == 2 and y.size(-1) == 10:           # one-hot -> indices
+                y = y.argmax(dim=1)
+            elif y.ndim != 1:
+                raise ValueError(f"Labels must be [B] or [B,10], got {tuple(y.shape)}")
+
+            self._collect_consensus = True
+            self._consensus_labels  = y.to(self.device).long()
 
             return self.test_classifications(graph.clone().to(self.device), 
                                       remove_label=remove_label)
-                                      
+        self._collect_consensus = False
+               
         if "generation" in eval_types:
             self.set_task("generation")       # not update the supervised nodes, only sensory nodes
 
@@ -2927,7 +3211,7 @@ class PCgraph(torch.nn.Module):
 
                 self.test_generative(graph.clone().to(self.device), 
                                     label.clone().to(self.device),
-                                    remove_label=False, save_imgs=True, wandb_logging=True)
+                                    remove_label=False, save_imgs=False, wandb_logging=True)
                 # clear 
                 self.trace_data = []
 
