@@ -8,19 +8,60 @@ import wandb
 # --- Configuration ---
 use_all_runs = False
 
-run_ids = ["uqqkm2uq", "1rx1pf9f"]  # "svloxh0l", "lp3o6d1s", "jozn66av"
+# run_ids = ["uqqkm2uq", "1rx1pf9f"]  # "svloxh0l", "lp3o6d1s", "jozn66av"
+
+# legend_replacements = {
+#     "uqqkm2uq": "Acc: 0.84",
+#     "1rx1pf9f": "Acc: 0.94",
+#     # Add more replacements as needed
+# }
+
+
+
+# run_ids = ["9ojg2wg4", "8bbuenop", "nq9qdym2", "7swwe5np", "z3gjfool"]
+# run_ids = ["z3gjfool", "8bbuenop", "nq9qdym2", "igrcow02", "9ojg2wg4", "7ci6q50q", "yykum5ef", "dgsl86md"]
+run_ids = ["z3gjfool", "8bbuenop", "nq9qdym2", "igrcow02", "9ojg2wg4", "7ci6q50q"]
 
 legend_replacements = {
-    "uqqkm2uq": "Acc: 0.84",
-    "1rx1pf9f": "Acc: 0.94",
+    # "uqqkm2uq": "Acc: 0.84",
+    # "1rx1pf9f": "Acc: 0.94",
+    "z3gjfool": "baseline",
+    "8bbuenop": "lr2",
+    "nq9qdym2": "lr3",
+    "8bbuenop": "T5",
+    "igrcow02": "T6",
+    "9ojg2wg4": "init_8",
+    "7ci6q50q": "10_Grokfast_T",
+    "yykum5ef": "12_MPL like",
+    "dgsl86md": "12_Weight 0.05",
+
+    
+
     # Add more replacements as needed
 }
+
+
+# 1 LR ----0.94----
+# 2
+# 3
+# 4 T 15: ----0.94----
+# 5 50 : 8bbuenop: 0.97
+# 6 100: igrcow02: 0.97
+# 7 init  ----0.94----
+# 8   0.94:   9ojg2wg4
+# 9 Grokfast False ----0.94----
+# 10 True: 7ci6q50q : 0.94
+# 11  Weight              0.005 ----0.94----
+# 12  MPL like: yykum5ef
+# 13  0.05 dgsl86md
 
 run_ids = list(dict.fromkeys(run_ids))  # preserve order, dedupe
 display_label_map = {rid: legend_replacements.get(rid, rid) for rid in run_ids}
 
 base_dir = "jobs/plotting/trajectories"
-out_dir = "jobs/plotting/outputs_trajectories/converge_instability5/"
+out_dir = "jobs/plotting/outputs_trajectories/converge_instability8/"
+
+
 os.makedirs(out_dir, exist_ok=True)
 
 if use_all_runs:

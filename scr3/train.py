@@ -91,6 +91,7 @@ parser.add_argument('--numbers_list', type=valid_int_list, default=[0, 1, 3, 4, 
 parser.add_argument('--N', type=valid_int_or_all, default=20, help="Number of distinct trainig images per class; greater than 0 or the string 'all' for all instances o.")
 
 parser.add_argument('--supervision_label_val', default=1, type=int, required=True, help='An integer value.')
+parser.add_argument('--save_weight_history', type=str2bool, default=False, help='Whether to save the weight history during training for each epoch.')
 
 
 ## -----graph-----  
